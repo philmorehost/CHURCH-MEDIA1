@@ -1,0 +1,55 @@
+name: church_media_app
+description: Grace & Life Church — sermons, events, and the media feed. Front-end only, no login.
+publish_to: "none"
+version: 1.0.1+2
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.2.1
+  cached_network_image: ^3.3.1
+  video_player: ^2.9.1
+  webview_flutter: ^4.10.0
+  # Built on webview_flutter (no flutter_inappwebview), so it avoids the
+  # proguard-android.txt issue that breaks the release build with the current
+  # Android Gradle Plugin.
+  youtube_player_iframe: ^6.0.2
+  visibility_detector: ^0.4.0+2
+  google_fonts: ^6.2.1
+  url_launcher: ^6.3.0
+  intl: ^0.19.0
+  cupertino_icons: ^1.0.8
+  # Comment image attachments (photo library picker)
+  image_picker: ^1.1.2
+  # Push notifications (Firebase Cloud Messaging)
+  firebase_core: ^3.6.0
+  firebase_messaging: ^15.1.3
+  # In-app updates (Google Play) — prompt users to update inside the app
+  in_app_update: ^5.0.0
+  # Offline Bible storage + settings
+  sqflite: ^2.3.3
+  path: ^1.9.0
+  shared_preferences: ^2.2.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+  flutter_launcher_icons: ^0.14.1
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  remove_alpha_ios: false
+  image_path: "assets/icon/app_icon.png"
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/icon/app_icon.png"
+  min_sdk_android: 24
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/bible/
