@@ -63,13 +63,13 @@ function uploadUrl(?string $path): ?string
     return baseUrl('uploads/' . ltrim($path, '/'));
 }
 
-function redirect(string $path): never
+function redirect(string $path)
 {
     header('Location: ' . $path);
     exit;
 }
 
-function jsonResponse(array $payload, int $status = 200): never
+function jsonResponse(array $payload, int $status = 200)
 {
     http_response_code($status);
     header('Content-Type: application/json; charset=utf-8');
@@ -81,7 +81,7 @@ function jsonResponse(array $payload, int $status = 200): never
  * Streams rows as an Excel-friendly CSV download and exits. fputcsv handles
  * quoting/escaping, and the UTF-8 BOM makes it open correctly in Excel.
  */
-function csvDownload(string $filename, array $headers, array $rows): never
+function csvDownload(string $filename, array $headers, array $rows)
 {
     http_response_code(200);
     header('Content-Type: text/csv; charset=utf-8');
@@ -231,7 +231,7 @@ function settings(): array
     return $cache;
 }
 
-function setting(string $key, mixed $default = null): mixed
+function setting(string $key, $default = null)
 {
     return settings()[$key] ?? $default;
 }
@@ -440,7 +440,7 @@ function keepFormOld(array $input): void
 }
 
 /** Returns the previously submitted value for a form input (string for scalar fields, array for checkbox). */
-function formOld(string $key, mixed $default = ''): mixed
+function formOld(string $key, $default = '')
 {
     $old = $_SESSION['_form_old'] ?? [];
     return array_key_exists($key, $old) ? $old[$key] : $default;
