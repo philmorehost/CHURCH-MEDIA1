@@ -1,0 +1,33 @@
+DirectoryIndex index.php
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+
+    # Force HTTPS in production. Set `SetEnv APP_ENV local` in the local XAMPP
+    # vhost to skip this — local dev runs over plain HTTP.
+    RewriteCond %{HTTPS} off
+    RewriteCond %{ENV:APP_ENV} !local
+    RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+    # Collapse /something.php requests down to the clean /something URL
+    RewriteCond %{THE_REQUEST} ^[A-Z]{3,9}\s/([^?\s]*)\.php[\s?] [NC]
+    RewriteRule ^ /%1 [R=301,L]
+
+    # Real files/directories (uploads, assets, favicon.ico) are served as-is
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+
+    # Everything else goes through the front controller
+    RewriteRule ^ index.php [L]
+</IfModule>
+
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-Frame-Options "SAMEORIGIN"
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+    Header set Permissions-Policy "geolocation=(), microphone=(), camera=()"
+</IfModule>
+
+Options -Indexes -MultiViews

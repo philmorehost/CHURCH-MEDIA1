@@ -1,0 +1,21 @@
+# Root .htaccess — used only on shared hosting where the DocumentRoot cannot be
+# pointed directly at /public (e.g. typical cPanel accounts). On this local XAMPP
+# dev environment the Apache vhost DocumentRoot points straight at /public, so this
+# file is never actually hit — it exists for portability to real hosting later.
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{REQUEST_URI} !^/public/
+    RewriteRule ^(.*)$ /public/$1 [L]
+</IfModule>
+
+# Never serve these from the web, regardless of DocumentRoot
+<FilesMatch "\.(sql|env|log|lock)$">
+    Require all denied
+</FilesMatch>
+
+# php -- BEGIN cPanel-generated handler, do not edit
+# Set the “ea-php74” package as the default “PHP” programming language.
+<IfModule mime_module>
+  AddHandler application/x-httpd-ea-php74___lsphp .php .php7 .phtml
+</IfModule>
+# php -- END cPanel-generated handler, do not edit

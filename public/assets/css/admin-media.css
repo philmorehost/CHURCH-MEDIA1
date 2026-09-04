@@ -1,0 +1,37 @@
+/* Admin media composer — upload/YouTube sections, preview grid, auto cover capture, upload progress. */
+
+.composer{max-width:720px;}
+.composer .hint{font-size:12px; color:var(--ink-faint); margin:-8px 0 14px;}
+.media-zone{
+  padding:16px; margin-bottom:20px; border:1px solid var(--border); border-radius:14px;
+  background:#0f0d1f66;
+}
+.media-zone > label:first-child{font-weight:700; color:var(--gold-soft);}
+
+.media-preview{display:none; flex-wrap:wrap; gap:10px; margin:2px 0 14px;}
+.media-preview:empty{display:none;}
+.preview-tile{
+  position:relative; width:96px; height:150px; border-radius:10px; overflow:hidden;
+  background:#0f0d1f; border:1px solid var(--border); cursor:pointer;
+}
+.preview-tile img{width:100%; height:100%; object-fit:cover; display:block;}
+.preview-tile img:not(.has-cover){opacity:.35;}
+.preview-tile .tile-badge{
+  position:absolute; top:6px; left:6px; font-size:9.5px; font-weight:700; text-transform:uppercase;
+  letter-spacing:.05em; background:#000a; color:var(--gold-soft); padding:2px 6px; border-radius:6px;
+}
+.preview-tile .tile-label{
+  position:absolute; bottom:0; left:0; right:0; padding:5px 6px; font-size:9px; color:#fff;
+  background:linear-gradient(transparent,#000); text-align:center;
+}
+.preview-tile.is-video .tile-badge{background:#e8b95f22; color:#fff;}
+
+.progress-wrap{margin:4px 0 16px;}
+.progress-track{height:10px; border-radius:999px; background:#0f0d1f; border:1px solid var(--border); overflow:hidden;}
+.progress-bar{height:100%; width:0; border-radius:999px; background:linear-gradient(90deg,var(--gold-soft),var(--gold)); transition:width .2s ease;}
+.progress-label{font-size:12px; color:var(--ink-dim); margin-top:7px;}
+
+.yt-preview{margin:-6px 0 15px; display:flex; align-items:center; gap:14px; min-height:84px;}
+.yt-preview img{width:150px; height:84px; border-radius:10px; object-fit:cover; border:1px solid var(--border);}
+.yt-preview div{font-size:12.5px; color:var(--ink-dim);}
+.yt-cover-preview img{max-width:150px; border-radius:10px; margin:0 0 14px; border:1px solid var(--border);}

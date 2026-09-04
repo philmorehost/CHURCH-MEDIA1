@@ -1,0 +1,230 @@
+/* Public form pages (/forms/{slug}) — modern glassmorphism card */
+.form-page{
+  min-height:calc(100vh - 120px);
+  display:flex; align-items:flex-start; justify-content:center;
+  padding:56px 18px 96px; position:relative; overflow:hidden;
+  background:
+    radial-gradient(1100px 520px at 12% -8%, #e8b95f1e, transparent 60%),
+    radial-gradient(900px 520px at 105% 4%, #7a5cff26, transparent 62%),
+    radial-gradient(700px 600px at 50% 120%, #3fa9f51a, transparent 65%),
+    var(--bg-0);
+}
+.form-page::before,.form-page::after{
+  content:""; position:absolute; border-radius:50%; filter:blur(90px); z-index:0; pointer-events:none;
+}
+.form-page::before{width:420px;height:420px; top:-120px; right:-80px; background:#7a5cff22;}
+.form-page::after{width:380px;height:380px; bottom:-100px; left:-90px; background:#e8b95f1c;}
+
+.form-card{
+  position:relative; z-index:1; width:100%; max-width:680px;
+  background:linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.012));
+  backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px);
+  border:1px solid var(--border-soft); border-radius:26px;
+  padding:0; overflow:hidden;
+  box-shadow:0 40px 100px -40px #000d, inset 0 1px 0 #ffffff12;
+}
+
+/* Banner header */
+.form-banner{
+  display:flex; align-items:center; gap:16px; padding:30px 34px 24px;
+  background:linear-gradient(135deg, #e8b95f14, transparent 55%), linear-gradient(180deg,#1d1836,#161328);
+  border-bottom:1px solid var(--border-soft);
+}
+.form-mark{
+  width:54px; height:54px; border-radius:16px; flex-shrink:0;
+  background:linear-gradient(135deg, var(--gold-soft), var(--gold));
+  color:#1a1530; font-family:var(--serif); font-weight:800; font-size:26px;
+  display:flex; align-items:center; justify-content:center;
+  box-shadow:0 10px 26px -8px #e8b95f77; text-transform:uppercase;
+}
+.form-eyebrow{
+  font-size:11px; font-weight:800; letter-spacing:.16em; text-transform:uppercase;
+  color:var(--gold-soft); opacity:.85; margin-bottom:4px;
+}
+.form-title{
+  font-family:var(--serif); font-size:clamp(23px,4vw,30px); line-height:1.15; margin:0;
+  color:var(--ink);
+}
+.form-title.center{text-align:center;}
+
+.form-desc{color:var(--ink-dim); font-size:15px; line-height:1.65; padding:22px 34px 0;}
+.form-desc.center{text-align:center;}
+
+.form-meta{
+  display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;
+  padding:16px 34px 0;
+}
+.form-deadline{
+  display:inline-flex; align-items:center; gap:7px;
+  font-size:12.5px; font-weight:700; color:var(--gold-soft);
+  border:1px solid #e8b95f44; background:var(--gold-dim);
+  padding:7px 14px; border-radius:999px;
+}
+.dl-icon{opacity:.9;}
+.form-hint{font-size:12.5px; color:var(--ink-faint); font-weight:600;}
+
+.form-error{
+  margin:18px 34px 0; padding:13px 16px; border-radius:14px;
+  background:#ff6b6b14; border:1px solid #ff6b6b44; color:#ffb3b3; font-size:14px; line-height:1.6;
+}
+
+form{padding:8px 34px 36px;}
+.form-field{margin-top:26px;}
+
+.form-label{
+  display:flex; align-items:center; gap:10px; font-size:15px; font-weight:700;
+  color:var(--ink); margin-bottom:10px; line-height:1.4;
+}
+.field-num{
+  width:24px; height:24px; border-radius:8px; flex-shrink:0;
+  background:var(--gold-dim); border:1px solid #e8b95f33; color:var(--gold-soft);
+  font-size:11.5px; font-weight:800; display:inline-flex; align-items:center; justify-content:center;
+}
+.req{color:var(--danger);}
+
+.form-field input[type="text"],
+.form-field input[type="email"],
+.form-field input[type="number"],
+.form-field input[type="date"],
+.form-field input[type="time"],
+.form-field input[type="datetime-local"],
+.form-field input[type="url"],
+.form-field select,
+.form-field textarea{
+  width:100%; background:#0f0d1fcc; border:1px solid var(--border);
+  color:var(--ink); border-radius:14px; padding:14px 16px; font-size:15px;
+  font-family:var(--sans); transition:border-color .2s, box-shadow .2s, background .2s;
+}
+/* Text-like inputs keep appearance:none (clean look). */
+.form-field input[type="text"],
+.form-field input[type="email"],
+.form-field input[type="number"],
+.form-field input[type="url"],
+.form-field textarea{
+  -webkit-appearance:none; appearance:none;
+}
+/* Date/time pickers keep their native calendar & clock so users can select
+   instead of typing (do NOT set appearance:none here — it would strip the
+   picker icon). color-scheme:dark makes the picker icon light on dark. */
+.form-field input[type="date"],
+.form-field input[type="time"],
+.form-field input[type="datetime-local"]{
+  color-scheme:dark;
+  cursor:pointer;
+}
+.form-field input::placeholder,
+.form-field textarea::placeholder{color:var(--ink-faint);}
+.form-field input:focus,
+.form-field select:focus,
+.form-field textarea:focus{
+  outline:none; border-color:var(--gold); background:#141126;
+  box-shadow:0 0 0 4px #e8b95f1f;
+}
+.form-field select{
+  background-image:linear-gradient(45deg, transparent 50%, var(--ink-dim) 50%),linear-gradient(135deg, var(--ink-dim) 50%, transparent 50%);
+  background-position:calc(100% - 22px) 50%,calc(100% - 14px) 50%; background-size:8px 8px; background-repeat:no-repeat;
+  padding-right:40px; cursor:pointer;
+}
+
+/* Cascading dropdowns (dropdown in dropdown lists: Province > Zone > Area > Parish) */
+.cascade-selects{display:flex; flex-direction:column; gap:10px;}
+.cascade-note{font-size:12.5px; color:var(--ink-faint); margin-top:8px; line-height:1.5;}
+
+/* Password field briefly highlighted after a weak-password rejection */
+.pw-error{border-color:#ff6b6b !important; box-shadow:0 0 0 4px #ff6b6b33 !important;}
+
+/* Private form password gate */
+.form-lock{padding:34px 34px 40px; text-align:center;}
+.form-lock-icon{
+  width:64px; height:64px; margin:0 auto 18px; border-radius:20px;
+  background:var(--gold-dim); border:1px solid #e8b95f44; color:var(--gold-soft);
+  display:flex; align-items:center; justify-content:center;
+}
+.form-lock-form{max-width:420px; margin:22px auto 0; text-align:left;}
+
+/* Radio / checkbox */
+.form-options{display:flex; flex-direction:column; gap:10px;}
+.form-option{
+  display:flex; align-items:center; gap:12px; padding:13px 15px;
+  background:#0f0d1f88; border:1px solid var(--border-soft); border-radius:14px;
+  cursor:pointer; font-size:15px; transition:border-color .2s, background .2s, transform .15s;
+  user-select:none;
+}
+.form-option:hover{border-color:var(--border); background:#141126;}
+.form-option input{position:absolute; opacity:0; pointer-events:none;}
+.option-box{
+  width:22px; height:22px; border-radius:7px; flex-shrink:0;
+  border:2px solid var(--border); background:#0f0d1f;
+  display:flex; align-items:center; justify-content:center;
+  transition:all .2s; color:transparent;
+}
+.form-option input[type="radio"] + .option-box{border-radius:50%;}
+.form-option input:checked + .option-box{
+  background:linear-gradient(135deg,var(--gold-soft),var(--gold)); border-color:transparent; color:#1a1530;
+}
+.form-option input:checked ~ span:last-child{color:var(--ink);}
+.form-option input:focus-visible + .option-box{box-shadow:0 0 0 4px #e8b95f2e;}
+
+/* Image upload dropzone */
+.form-upload{
+  display:flex; flex-direction:column; align-items:center; text-align:center; gap:6px;
+  padding:30px 20px; cursor:pointer;
+  border:2px dashed var(--border); border-radius:16px; background:#0f0d1f55;
+  transition:border-color .2s, background .2s;
+}
+.form-upload:hover{border-color:#e8b95f88; background:#e8b95f0d;}
+.form-upload input{position:absolute; opacity:0; width:1px; height:1px;}
+.upload-icon{
+  width:52px; height:52px; border-radius:14px; color:var(--gold-soft);
+  background:var(--gold-dim); display:flex; align-items:center; justify-content:center; margin-bottom:4px;
+}
+.upload-title{font-weight:700; font-size:15px; color:var(--ink);}
+.upload-sub{font-size:12.5px; color:var(--ink-faint);}
+.upload-files{
+  margin-top:6px; font-size:12px; font-weight:700; color:var(--gold-soft);
+  background:var(--gold-dim); border:1px solid #e8b95f33; padding:4px 12px; border-radius:999px;
+}
+
+/* Submit */
+.form-submit{
+  margin-top:34px; width:100%; padding:16px 20px; border:none; border-radius:16px;
+  background:linear-gradient(135deg, var(--gold-soft), var(--gold)); color:#1a1530;
+  font-size:16px; font-weight:800; letter-spacing:.02em; cursor:pointer;
+  display:flex; align-items:center; justify-content:center; gap:10px;
+  transition:transform .2s, box-shadow .2s, filter .2s;
+  box-shadow:0 16px 40px -12px #e8b95f66;
+}
+.form-submit:hover{transform:translateY(-2px); box-shadow:0 20px 48px -12px #e8b95f88; filter:brightness(1.04);}
+.form-submit:active{transform:translateY(0);}
+.form-submit.ghost{
+  width:auto; margin:6px auto 0; background:#ffffff0d; color:var(--gold-soft);
+  border:1px solid #e8b95f44; box-shadow:none; font-size:14px;
+}
+.form-submit.ghost:hover{background:#e8b95f14;}
+
+/* Success / closed */
+.form-success,.form-closed{padding:64px 34px 54px; text-align:center;}
+.form-check{width:88px; height:88px; margin:0 auto 24px; position:relative;}
+.form-check svg{width:100%; height:100%;}
+.form-check circle{stroke:var(--success); stroke-width:2; stroke-dasharray:151; stroke-dashoffset:151; animation:draw 1s .2s ease forwards;}
+.form-check path{stroke:var(--success); stroke-width:4; stroke-linecap:round; stroke-linejoin:round; stroke-dasharray:40; stroke-dashoffset:40; animation:draw .6s .7s ease forwards;}
+.form-check.closed circle{stroke:var(--danger); stroke-width:2; stroke-dasharray:151; stroke-dashoffset:151; animation:draw 1s .2s ease forwards;}
+.form-check.closed path{stroke:var(--danger); stroke-width:4; stroke-linecap:round; stroke-linejoin:round; stroke-dasharray:22; stroke-dashoffset:22; animation:draw .45s 1s ease forwards;}
+.form-check.closed path.x2{animation-delay:1.35s;}
+.form-closed .eyebrow{display:block; color:var(--danger); margin-bottom:14px;}
+.form-closed-actions{display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin-top:10px;}
+@keyframes draw{to{stroke-dashoffset:0;}}
+.form-closed p{color:var(--ink-dim);}
+
+/* Honeypot — hidden from humans, visible to bots */
+.honeypot{position:absolute; left:-9999px; opacity:0; height:0; width:0; overflow:hidden;}
+
+@media (max-width:560px){
+  .form-page{padding:30px 12px 64px;}
+  .form-banner{padding:24px 20px 20px;}
+  .form-desc{padding:18px 20px 0;}
+  .form-meta{padding:14px 20px 0;}
+  .form-error{margin:16px 20px 0;}
+  form{padding:6px 20px 28px;}
+  .form-success,.form-closed{padding:48px 20px 44px;}
+}
