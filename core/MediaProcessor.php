@@ -16,15 +16,29 @@ class MediaProcessor
             return null;
         }
 
-        $image = match ($info['mime']) {
-            'image/jpeg' => imagecreatefromjpeg($sourcePath),
-            'image/png' => imagecreatefrompng($sourcePath),
-            'image/gif' => imagecreatefromgif($sourcePath),
-            'image/webp' => imagecreatefromwebp($sourcePath),
-            'image/bmp' => function_exists('imagecreatefrombmp') ? imagecreatefrombmp($sourcePath) : false,
-            'image/avif' => function_exists('imagecreatefromavif') ? @imagecreatefromavif($sourcePath) : false,
-            default => false,
-        };
+        switch ($info['mime']) {
+            case 'image/jpeg':
+                $image = @imagecreatefromjpeg($sourcePath);
+                break;
+            case 'image/png':
+                $image = @imagecreatefrompng($sourcePath);
+                break;
+            case 'image/gif':
+                $image = @imagecreatefromgif($sourcePath);
+                break;
+            case 'image/webp':
+                $image = @imagecreatefromwebp($sourcePath);
+                break;
+            case 'image/bmp':
+                $image = function_exists('imagecreatefrombmp') ? @imagecreatefrombmp($sourcePath) : false;
+                break;
+            case 'image/avif':
+                $image = function_exists('imagecreatefromavif') ? @imagecreatefromavif($sourcePath) : false;
+                break;
+            default:
+                $image = false;
+                break;
+        }
         if ($image === false) {
             return null;
         }
@@ -85,15 +99,29 @@ class MediaProcessor
             return $name;
         }
 
-        $image = match ($mime) {
-            'image/jpeg' => @imagecreatefromjpeg($sourcePath),
-            'image/png' => @imagecreatefrompng($sourcePath),
-            'image/gif' => @imagecreatefromgif($sourcePath),
-            'image/webp' => @imagecreatefromwebp($sourcePath),
-            'image/bmp' => function_exists('imagecreatefrombmp') ? @imagecreatefrombmp($sourcePath) : false,
-            'image/avif' => function_exists('imagecreatefromavif') ? @imagecreatefromavif($sourcePath) : false,
-            default => false,
-        };
+        switch ($mime) {
+            case 'image/jpeg':
+                $image = @imagecreatefromjpeg($sourcePath);
+                break;
+            case 'image/png':
+                $image = @imagecreatefrompng($sourcePath);
+                break;
+            case 'image/gif':
+                $image = @imagecreatefromgif($sourcePath);
+                break;
+            case 'image/webp':
+                $image = @imagecreatefromwebp($sourcePath);
+                break;
+            case 'image/bmp':
+                $image = function_exists('imagecreatefrombmp') ? @imagecreatefrombmp($sourcePath) : false;
+                break;
+            case 'image/avif':
+                $image = function_exists('imagecreatefromavif') ? @imagecreatefromavif($sourcePath) : false;
+                break;
+            default:
+                $image = false;
+                break;
+        }
         if ($image === false) {
             return null;
         }
@@ -288,15 +316,29 @@ class MediaProcessor
             return null;
         }
 
-        $image = match ($info['mime']) {
-            'image/jpeg' => @imagecreatefromjpeg($sourcePath),
-            'image/png' => @imagecreatefrompng($sourcePath),
-            'image/gif' => @imagecreatefromgif($sourcePath),
-            'image/webp' => @imagecreatefromwebp($sourcePath),
-            'image/bmp' => function_exists('imagecreatefrombmp') ? @imagecreatefrombmp($sourcePath) : false,
-            'image/avif' => function_exists('imagecreatefromavif') ? @imagecreatefromavif($sourcePath) : false,
-            default => false,
-        };
+        switch ($info['mime']) {
+            case 'image/jpeg':
+                $image = @imagecreatefromjpeg($sourcePath);
+                break;
+            case 'image/png':
+                $image = @imagecreatefrompng($sourcePath);
+                break;
+            case 'image/gif':
+                $image = @imagecreatefromgif($sourcePath);
+                break;
+            case 'image/webp':
+                $image = @imagecreatefromwebp($sourcePath);
+                break;
+            case 'image/bmp':
+                $image = function_exists('imagecreatefrombmp') ? @imagecreatefrombmp($sourcePath) : false;
+                break;
+            case 'image/avif':
+                $image = function_exists('imagecreatefromavif') ? @imagecreatefromavif($sourcePath) : false;
+                break;
+            default:
+                $image = false;
+                break;
+        }
         if ($image === false) {
             return null;
         }
