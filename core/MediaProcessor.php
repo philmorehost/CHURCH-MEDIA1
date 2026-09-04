@@ -275,6 +275,76 @@ class MediaProcessor
         return is_file($bundled) ? $bundled : null;
     }
 
+    /**
+     * Crops and formats an uploaded ad image into an exact 9:16 vertical ratio (1080x1920 WebP).
+     */
+    public static function processAdImage(string $sourcePath, string $destinationDirectory, int $quality = 85): ?string
+    {
+        if (!is_file($sourcePath)) {
+            return null;
+        }
+        $info = @getimagesize($sourcePath);
+        if (!$info) {
+            return null;
+        }
+
+        $image = match ($info['mime']) {
+            'image/jpeg' => @imagecreatefromjpeg($sourcePath),
+            'image/png' => @imagecreatefrompng($sourcePath),
+            'image/gif' => @imagecreatefromgif($sourcePath),
+            'image/webp' => @imagecreatefromwebp($sourcePath),
+            'image/bmp' => function_exists('imagecreatefrombmp') ? @imagecreatefrombmp($sourcePath) : false,
+            'image/avif' => function_exists('imagecreatefromavif') ? @imagecreatefromavif($sourcePath) : false,
+            default => false,
+        };
+        if ($image === false) {
+            return null;
+        }
+
+        $srcW = imagesx($image);
+        $srcH = imagesy($image);
+        $targetW = 1080;
+        $targetH = 1920;
+
+        $srcRatio = $srcW / $srcH;
+        $targetRatio = $targetW / $targetH;
+
+        if ($srcRatio > $targetRatio) {
+            $cropH = $srcH;
+            $cropW = (int) round($srcH * $targetRatio);
+            $srcX = (int) round(($srcW - $cropW) / 2);
+            $srcY = 0;
+        } else {
+            $cropW = $srcW;
+            $cropH = (int) round($srcW / $targetRatio);
+            $srcX = 0;
+            $srcY = (int) round(($srcH - $cropH) / 2);
+        }
+
+        $canvas = imagecreatetruecolor($targetW, $targetH);
+        imagealphablending($canvas, false);
+        imagesavealpha($canvas, true);
+        imagecopyresampled($canvas, $image, 0, 0, $srcX, $srcY, $targetW, $targetH, $cropW, $cropH);
+        imagedestroy($image);
+
+        if (!is_dir($destinationDirectory)) {
+            mkdir($destinationDirectory, 0775, true);
+        }
+        $filename = uniqid('ad_img_', true) . '.webp';
+        $ok = imagewebp($canvas, $destinationDirectory . '/' . $filename, $quality);
+        imagedestroy($canvas);
+
+        return $ok ? $filename : null;
+    }
+
+    /**
+     * Processes an ad video into an exact 9:16 vertical reel format.
+     */
+    public static function processAdVideo(string $sourcePath, string $destinationDirectory, string $thumbDirectory): array
+    {
+        return self::processVideoToReel($sourcePath, $destinationDirectory, $thumbDirectory, null, true);
+    }
+
     /** SVG initial-letter favicon, used when no favicon has been uploaded. */
     public static function renderDynamicFavicon(string $initial): never
     {

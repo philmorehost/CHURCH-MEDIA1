@@ -46,7 +46,7 @@ function mediaPinnedColumnsExist(PDO $pdo): bool
         $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'media_posts' AND COLUMN_NAME IN ('is_pinned','pinned_at','pinned_expires_at')");
         $stmt->execute();
         $cached = (int) $stmt->fetchColumn() === 3;
-    } catch (Throwable) {
+    } catch (Throwable $e) {
         $cached = false;
     }
     return $cached;
@@ -225,7 +225,7 @@ function settings(): array
             ->query('SELECT * FROM settings ORDER BY id ASC LIMIT 1')
             ->fetch();
         $cache = $row ? array_merge($defaults, array_filter($row, fn ($v) => $v !== null)) : $defaults;
-    } catch (Throwable) {
+    } catch (Throwable $e) {
         $cache = $defaults;
     }
     return $cache;

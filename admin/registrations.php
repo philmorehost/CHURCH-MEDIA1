@@ -135,7 +135,7 @@ if ($action === 'approve' && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 try {
                     $mailExtra = $createdEmail ? "\n\nCorporate email: {$createdEmail}" : '';
                     Mailer::send($email, 'Your ' . setting('site_title') . ' admin account is approved', "Hi {$name},\n\nYour church admin account has been approved and activated.\n\nLogin: " . baseUrl('admin/login') . "\nUsername: {$username}{$mailExtra}\n\nBlessings.");
-                } catch (Throwable) {
+                } catch (Throwable $e) {
                     // SMTP may be unconfigured — the account is still created.
                 }
                 flash('success', 'Registration approved — admin account created for ' . $name . ' (' . (string) $parish['name'] . '); ' . $emailNote . '.');
@@ -157,7 +157,7 @@ if ($action === 'reject' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($reg) {
         try {
             Mailer::send((string) $reg['email'], 'Your ' . setting('site_title') . ' registration', "Hi {$reg['name']},\n\nYour church admin registration was not approved." . ($reason !== '' ? "\n\nReason: {$reason}" : '') . "\n\nYou can contact the site admin for help.");
-        } catch (Throwable) {
+        } catch (Throwable $e) {
         }
     }
     flash('success', 'Registration rejected.');

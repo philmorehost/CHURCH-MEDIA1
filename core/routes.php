@@ -43,6 +43,176 @@ $router->get('/units', function () {
     render('units');
 });
 
+// Publisher Ad Manager Portal
+$router->get('/ad-manager', function () {
+    render('ad-manager');
+});
+
+$router->post('/ad-manager', function () {
+    $token = trim((string) ($_GET['token'] ?? ''));
+    if ($token === '') {
+        http_response_code(403);
+        exit('Access denied.');
+    }
+
+    $pdo = Database::getInstance()->getConnection();
+    $stmt = $pdo->prepare('SELECT id FROM ad_publishers WHERE token = ? LIMIT 1');
+    $stmt->execute([$token]);
+    $pub = $stmt->fetch();
+
+    if (!$pub) {
+        http_response_code(403);
+        exit('Access denied.');
+    }
+
+    $title = trim((string) ($_POST['title'] ?? ''));
+    $destUrl = trim((string) ($_POST['destination_url'] ?? ''));
+    $targetPlatform = in_array($_POST['target_platform'] ?? '', ['web', 'app', 'both'], true) ? $_POST['target_platform'] : 'both';
+    $durationDays = (int) ($_POST['duration_days'] ?? 7);
+    $mediaType = in_array($_POST['media_type'] ?? '', ['image', 'video'], true) ? $_POST['media_type'] : 'image';
+
+    if ($title === '') {
+        flash('pub_error', 'Please enter an Ad title.');
+        redirect('/ad-manager?token=' . rawurlencode($token));
+    }
+
+    $fileUpload = $_FILES['media_file'] ?? null;
+    if (!$fileUpload || empty($fileUpload['tmp_name']) || ($fileUpload['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        flash('pub_error', 'Please upload a media file for your advert.');
+        redirect('/ad-manager?token=' . rawurlencode($token));
+    }
+
+    $filePath = null;
+    $thumbPath = null;
+
+    if ($mediaType === 'image') {
+        $processed = MediaProcessor::processAdImage($fileUpload['tmp_name'], UPLOADS_PATH . '/ads');
+        if (!$processed) {
+            flash('pub_error', 'Failed to process the uploaded image.');
+            redirect('/ad-manager?token=' . rawurlencode($token));
+        }
+        $filePath = 'ads/' . $processed;
+    } else {
+        $res = MediaProcessor::processAdVideo($fileUpload['tmp_name'], UPLOADS_PATH . '/ads/reels', UPLOADS_PATH . '/ads/thumbs');
+        if (empty($res['file'])) {
+            flash('pub_error', 'Failed to process the uploaded video.');
+            redirect('/ad-manager?token=' . rawurlencode($token));
+        }
+        $filePath = 'ads/reels/' . $res['file'];
+        if (!empty($res['thumbnail'])) {
+            $thumbPath = 'ads/thumbs/' . $res['thumbnail'];
+        }
+    }
+
+    $stmt = $pdo->prepare('INSERT INTO ads (publisher_id, title, media_type, file_path, thumbnail_path, destination_url, target_platform, duration_days, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, "pending")');
+    $stmt->execute([(int) $pub['id'], $title, $mediaType, $filePath, $thumbPath, $destUrl ?: null, $targetPlatform, $durationDays]);
+
+    flash('pub_success', 'Your new advertisement has been submitted and is pending admin approval.');
+    redirect('/ad-manager?token=' . rawurlencode($token));
+});
+
+// Public Ad placement page and submission handler
+$router->get('/advertise', function () {
+    render('advertise', [
+        'metaTitle' => 'Place an Advert',
+        'metaDescription' => 'Promote your brand, business or ministry on our website and Mobile App with targeted vertical video and image ads.',
+    ]);
+});
+
+$router->post('/advertise', function () {
+    $pdo = Database::getInstance()->getConnection();
+
+    // Honeypot check
+    if (trim((string) ($_POST['website'] ?? '')) !== '') {
+        flash('advertise_sent', '1');
+        redirect('/advertise?sent=1');
+    }
+
+    if (!RateLimiter::attempt('advertise_submit', clientIp(), 5, 600)) {
+        keepFormOld($_POST);
+        flash('advertise_error', 'Too many attempts — please wait a few minutes before trying again.');
+        redirect('/advertise');
+    }
+
+    $pubName = trim((string) ($_POST['publisher_name'] ?? ''));
+    $pubEmail = trim((string) ($_POST['publisher_email'] ?? ''));
+    $pubPhone = trim((string) ($_POST['publisher_phone'] ?? ''));
+    $title = trim((string) ($_POST['title'] ?? ''));
+    $destUrl = trim((string) ($_POST['destination_url'] ?? ''));
+    $targetPlatform = in_array($_POST['target_platform'] ?? '', ['web', 'app', 'both'], true) ? $_POST['target_platform'] : 'both';
+    $durationDays = (int) ($_POST['duration_days'] ?? 7);
+    $mediaType = in_array($_POST['media_type'] ?? '', ['image', 'video'], true) ? $_POST['media_type'] : 'image';
+
+    $errors = [];
+    if ($pubName === '' || !filter_var($pubEmail, FILTER_VALIDATE_EMAIL)) {
+        $errors[] = 'Please enter your name and a valid email address.';
+    }
+    if ($title === '') {
+        $errors[] = 'Please enter an Ad title.';
+    }
+    if ($destUrl !== '' && !filter_var($destUrl, FILTER_VALIDATE_URL)) {
+        $errors[] = 'Please enter a valid website destination URL (including http:// or https://).';
+    }
+
+    $fileUpload = $_FILES['media_file'] ?? null;
+    if (!$fileUpload || empty($fileUpload['tmp_name']) || ($fileUpload['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        $errors[] = 'Please upload an image or video for your advert.';
+    }
+
+    if ($errors) {
+        keepFormOld($_POST);
+        flash('advertise_error', implode(' ', $errors));
+        redirect('/advertise');
+    }
+
+    // Find or create publisher
+    $stmt = $pdo->prepare('SELECT id, token FROM ad_publishers WHERE email = ? LIMIT 1');
+    $stmt->execute([$pubEmail]);
+    $pub = $stmt->fetch();
+    if ($pub) {
+        $publisherId = (int) $pub['id'];
+        $pubToken = $pub['token'];
+    } else {
+        $pubToken = bin2hex(random_bytes(24));
+        $stmt = $pdo->prepare('INSERT INTO ad_publishers (name, email, phone, token) VALUES (?, ?, ?, ?)');
+        $stmt->execute([$pubName, $pubEmail, $pubPhone ?: null, $pubToken]);
+        $publisherId = (int) $pdo->lastInsertId();
+    }
+
+    // Process media into 9:16 vertical aspect ratio
+    $filePath = null;
+    $thumbPath = null;
+
+    if ($mediaType === 'image') {
+        $processed = MediaProcessor::processAdImage($fileUpload['tmp_name'], UPLOADS_PATH . '/ads');
+        if (!$processed) {
+            flash('advertise_error', 'Failed to process the uploaded image. Please ensure it is a valid JPG, PNG, or WebP image.');
+            keepFormOld($_POST);
+            redirect('/advertise');
+        }
+        $filePath = 'ads/' . $processed;
+    } else {
+        // Video upload
+        $res = MediaProcessor::processAdVideo($fileUpload['tmp_name'], UPLOADS_PATH . '/ads/reels', UPLOADS_PATH . '/ads/thumbs');
+        if (empty($res['file'])) {
+            flash('advertise_error', 'Failed to process the uploaded video. Please ensure it is a valid MP4 or MOV video.');
+            keepFormOld($_POST);
+            redirect('/advertise');
+        }
+        $filePath = 'ads/reels/' . $res['file'];
+        if (!empty($res['thumbnail'])) {
+            $thumbPath = 'ads/thumbs/' . $res['thumbnail'];
+        }
+    }
+
+    $stmt = $pdo->prepare('INSERT INTO ads (publisher_id, title, media_type, file_path, thumbnail_path, destination_url, target_platform, duration_days, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, "pending")');
+    $stmt->execute([$publisherId, $title, $mediaType, $filePath, $thumbPath, $destUrl ?: null, $targetPlatform, $durationDays]);
+
+    clearFormOld();
+    flash('advertise_sent', '1');
+    redirect('/advertise?sent=1');
+});
+
 // Public church-admin self-registration (super admin approves afterwards).
 $router->get('/register', function () {
     render('register', [

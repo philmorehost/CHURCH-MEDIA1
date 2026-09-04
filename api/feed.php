@@ -123,4 +123,48 @@ foreach ($posts as &$post) {
 }
 unset($post);
 
-jsonResponse(['status' => 'success', 'page' => $page, 'has_more' => $hasMore, 'data' => $posts]);
+// Fetch active Ads to intersperse into the feed
+$adsStmt = $pdo->prepare("SELECT id, title, media_type, file_path, thumbnail_path, destination_url, target_platform
+    FROM ads
+    WHERE status = 'approved' AND (target_platform = 'both' OR target_platform = 'web') AND start_at <= NOW() AND (expires_at IS NULL OR expires_at > NOW())
+    ORDER BY RAND() LIMIT 2");
+$adsStmt->execute();
+$activeAds = $adsStmt->fetchAll();
+
+$feedItems = [];
+$adIdx = 0;
+foreach ($posts as $i => $post) {
+    $feedItems[] = $post;
+    if (($i + 1) % 3 === 0 && isset($activeAds[$adIdx])) {
+        $ad = $activeAds[$adIdx++];
+        $feedItems[] = [
+            'id' => 'ad_' . $ad['id'],
+            'real_ad_id' => (int) $ad['id'],
+            'is_ad' => true,
+            'caption' => $ad['title'],
+            'post_type' => 'ad',
+            'likes_count' => 0,
+            'views_count' => 0,
+            'saves_count' => 0,
+            'comments_count' => 0,
+            'created_at' => date('Y-m-d H:i:s'),
+            'author_name' => 'Sponsored',
+            'author_username' => 'sponsored',
+            'destination_url' => $ad['destination_url'],
+            'media_items' => [[
+                'type' => $ad['media_type'],
+                'source' => 'upload',
+                'file_url' => uploadUrl($ad['file_path']),
+                'thumbnail_url' => uploadUrl($ad['thumbnail_path']),
+                'conversion_status' => 'converted',
+            ]],
+            'categories' => [],
+            'liked_by_viewer' => false,
+            'saved_by_viewer' => false,
+            'unit' => [],
+            'unit_label' => 'Sponsored',
+        ];
+    }
+}
+
+jsonResponse(['status' => 'success', 'page' => $page, 'has_more' => $hasMore, 'data' => $feedItems]);

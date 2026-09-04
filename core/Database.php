@@ -70,7 +70,7 @@ class Database
             ]);
             $pdo->query('SELECT 1');
             return true;
-        } catch (Throwable) {
+        } catch (Throwable $e) {
             return false;
         }
     }
@@ -91,7 +91,7 @@ class Database
                 }
             }
             return true;
-        } catch (Throwable) {
+        } catch (Throwable $e) {
             return false;
         }
     }
@@ -104,7 +104,7 @@ class Database
         }
         try {
             return self::databaseHasSchema(self::getInstance()->getConnection());
-        } catch (Throwable) {
+        } catch (Throwable $e) {
             return false;
         }
     }
@@ -620,6 +620,72 @@ class Database
                 self::addColumnIfMissing($pdo, 'pending_registrations', 'password_enc', 'TEXT NULL', 'password_hash');
                 self::addColumnIfMissing($pdo, 'pending_registrations', 'email_created', 'TINYINT(1) NOT NULL DEFAULT 0', 'status');
                 self::addColumnIfMissing($pdo, 'pending_registrations', 'created_email', 'VARCHAR(190) NULL', 'email_created');
+            },
+            '2026_08_advertising_system' => function (PDO $pdo): void {
+                // Ad duration presets managed by super admin (e.g. 7 days, 14 days, 30 days)
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `ad_durations` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `title` VARCHAR(100) NOT NULL,
+                    `days` INT NOT NULL,
+                    `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+                    `sort_order` INT NOT NULL DEFAULT 0,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                // Seed default ad durations if empty
+                if ((int) $pdo->query('SELECT COUNT(*) FROM ad_durations')->fetchColumn() === 0) {
+                    $pdo->exec("INSERT INTO ad_durations (title, days, sort_order) VALUES
+                        ('7 Days', 7, 1),
+                        ('14 Days', 14, 2),
+                        ('30 Days', 30, 3),
+                        ('60 Days', 60, 4)");
+                }
+
+                // Ad publishers (advertisers) who get access via unique tokens
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `ad_publishers` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `name` VARCHAR(150) NOT NULL,
+                    `email` VARCHAR(150) NOT NULL,
+                    `phone` VARCHAR(45) NULL,
+                    `token` VARCHAR(64) NOT NULL UNIQUE,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    INDEX `idx_pub_email` (`email`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                // Advertisements table
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `ads` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `publisher_id` INT NOT NULL,
+                    `title` VARCHAR(200) NOT NULL,
+                    `media_type` ENUM('image','video') NOT NULL,
+                    `file_path` VARCHAR(255) NOT NULL,
+                    `thumbnail_path` VARCHAR(255) NULL,
+                    `destination_url` VARCHAR(500) NULL,
+                    `target_platform` ENUM('web','app','both') NOT NULL DEFAULT 'both',
+                    `duration_days` INT NOT NULL,
+                    `status` ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+                    `start_at` DATETIME NULL,
+                    `expires_at` DATETIME NULL,
+                    `views_count` INT NOT NULL DEFAULT 0,
+                    `clicks_count` INT NOT NULL DEFAULT 0,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    FOREIGN KEY (`publisher_id`) REFERENCES `ad_publishers`(`id`) ON DELETE CASCADE,
+                    INDEX `idx_ad_status_expires` (`status`, `start_at`, `expires_at`, `target_platform`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                // Detailed ad interaction logs for advanced analytics
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `ad_events` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `ad_id` INT NOT NULL,
+                    `event_type` ENUM('view','click') NOT NULL,
+                    `platform` VARCHAR(20) NOT NULL DEFAULT 'web',
+                    `ip_address` VARCHAR(45) NULL,
+                    `user_agent` VARCHAR(255) NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (`ad_id`) REFERENCES `ads`(`id`) ON DELETE CASCADE,
+                    INDEX `idx_ad_event_time` (`ad_id`, `event_type`, `created_at`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
             },
         ];
     }

@@ -2,14 +2,46 @@
 declare(strict_types=1);
 
 Auth::requireRole('admin');
-if (!Auth::isSuperAdmin()) {
-    http_response_code(403);
-    exit('Only the super admin can manage units.');
-}
 
 $pdo = Database::getInstance()->getConnection();
 $user = Auth::user();
 $action = $_GET['action'] ?? 'list';
+
+// Export Church Units to CSV (accessible to Super Admin and Church Admins)
+if ($action === 'export_csv') {
+    $allUnits = Unit::all();
+    $rows = [];
+    $byId = [];
+    foreach ($allUnits as $u) {
+        $byId[(int) $u['id']] = $u;
+    }
+
+    foreach ($allUnits as $u) {
+        // Non-super admins only export units in their scope
+        if (!Auth::isSuperAdmin() && !Unit::inAssignableScope($user, (int) $u['id'])) {
+            continue;
+        }
+        $parentName = ($u['parent_id'] !== null && isset($byId[(int) $u['parent_id']])) ? $byId[(int) $u['parent_id']]['name'] : '';
+        $fullPath = Unit::label((int) $u['id']);
+        $rows[] = [
+            'ID' => $u['id'],
+            'Type' => ucfirst($u['type']),
+            'Name' => $u['name'],
+            'Slug' => $u['slug'] ?? '',
+            'Parent' => $parentName,
+            'Full Hierarchy' => $fullPath,
+            'Created At' => $u['created_at'] ?? '',
+        ];
+    }
+
+    csvDownload('church-units-' . date('Y-m-d') . '.csv', ['ID', 'Type', 'Name', 'Slug', 'Parent', 'Full Hierarchy', 'Created At'], $rows);
+}
+
+// Write/Manage operations are restricted to Super Admin
+if (!Auth::isSuperAdmin() && in_array($action, ['create', 'edit', 'delete', 'import_csv', 'flag_approve', 'flag_reject'], true)) {
+    http_response_code(403);
+    exit('Only the super admin can modify church units.');
+}
 $id = (int) ($_GET['id'] ?? 0);
 $errors = [];
 
@@ -299,9 +331,12 @@ require __DIR__ . '/partials/layout-open.php';
   </div>
 <?php else: ?>
   <div class="btn-row" style="margin-bottom:20px;">
-    <a class="btn" href="/admin/units?action=create">+ Add Unit</a>
-    <a class="btn secondary" href="/admin/units?action=import_csv">⬆ Import Churches (CSV)</a>
-    <a class="btn secondary" href="/admin/units?action=flags">🏷 Name Corrections</a>
+    <?php if (Auth::isSuperAdmin()): ?>
+      <a class="btn" href="/admin/units?action=create">+ Add Unit</a>
+      <a class="btn secondary" href="/admin/units?action=import_csv">⬆ Import Churches (CSV)</a>
+      <a class="btn secondary" href="/admin/units?action=flags">🏷 Name Corrections</a>
+    <?php endif; ?>
+    <a class="btn secondary" href="/admin/units?action=export_csv">⬇ Export Units (CSV)</a>
   </div>
   <?php if (!$tree): ?>
     <div class="card"><p style="color:var(--ink-faint);">No units yet — start by adding a Province, or <a href="/admin/units?action=import_csv" style="color:var(--gold-soft);">import churches from CSV</a>.</p></div>
@@ -316,12 +351,16 @@ require __DIR__ . '/partials/layout-open.php';
           echo '<td>' . $pad . e($node['name']) . ' <small style="color:var(--ink-faint);">/' . e($node['slug']) . '</small></td>';
           echo '<td><span class="badge info">' . e($node['type']) . '</span></td>';
           echo '<td>';
-          echo '<a class="btn sm" href="/admin/units?action=edit&id=' . (int) $node['id'] . '">Edit</a> ';
-          echo '<form method="post" action="/admin/units?action=delete" onsubmit="return confirm(\'Delete this unit and everything under it? Posts/users will be unassigned.\');" style="display:inline;">';
-          echo Csrf::field();
-          echo '<input type="hidden" name="id" value="' . (int) $node['id'] . '">';
-          echo '<button type="submit" class="btn danger sm">Delete</button>';
-          echo '</form>';
+          if (Auth::isSuperAdmin()) {
+              echo '<a class="btn sm" href="/admin/units?action=edit&id=' . (int) $node['id'] . '">Edit</a> ';
+              echo '<form method="post" action="/admin/units?action=delete" onsubmit="return confirm(\'Delete this unit and everything under it? Posts/users will be unassigned.\');" style="display:inline;">';
+              echo Csrf::field();
+              echo '<input type="hidden" name="id" value="' . (int) $node['id'] . '">';
+              echo '<button type="submit" class="btn danger sm">Delete</button>';
+              echo '</form>';
+          } else {
+              echo '—';
+          }
           echo '</td></tr>';
           foreach ($node['children'] ?? [] as $child) {
               $renderNode($child, $depth + 1);
