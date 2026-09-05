@@ -652,6 +652,7 @@ class Database
                     INDEX `idx_pub_email` (`email`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
                 self::addColumnIfMissing($pdo, 'ad_publishers', 'phone', 'VARCHAR(45) NULL', 'email');
+                self::addColumnIfMissing($pdo, 'ad_publishers', 'token', 'VARCHAR(64) NULL', 'phone');
 
                 // Advertisements table
                 $pdo->exec("CREATE TABLE IF NOT EXISTS `ads` (
