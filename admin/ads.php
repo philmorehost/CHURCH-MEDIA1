@@ -190,89 +190,91 @@ require __DIR__ . '/partials/layout-open.php';
     <a class="btn secondary sm" href="/admin/ads">← Back to Ads</a>
   </div>
 
-  <div class="card" style="margin-bottom:24px;">
-    <h2>Ad Gateway Settings</h2>
-    <form method="post" action="/admin/ads?action=settings">
-      <?= Csrf::field() ?>
-      <input type="hidden" name="save_settings" value="1">
+  <div class="grid cols-2" style="margin-bottom:24px; align-items:start;">
+    <div class="card" style="margin-bottom:0;">
+      <h2>Ad Gateway Settings</h2>
+      <form method="post" action="/admin/ads?action=settings">
+        <?= Csrf::field() ?>
+        <input type="hidden" name="save_settings" value="1">
 
-      <h3 style="margin-top:0;">💳 Payhub Payment Gateway (Online Payments)</h3>
-      <p class="sub">Payhub integration allows publishers to pay online for ad packages. Get your API keys at <a href="https://merchant.payhub.com.ng" target="_blank">merchant.payhub.com.ng</a>.</p>
+        <h3 style="margin-top:0;">💳 Payhub Payment Gateway (Online)</h3>
+        <p class="sub">Payhub integration allows publishers to pay online for ad packages. Get your API keys at <a href="https://merchant.payhub.com.ng" target="_blank">merchant.payhub.com.ng</a>.</p>
 
-      <div class="checkbox-row" style="margin-bottom:12px;">
-        <input type="checkbox" id="payhub_enabled" name="payhub_enabled" <?= !empty(setting('payhub_enabled')) ? 'checked' : '' ?>>
-        <label for="payhub_enabled" style="margin:0;">Enable Payhub Online Payments</label>
-      </div>
+        <div class="checkbox-row" style="margin-bottom:12px;">
+          <input type="checkbox" id="payhub_enabled" name="payhub_enabled" <?= !empty(setting('payhub_enabled')) ? 'checked' : '' ?>>
+          <label for="payhub_enabled" style="margin:0;">Enable Payhub Online Payments</label>
+        </div>
 
-      <div class="row two">
-        <div>
-          <label for="payhub_public_key">Payhub Public Key</label>
-          <input type="text" id="payhub_public_key" name="payhub_public_key" value="<?= e((string) setting('payhub_public_key')) ?>" placeholder="YOUR_PUBLIC_KEY">
-        </div>
-        <div>
-          <label for="payhub_secret_key">Payhub Secret Key</label>
-          <input type="password" id="payhub_secret_key" name="payhub_secret_key" value="<?= e((string) setting('payhub_secret_key')) ?>" placeholder="sk_live_xxxx">
-        </div>
-      </div>
-
-      <h3 style="margin-top:20px;">🏦 Manual Bank Transfer Payment Method</h3>
-      <p class="sub">Allow advertisers to pay via bank transfer and upload proof of payment for review.</p>
-      <div class="checkbox-row" style="margin-bottom:12px;">
-        <input type="checkbox" id="manual_payment_enabled" name="manual_payment_enabled" <?= !empty(setting('manual_payment_enabled', 1)) ? 'checked' : '' ?>>
-        <label for="manual_payment_enabled" style="margin:0;">Enable Manual Payment Method</label>
-      </div>
-      <label for="manual_payment_instructions">Bank Account Details &amp; Payment Instructions</label>
-      <textarea id="manual_payment_instructions" name="manual_payment_instructions" rows="3" placeholder="Bank Name: GTBank&#10;Account Name: Grace & Life Church&#10;Account Number: 0123456789"><?= e((string) setting('manual_payment_instructions')) ?></textarea>
-
-      <button type="submit" class="btn" style="margin-top:16px;">Save Gateway Settings</button>
-    </form>
-  </div>
-
-  <div class="card" style="max-width:700px; margin-bottom:24px;">
-    <h2>Add Ad Package / Duration</h2>
-    <form method="post" action="/admin/ads?action=settings">
-      <?= Csrf::field() ?>
-      <input type="hidden" name="add_duration" value="1">
-      <div class="row two">
-        <div>
-          <label for="title">Title (e.g. 14 Days Premium)</label>
-          <input type="text" id="title" name="title" required placeholder="e.g. 14 Days Special">
-        </div>
-        <div>
-          <label for="days">Days Duration</label>
-          <input type="number" id="days" name="days" min="1" required placeholder="14">
-        </div>
-      </div>
-      <div class="row two" style="margin-top:10px;">
-        <div>
-          <label for="price">Price (₦) *</label>
-          <input type="number" step="0.01" id="price" name="price" value="0.00" placeholder="5000">
-        </div>
-        <div>
-          <label for="display_frequency">Display Frequency *</label>
-          <select id="display_frequency" name="display_frequency">
-            <option value="5_min">Every 5 Minutes (Default for Paid Ads)</option>
-            <option value="10_min">Every 10 Minutes</option>
-            <option value="15_min">Every 15 Minutes</option>
-            <option value="30_min">Every 30 Minutes</option>
-            <option value="once_daily">Once Daily</option>
-          </select>
-        </div>
-      </div>
-      <div class="row two" style="margin-top:10px;">
-        <div>
-          <label for="sort_order">Sort Order</label>
-          <input type="number" id="sort_order" name="sort_order" value="0">
-        </div>
-        <div style="display:flex; align-items:center; margin-top:20px;">
-          <div class="checkbox-row" style="margin:0;">
-            <input type="checkbox" id="is_free" name="is_free" onchange="handleFreeCheckbox(this, 'price', 'display_frequency')">
-            <label for="is_free" style="margin:0;">Mark as FREE package</label>
+        <div class="row two">
+          <div>
+            <label for="payhub_public_key">Payhub Public Key</label>
+            <input type="text" id="payhub_public_key" name="payhub_public_key" value="<?= e((string) setting('payhub_public_key')) ?>" placeholder="YOUR_PUBLIC_KEY">
+          </div>
+          <div>
+            <label for="payhub_secret_key">Payhub Secret Key</label>
+            <input type="password" id="payhub_secret_key" name="payhub_secret_key" value="<?= e((string) setting('payhub_secret_key')) ?>" placeholder="sk_live_xxxx">
           </div>
         </div>
-      </div>
-      <button type="submit" class="btn" style="margin-top:16px;">Add Package</button>
-    </form>
+
+        <h3 style="margin-top:20px;">🏦 Manual Bank Transfer</h3>
+        <p class="sub">Allow advertisers to pay via bank transfer and upload proof of payment for review.</p>
+        <div class="checkbox-row" style="margin-bottom:12px;">
+          <input type="checkbox" id="manual_payment_enabled" name="manual_payment_enabled" <?= !empty(setting('manual_payment_enabled', 1)) ? 'checked' : '' ?>>
+          <label for="manual_payment_enabled" style="margin:0;">Enable Manual Payment Method</label>
+        </div>
+        <label for="manual_payment_instructions">Bank Account Details &amp; Payment Instructions</label>
+        <textarea id="manual_payment_instructions" name="manual_payment_instructions" rows="3" placeholder="Bank Name: GTBank&#10;Account Name: Grace & Life Church&#10;Account Number: 0123456789"><?= e((string) setting('manual_payment_instructions')) ?></textarea>
+
+        <button type="submit" class="btn" style="margin-top:16px;">Save Gateway Settings</button>
+      </form>
+    </div>
+
+    <div class="card" style="margin-bottom:0;">
+      <h2>Add Ad Package / Duration</h2>
+      <form method="post" action="/admin/ads?action=settings">
+        <?= Csrf::field() ?>
+        <input type="hidden" name="add_duration" value="1">
+        <div class="row two">
+          <div>
+            <label for="title">Title (e.g. 14 Days Premium)</label>
+            <input type="text" id="title" name="title" required placeholder="e.g. 14 Days Special">
+          </div>
+          <div>
+            <label for="days">Days Duration</label>
+            <input type="number" id="days" name="days" min="1" required placeholder="14">
+          </div>
+        </div>
+        <div class="row two" style="margin-top:10px;">
+          <div>
+            <label for="price">Price (₦) *</label>
+            <input type="number" step="0.01" id="price" name="price" value="0.00" placeholder="5000">
+          </div>
+          <div>
+            <label for="display_frequency">Display Frequency *</label>
+            <select id="display_frequency" name="display_frequency">
+              <option value="5_min">Every 5 Minutes (Default for Paid Ads)</option>
+              <option value="10_min">Every 10 Minutes</option>
+              <option value="15_min">Every 15 Minutes</option>
+              <option value="30_min">Every 30 Minutes</option>
+              <option value="once_daily">Once Daily</option>
+            </select>
+          </div>
+        </div>
+        <div class="row two" style="margin-top:10px;">
+          <div>
+            <label for="sort_order">Sort Order</label>
+            <input type="number" id="sort_order" name="sort_order" value="0">
+          </div>
+          <div style="display:flex; align-items:center; margin-top:20px;">
+            <div class="checkbox-row" style="margin:0;">
+              <input type="checkbox" id="is_free" name="is_free" onchange="handleFreeCheckbox(this, 'price', 'display_frequency')">
+              <label for="is_free" style="margin:0;">Mark as FREE package</label>
+            </div>
+          </div>
+        </div>
+        <button type="submit" class="btn" style="margin-top:16px;">Add Package</button>
+      </form>
+    </div>
   </div>
 
   <div class="card">
