@@ -104,8 +104,16 @@ $router->post('/ad-manager', function () {
         }
     }
 
-    $stmt = $pdo->prepare('INSERT INTO ads (publisher_id, title, media_type, file_path, thumbnail_path, destination_url, target_platform, duration_days, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, "pending")');
-    $stmt->execute([(int) $pub['id'], $title, $mediaType, $filePath, $thumbPath, $destUrl ?: null, $targetPlatform, $durationDays]);
+    $stmt = $pdo->prepare('SELECT * FROM ad_durations WHERE days = ? AND is_active = 1 LIMIT 1');
+    $stmt->execute([$durationDays]);
+    $dur = $stmt->fetch();
+    $price = $dur ? (float) $dur['price'] : 0.00;
+    $isFree = $dur ? (int) $dur['is_free'] : 0;
+    $displayFreq = $dur ? (string) ($dur['display_frequency'] ?? '5_min') : '5_min';
+    if ($isFree) { $displayFreq = 'once_daily'; }
+
+    $stmt = $pdo->prepare('INSERT INTO ads (publisher_id, title, media_type, file_path, thumbnail_path, destination_url, target_platform, duration_days, price, is_free, display_frequency, payment_status, payment_method, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "pending")');
+    $stmt->execute([(int) $pub['id'], $title, $mediaType, $filePath, $thumbPath, $destUrl ?: null, $targetPlatform, $durationDays, $price, $isFree, $displayFreq, $isFree ? 'paid' : 'unpaid', $isFree ? 'free' : 'online']);
 
     flash('pub_success', 'Your new advertisement has been submitted and is pending admin approval.');
     redirect('/ad-manager?token=' . rawurlencode($token));
@@ -232,10 +240,12 @@ $router->post('/advertise', function () {
     $durationDays = (int) $dur['days'];
     $price = (float) $dur['price'];
     $isFree = (bool) $dur['is_free'];
+    $displayFreq = (string) ($dur['display_frequency'] ?? '5_min');
 
     if ($isFree) {
         $paymentMethod = 'free';
         $paymentStatus = 'paid';
+        $displayFreq = 'once_daily';
     } else {
         $paymentStatus = 'unpaid';
     }
@@ -319,10 +329,10 @@ $router->post('/advertise', function () {
 
     $reference = 'PH_AD_' . time() . '_' . mt_rand(1000, 9999);
 
-    $stmt = $pdo->prepare('INSERT INTO ads (publisher_id, title, media_type, file_path, thumbnail_path, destination_url, target_platform, duration_days, price, is_free, payment_status, payment_method, payment_proof_path, payment_reference, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "pending")');
+    $stmt = $pdo->prepare('INSERT INTO ads (publisher_id, title, media_type, file_path, thumbnail_path, destination_url, target_platform, duration_days, price, is_free, display_frequency, payment_status, payment_method, payment_proof_path, payment_reference, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "pending")');
     $stmt->execute([
         $publisherId, $title, $mediaType, $filePath, $thumbPath, $destUrl ?: null, $targetPlatform,
-        $durationDays, $price, $isFree ? 1 : 0, $paymentStatus, $paymentMethod, $proofPath, $reference
+        $durationDays, $price, $isFree ? 1 : 0, $displayFreq, $paymentStatus, $paymentMethod, $proofPath, $reference
     ]);
     $adId = (int) $pdo->lastInsertId();
 

@@ -23,10 +23,9 @@ if ($action === 'settings' || $action === 'durations') {
         $payhubSec = trim((string) ($_POST['payhub_secret_key'] ?? ''));
         $manualEnabled = isset($_POST['manual_payment_enabled']) ? 1 : 0;
         $manualInstructions = trim((string) ($_POST['manual_payment_instructions'] ?? ''));
-        $freq = in_array($_POST['ad_display_frequency'] ?? '', ['5_min', '10_min', '15_min', '30_min', 'once_daily'], true) ? $_POST['ad_display_frequency'] : '5_min';
 
-        $pdo->prepare('UPDATE settings SET payhub_enabled = ?, payhub_public_key = ?, payhub_secret_key = ?, manual_payment_enabled = ?, manual_payment_instructions = ?, ad_display_frequency = ? WHERE id = (SELECT id FROM (SELECT id FROM settings LIMIT 1) t)')
-            ->execute([$payhubEnabled, $payhubPub, $payhubSec, $manualEnabled, $manualInstructions, $freq]);
+        $pdo->prepare('UPDATE settings SET payhub_enabled = ?, payhub_public_key = ?, payhub_secret_key = ?, manual_payment_enabled = ?, manual_payment_instructions = ? WHERE id = (SELECT id FROM (SELECT id FROM settings LIMIT 1) t)')
+            ->execute([$payhubEnabled, $payhubPub, $payhubSec, $manualEnabled, $manualInstructions]);
 
         flash('success', 'Ad settings updated successfully.');
         redirect('/admin/ads?action=settings');
@@ -38,14 +37,43 @@ if ($action === 'settings' || $action === 'durations') {
         $days = (int) ($_POST['days'] ?? 0);
         $price = (float) ($_POST['price'] ?? 0.00);
         $isFree = isset($_POST['is_free']) ? 1 : 0;
+        $displayFreq = in_array($_POST['display_frequency'] ?? '', ['5_min', '10_min', '15_min', '30_min', 'once_daily'], true) ? $_POST['display_frequency'] : '5_min';
+        if ($isFree) {
+            $displayFreq = 'once_daily';
+            $price = 0.00;
+        }
         $sortOrder = (int) ($_POST['sort_order'] ?? 0);
 
         if ($title === '' || $days <= 0) {
             $errors[] = 'Please enter a valid title and number of days.';
         } else {
-            $stmt = $pdo->prepare('INSERT INTO ad_durations (title, days, price, is_free, sort_order) VALUES (?, ?, ?, ?, ?)');
-            $stmt->execute([$title, $days, $isFree ? 0.00 : $price, $isFree, $sortOrder]);
-            flash('success', 'Duration option added.');
+            $stmt = $pdo->prepare('INSERT INTO ad_durations (title, days, price, is_free, display_frequency, sort_order) VALUES (?, ?, ?, ?, ?, ?)');
+            $stmt->execute([$title, $days, $price, $isFree, $displayFreq, $sortOrder]);
+            flash('success', 'Ad package added.');
+            redirect('/admin/ads?action=settings');
+        }
+    }
+
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_duration'])) {
+        Csrf::requireValid();
+        $durId = (int) ($_POST['duration_id'] ?? 0);
+        $title = trim((string) ($_POST['title'] ?? ''));
+        $days = (int) ($_POST['days'] ?? 0);
+        $price = (float) ($_POST['price'] ?? 0.00);
+        $isFree = isset($_POST['is_free']) ? 1 : 0;
+        $displayFreq = in_array($_POST['display_frequency'] ?? '', ['5_min', '10_min', '15_min', '30_min', 'once_daily'], true) ? $_POST['display_frequency'] : '5_min';
+        if ($isFree) {
+            $displayFreq = 'once_daily';
+            $price = 0.00;
+        }
+        $sortOrder = (int) ($_POST['sort_order'] ?? 0);
+
+        if ($durId <= 0 || $title === '' || $days <= 0) {
+            $errors[] = 'Please enter valid package details.';
+        } else {
+            $stmt = $pdo->prepare('UPDATE ad_durations SET title = ?, days = ?, price = ?, is_free = ?, display_frequency = ?, sort_order = ? WHERE id = ?');
+            $stmt->execute([$title, $days, $price, $isFree, $displayFreq, $sortOrder, $durId]);
+            flash('success', 'Ad package updated.');
             redirect('/admin/ads?action=settings');
         }
     }
@@ -163,7 +191,7 @@ require __DIR__ . '/partials/layout-open.php';
   </div>
 
   <div class="card" style="margin-bottom:24px;">
-    <h2>Ad Gateway &amp; Display Frequency Settings</h2>
+    <h2>Ad Gateway Settings</h2>
     <form method="post" action="/admin/ads?action=settings">
       <?= Csrf::field() ?>
       <input type="hidden" name="save_settings" value="1">
@@ -196,17 +224,7 @@ require __DIR__ . '/partials/layout-open.php';
       <label for="manual_payment_instructions">Bank Account Details &amp; Payment Instructions</label>
       <textarea id="manual_payment_instructions" name="manual_payment_instructions" rows="3" placeholder="Bank Name: GTBank&#10;Account Name: Grace & Life Church&#10;Account Number: 0123456789"><?= e((string) setting('manual_payment_instructions')) ?></textarea>
 
-      <h3 style="margin-top:20px;">⏱ Paid Ads Display Frequency</h3>
-      <p class="sub">How often active paid ads surface in the public media feed / mobile app (Free ads display once per day by default).</p>
-      <select id="ad_display_frequency" name="ad_display_frequency">
-        <option value="5_min" <?= setting('ad_display_frequency') === '5_min' ? 'selected' : '' ?>>Every 5 Minutes (Default for Paid Ads)</option>
-        <option value="10_min" <?= setting('ad_display_frequency') === '10_min' ? 'selected' : '' ?>>Every 10 Minutes</option>
-        <option value="15_min" <?= setting('ad_display_frequency') === '15_min' ? 'selected' : '' ?>>Every 15 Minutes</option>
-        <option value="30_min" <?= setting('ad_display_frequency') === '30_min' ? 'selected' : '' ?>>Every 30 Minutes</option>
-        <option value="once_daily" <?= setting('ad_display_frequency') === 'once_daily' ? 'selected' : '' ?>>Once Daily</option>
-      </select>
-
-      <button type="submit" class="btn" style="margin-top:16px;">Save Gateway &amp; Frequency Settings</button>
+      <button type="submit" class="btn" style="margin-top:16px;">Save Gateway Settings</button>
     </form>
   </div>
 
@@ -231,30 +249,56 @@ require __DIR__ . '/partials/layout-open.php';
           <input type="number" step="0.01" id="price" name="price" value="0.00" placeholder="5000">
         </div>
         <div>
+          <label for="display_frequency">Display Frequency *</label>
+          <select id="display_frequency" name="display_frequency">
+            <option value="5_min">Every 5 Minutes (Default for Paid Ads)</option>
+            <option value="10_min">Every 10 Minutes</option>
+            <option value="15_min">Every 15 Minutes</option>
+            <option value="30_min">Every 30 Minutes</option>
+            <option value="once_daily">Once Daily</option>
+          </select>
+        </div>
+      </div>
+      <div class="row two" style="margin-top:10px;">
+        <div>
           <label for="sort_order">Sort Order</label>
           <input type="number" id="sort_order" name="sort_order" value="0">
         </div>
+        <div style="display:flex; align-items:center; margin-top:20px;">
+          <div class="checkbox-row" style="margin:0;">
+            <input type="checkbox" id="is_free" name="is_free" onchange="handleFreeCheckbox(this, 'price', 'display_frequency')">
+            <label for="is_free" style="margin:0;">Mark as FREE package</label>
+          </div>
+        </div>
       </div>
-      <div class="checkbox-row" style="margin-top:10px;">
-        <input type="checkbox" id="is_free" name="is_free">
-        <label for="is_free" style="margin:0;">Mark as FREE package (no payment required)</label>
-      </div>
-      <button type="submit" class="btn" style="margin-top:14px;">Add Package</button>
+      <button type="submit" class="btn" style="margin-top:16px;">Add Package</button>
     </form>
   </div>
 
   <div class="card">
     <h2>Configured Ad Packages</h2>
     <table>
-      <tr><th>Title</th><th>Days</th><th>Price</th><th>Type</th><th>Sort Order</th><th></th></tr>
+      <tr><th>Title</th><th>Days</th><th>Price</th><th>Frequency</th><th>Type</th><th>Sort Order</th><th></th></tr>
       <?php foreach ($durations as $d): ?>
+        <?php
+          $freqLabels = [
+            '5_min' => 'Every 5 mins',
+            '10_min' => 'Every 10 mins',
+            '15_min' => 'Every 15 mins',
+            '30_min' => 'Every 30 mins',
+            'once_daily' => 'Once daily',
+          ];
+          $fLabel = $freqLabels[$d['display_frequency'] ?? '5_min'] ?? 'Every 5 mins';
+        ?>
         <tr>
           <td><strong><?= e($d['title']) ?></strong></td>
           <td><?= (int) $d['days'] ?> days</td>
           <td><?= $d['is_free'] ? 'FREE' : '₦' . number_format((float) $d['price'], 2) ?></td>
-          <td><?= $d['is_free'] ? '<span class="badge ok">Free</span>' : '<span class="badge info">Paid</span>' ?></td>
+          <td><span class="badge info"><?= e($fLabel) ?></span></td>
+          <td><?= $d['is_free'] ? '<span class="badge ok">Free</span>' : '<span class="badge ok">Paid</span>' ?></td>
           <td><?= (int) $d['sort_order'] ?></td>
-          <td>
+          <td style="white-space:nowrap;">
+            <button class="btn sm secondary" onclick="openEditModal(<?= e(json_encode($d, JSON_HEX_APOS | JSON_HEX_QUOT)) ?>)">Edit</button>
             <form method="post" action="/admin/ads?action=settings" onsubmit="return confirm('Delete this duration?');" style="display:inline;">
               <?= Csrf::field() ?>
               <input type="hidden" name="delete_duration" value="1">
@@ -266,6 +310,94 @@ require __DIR__ . '/partials/layout-open.php';
       <?php endforeach; ?>
     </table>
   </div>
+
+  <!-- Edit Package Modal -->
+  <div id="editPackageModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:9999; overflow-y:auto; padding:30px 15px;">
+    <div class="card glass-card" style="max-width:600px; margin:40px auto; padding:32px; border-radius:12px; position:relative;">
+      <button type="button" onclick="document.getElementById('editPackageModal').style.display='none';" style="position:absolute; top:16px; right:16px; background:none; border:none; color:inherit; font-size:24px; cursor:pointer;">&times;</button>
+      <h2 style="margin-top:0; margin-bottom:20px;">Edit Ad Package</h2>
+
+      <form method="post" action="/admin/ads?action=settings">
+        <?= Csrf::field() ?>
+        <input type="hidden" name="edit_duration" value="1">
+        <input type="hidden" id="edit_duration_id" name="duration_id" value="">
+
+        <div class="row two">
+          <div>
+            <label for="edit_title">Title</label>
+            <input type="text" id="edit_title" name="title" required>
+          </div>
+          <div>
+            <label for="edit_days">Days Duration</label>
+            <input type="number" id="edit_days" name="days" min="1" required>
+          </div>
+        </div>
+
+        <div class="row two" style="margin-top:10px;">
+          <div>
+            <label for="edit_price">Price (₦)</label>
+            <input type="number" step="0.01" id="edit_price" name="price" value="0.00">
+          </div>
+          <div>
+            <label for="edit_display_frequency">Display Frequency</label>
+            <select id="edit_display_frequency" name="display_frequency">
+              <option value="5_min">Every 5 Minutes</option>
+              <option value="10_min">Every 10 Minutes</option>
+              <option value="15_min">Every 15 Minutes</option>
+              <option value="30_min">Every 30 Minutes</option>
+              <option value="once_daily">Once Daily</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row two" style="margin-top:10px;">
+          <div>
+            <label for="edit_sort_order">Sort Order</label>
+            <input type="number" id="edit_sort_order" name="sort_order" value="0">
+          </div>
+          <div style="display:flex; align-items:center; margin-top:20px;">
+            <div class="checkbox-row" style="margin:0;">
+              <input type="checkbox" id="edit_is_free" name="is_free" onchange="handleFreeCheckbox(this, 'edit_price', 'edit_display_frequency')">
+              <label for="edit_is_free" style="margin:0;">Mark as FREE package</label>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top:24px; text-align:right;">
+          <button type="button" class="btn secondary" onclick="document.getElementById('editPackageModal').style.display='none';">Cancel</button>
+          <button type="submit" class="btn">Save Package Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+  function handleFreeCheckbox(chk, priceId, freqId) {
+    var priceEl = document.getElementById(priceId);
+    var freqEl = document.getElementById(freqId);
+    if (chk.checked) {
+      if (priceEl) { priceEl.value = '0.00'; priceEl.disabled = true; }
+      if (freqEl) { freqEl.value = 'once_daily'; freqEl.disabled = true; }
+    } else {
+      if (priceEl) priceEl.disabled = false;
+      if (freqEl) freqEl.disabled = false;
+    }
+  }
+
+  function openEditModal(d) {
+    document.getElementById('edit_duration_id').value = d.id;
+    document.getElementById('edit_title').value = d.title;
+    document.getElementById('edit_days').value = d.days;
+    document.getElementById('edit_price').value = d.price;
+    document.getElementById('edit_sort_order').value = d.sort_order;
+    var chk = document.getElementById('edit_is_free');
+    chk.checked = d.is_free == 1;
+    var freqEl = document.getElementById('edit_display_frequency');
+    if (freqEl) freqEl.value = d.display_frequency || '5_min';
+    handleFreeCheckbox(chk, 'edit_price', 'edit_display_frequency');
+    document.getElementById('editPackageModal').style.display = 'block';
+  }
+  </script>
 
 <?php else: ?>
   <div class="btn-row" style="margin-bottom:20px; display:flex; justify-content:space-between; align-items:center;">

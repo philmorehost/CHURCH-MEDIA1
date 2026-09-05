@@ -135,8 +135,8 @@ $freqMinutes = [
 ];
 $paidMinInterval = $freqMinutes[$freq] ?? 5;
 
-// Select approved ads that are either paid or free (free ads rate-limited to once daily)
-$adsStmt = $pdo->prepare("SELECT id, title, media_type, file_path, thumbnail_path, destination_url, target_platform, is_free, price
+// Select approved ads that are either paid or free
+$adsStmt = $pdo->prepare("SELECT id, title, media_type, file_path, thumbnail_path, destination_url, target_platform, is_free, price, display_frequency
     FROM ads
     WHERE status = 'approved'
       AND (target_platform = 'both' OR target_platform = 'web')

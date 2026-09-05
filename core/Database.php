@@ -629,20 +629,22 @@ class Database
                     `days` INT NOT NULL,
                     `price` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
                     `is_free` TINYINT(1) NOT NULL DEFAULT 0,
+                    `display_frequency` VARCHAR(20) NOT NULL DEFAULT '5_min',
                     `is_active` TINYINT(1) NOT NULL DEFAULT 1,
                     `sort_order` INT NOT NULL DEFAULT 0,
                     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
                 self::addColumnIfMissing($pdo, 'ad_durations', 'price', 'DECIMAL(10,2) NOT NULL DEFAULT 0.00', 'days');
                 self::addColumnIfMissing($pdo, 'ad_durations', 'is_free', 'TINYINT(1) NOT NULL DEFAULT 0', 'price');
+                self::addColumnIfMissing($pdo, 'ad_durations', 'display_frequency', "VARCHAR(20) NOT NULL DEFAULT '5_min'", 'is_free');
 
                 // Seed default ad durations if empty
                 if ((int) $pdo->query('SELECT COUNT(*) FROM ad_durations')->fetchColumn() === 0) {
-                    $pdo->exec("INSERT INTO ad_durations (title, days, price, is_free, sort_order) VALUES
-                        ('Free Trial (7 Days)', 7, 0.00, 1, 1),
-                        ('7 Days Premium', 7, 5000.00, 0, 2),
-                        ('14 Days Premium', 14, 9000.00, 0, 3),
-                        ('30 Days Premium', 30, 15000.00, 0, 4)");
+                    $pdo->exec("INSERT INTO ad_durations (title, days, price, is_free, display_frequency, sort_order) VALUES
+                        ('Free Trial (7 Days)', 7, 0.00, 1, 'once_daily', 1),
+                        ('7 Days Premium', 7, 5000.00, 0, '5_min', 2),
+                        ('14 Days Premium', 14, 9000.00, 0, '5_min', 3),
+                        ('30 Days Premium', 30, 15000.00, 0, '5_min', 4)");
                 }
 
                 // Ad publishers (advertisers)
@@ -671,6 +673,7 @@ class Database
                     `duration_days` INT NOT NULL,
                     `price` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
                     `is_free` TINYINT(1) NOT NULL DEFAULT 0,
+                    `display_frequency` VARCHAR(20) NOT NULL DEFAULT '5_min',
                     `payment_status` ENUM('unpaid','pending_review','paid') NOT NULL DEFAULT 'unpaid',
                     `payment_method` ENUM('online','manual','free') NOT NULL DEFAULT 'free',
                     `payment_proof_path` VARCHAR(255) NULL,
@@ -687,7 +690,8 @@ class Database
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
                 self::addColumnIfMissing($pdo, 'ads', 'price', 'DECIMAL(10,2) NOT NULL DEFAULT 0.00', 'duration_days');
                 self::addColumnIfMissing($pdo, 'ads', 'is_free', 'TINYINT(1) NOT NULL DEFAULT 0', 'price');
-                self::addColumnIfMissing($pdo, 'ads', 'payment_status', "ENUM('unpaid','pending_review','paid') NOT NULL DEFAULT 'unpaid'", 'is_free');
+                self::addColumnIfMissing($pdo, 'ads', 'display_frequency', "VARCHAR(20) NOT NULL DEFAULT '5_min'", 'is_free');
+                self::addColumnIfMissing($pdo, 'ads', 'payment_status', "ENUM('unpaid','pending_review','paid') NOT NULL DEFAULT 'unpaid'", 'display_frequency');
                 self::addColumnIfMissing($pdo, 'ads', 'payment_method', "ENUM('online','manual','free') NOT NULL DEFAULT 'free'", 'payment_status');
                 self::addColumnIfMissing($pdo, 'ads', 'payment_proof_path', 'VARCHAR(255) NULL', 'payment_method');
                 self::addColumnIfMissing($pdo, 'ads', 'payment_reference', 'VARCHAR(100) NULL', 'payment_proof_path');
