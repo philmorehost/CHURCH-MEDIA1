@@ -9,6 +9,7 @@ $adminUser = Auth::user();
 $navItems = [
     ['key' => 'dashboard', 'href' => '/admin', 'label' => 'Dashboard'],
     ['key' => 'media', 'href' => '/admin/media', 'label' => 'Media & Reels'],
+    ['key' => 'ads', 'href' => '/admin/ads', 'label' => 'Ads Management'],
     ['key' => 'events', 'href' => '/admin/events', 'label' => 'Events'],
     ['key' => 'sermons', 'href' => '/admin/sermons', 'label' => 'Sermons'],
     ['key' => 'team', 'href' => '/admin/team', 'label' => 'Team'],
@@ -23,7 +24,7 @@ $navItems = [
 ];
 $navItemsSystem = [
     ['key' => 'registrations', 'href' => '/admin/registrations', 'label' => 'Registrations', 'super' => true],
-    ['key' => 'units', 'href' => '/admin/units', 'label' => 'Units', 'super' => true],
+    ['key' => 'units', 'href' => '/admin/units', 'label' => 'Units', 'roles' => ['admin']],
     ['key' => 'security', 'href' => '/admin/security', 'label' => 'Security'],
     ['key' => 'settings', 'href' => '/admin/settings', 'label' => 'Settings', 'super' => true],
     ['key' => 'firebase', 'href' => '/admin/firebase', 'label' => 'Firebase', 'super' => true],

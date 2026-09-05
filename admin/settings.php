@@ -121,7 +121,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         $setSql = implode(', ', array_map(fn ($k) => "$k = :$k", array_keys($fields)));
-        $pdo->prepare("UPDATE settings SET $setSql WHERE id = :id")->execute([...$fields, 'id' => $row['id']]);
+        $executeParams = array_merge($fields, ['id' => $row['id']]);
+        $pdo->prepare("UPDATE settings SET $setSql WHERE id = :id")->execute($executeParams);
         if ($imageErrors) {
             flash('error', implode(' ', $imageErrors) . ' Other settings were still saved.');
         } else {

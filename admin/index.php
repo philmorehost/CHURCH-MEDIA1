@@ -165,13 +165,23 @@ require __DIR__ . '/partials/layout-open.php';
         </td>
         <td data-label="Status">
           <?php
-            $statusBadge = match ($nc['follow_up_status'] ?? 'new') {
-              'contacted' => ['Contacted', 'info'],
-              'followed_up' => ['Followed Up', 'warn'],
-              'returned' => ['Returned', 'ok'],
-              'inactive' => ['Inactive', 'fail'],
-              default => ['New', 'warn'],
-            };
+            switch ($nc['follow_up_status'] ?? 'new') {
+              case 'contacted':
+                $statusBadge = ['Contacted', 'info'];
+                break;
+              case 'followed_up':
+                $statusBadge = ['Followed Up', 'warn'];
+                break;
+              case 'returned':
+                $statusBadge = ['Returned', 'ok'];
+                break;
+              case 'inactive':
+                $statusBadge = ['Inactive', 'fail'];
+                break;
+              default:
+                $statusBadge = ['New', 'warn'];
+                break;
+            }
           ?>
           <span class="badge <?= $statusBadge[1] ?>"><?= $statusBadge[0] ?></span>
         </td>

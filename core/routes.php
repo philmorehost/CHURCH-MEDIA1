@@ -43,6 +43,356 @@ $router->get('/units', function () {
     render('units');
 });
 
+// Publisher Ad Manager Portal
+$router->get('/ad-manager', function () {
+    render('ad-manager');
+});
+
+$router->post('/ad-manager', function () {
+    $token = trim((string) ($_GET['token'] ?? ''));
+    if ($token === '') {
+        http_response_code(403);
+        exit('Access denied.');
+    }
+
+    $pdo = Database::getInstance()->getConnection();
+    $stmt = $pdo->prepare('SELECT id FROM ad_publishers WHERE token = ? LIMIT 1');
+    $stmt->execute([$token]);
+    $pub = $stmt->fetch();
+
+    if (!$pub) {
+        http_response_code(403);
+        exit('Access denied.');
+    }
+
+    $title = trim((string) ($_POST['title'] ?? ''));
+    $destUrl = trim((string) ($_POST['destination_url'] ?? ''));
+    $targetPlatform = in_array($_POST['target_platform'] ?? '', ['web', 'app', 'both'], true) ? $_POST['target_platform'] : 'both';
+    $durationDays = (int) ($_POST['duration_days'] ?? 7);
+    $mediaType = in_array($_POST['media_type'] ?? '', ['image', 'video'], true) ? $_POST['media_type'] : 'image';
+
+    if ($title === '') {
+        flash('pub_error', 'Please enter an Ad title.');
+        redirect('/ad-manager?token=' . rawurlencode($token));
+    }
+
+    $fileUpload = $_FILES['media_file'] ?? null;
+    if (!$fileUpload || empty($fileUpload['tmp_name']) || ($fileUpload['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        flash('pub_error', 'Please upload a media file for your advert.');
+        redirect('/ad-manager?token=' . rawurlencode($token));
+    }
+
+    $filePath = null;
+    $thumbPath = null;
+
+    if ($mediaType === 'image') {
+        $processed = MediaProcessor::processAdImage($fileUpload['tmp_name'], UPLOADS_PATH . '/ads');
+        if (!$processed) {
+            flash('pub_error', 'Failed to process the uploaded image.');
+            redirect('/ad-manager?token=' . rawurlencode($token));
+        }
+        $filePath = 'ads/' . $processed;
+    } else {
+        $res = MediaProcessor::processAdVideo($fileUpload['tmp_name'], UPLOADS_PATH . '/ads/reels', UPLOADS_PATH . '/ads/thumbs');
+        if (empty($res['file'])) {
+            flash('pub_error', 'Failed to process the uploaded video.');
+            redirect('/ad-manager?token=' . rawurlencode($token));
+        }
+        $filePath = 'ads/reels/' . $res['file'];
+        if (!empty($res['thumbnail'])) {
+            $thumbPath = 'ads/thumbs/' . $res['thumbnail'];
+        }
+    }
+
+    $stmt = $pdo->prepare('SELECT * FROM ad_durations WHERE days = ? AND is_active = 1 LIMIT 1');
+    $stmt->execute([$durationDays]);
+    $dur = $stmt->fetch();
+    $price = $dur ? (float) $dur['price'] : 0.00;
+    $isFree = $dur ? (int) $dur['is_free'] : 0;
+    $displayFreq = $dur ? (string) ($dur['display_frequency'] ?? '5_min') : '5_min';
+    if ($isFree) { $displayFreq = 'once_daily'; }
+
+    $stmt = $pdo->prepare('INSERT INTO ads (publisher_id, title, media_type, file_path, thumbnail_path, destination_url, target_platform, duration_days, price, is_free, display_frequency, payment_status, payment_method, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "pending")');
+    $stmt->execute([(int) $pub['id'], $title, $mediaType, $filePath, $thumbPath, $destUrl ?: null, $targetPlatform, $durationDays, $price, $isFree, $displayFreq, $isFree ? 'paid' : 'unpaid', $isFree ? 'free' : 'online']);
+
+    flash('pub_success', 'Your new advertisement has been submitted and is pending admin approval.');
+    redirect('/ad-manager?token=' . rawurlencode($token));
+});
+
+// Payhub Callback & Webhook Verification Endpoint
+$router->get('/payment/payhub/callback', function () {
+    $pdo = Database::getInstance()->getConnection();
+    $reference = trim((string) ($_GET['ref'] ?? ($_GET['reference'] ?? '')));
+
+    if ($reference === '') {
+        flash('advertise_error', 'Invalid payment reference.');
+        redirect('/advertise');
+    }
+
+    $secKey = (string) setting('payhub_secret_key');
+    if ($secKey === '') {
+        flash('advertise_error', 'Payhub configuration missing.');
+        redirect('/advertise');
+    }
+
+    // Verify transaction with Payhub API
+    $url = 'https://merchant.payhub.com.ng/api/transaction/verify/' . urlencode($reference);
+    $paid = false;
+
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER => ['Authorization: Bearer ' . $secKey],
+        ]);
+        $res = curl_exec($ch);
+        curl_close($ch);
+
+        $data = json_decode((string) $res, true);
+        if (!empty($data['paid']) || (!empty($data['data']['status']) && $data['data']['status'] === 'success')) {
+            $paid = true;
+        }
+    }
+
+    if ($paid) {
+        $stmt = $pdo->prepare('UPDATE ads SET payment_status = "paid" WHERE payment_reference = ?');
+        $stmt->execute([$reference]);
+
+        $stmt = $pdo->prepare('UPDATE ad_payments SET status = "success" WHERE reference = ?');
+        $stmt->execute([$reference]);
+
+        flash('advertise_sent', '1');
+        redirect('/advertise?sent=1');
+    } else {
+        flash('advertise_error', 'Payment verification failed or payment was not successful.');
+        redirect('/advertise');
+    }
+});
+
+$router->post('/payment/payhub/webhook', function () {
+    $pdo = Database::getInstance()->getConnection();
+    $body = (string) file_get_contents('php://input');
+    $sig = $_SERVER['HTTP_X_PAYHUB_SIGNATURE'] ?? '';
+    $secKey = (string) setting('payhub_secret_key');
+
+    if ($secKey !== '') {
+        if ($sig === '' || !hash_equals(hash_hmac('sha256', $body, $secKey), $sig)) {
+            http_response_code(401);
+            exit('Invalid signature');
+        }
+    }
+
+    $payload = json_decode($body, true);
+    if (($payload['event'] ?? '') === 'charge.success' && !empty($payload['data']['reference'])) {
+        $ref = $payload['data']['reference'];
+        $pdo->prepare('UPDATE ads SET payment_status = "paid" WHERE payment_reference = ?')->execute([$ref]);
+        $pdo->prepare('UPDATE ad_payments SET status = "success" WHERE reference = ?')->execute([$ref]);
+    }
+
+    http_response_code(200);
+    echo json_encode(['status' => 'success']);
+    exit;
+});
+
+// Public Ad placement page and submission handler
+$router->get('/advertise', function () {
+    render('advertise', [
+        'metaTitle' => 'Place an Advert',
+        'metaDescription' => 'Promote your brand, business or ministry on our website and Mobile App with targeted vertical video and image ads.',
+    ]);
+});
+
+$router->post('/advertise', function () {
+    $pdo = Database::getInstance()->getConnection();
+
+    // Honeypot check
+    if (trim((string) ($_POST['website'] ?? '')) !== '') {
+        flash('advertise_sent', '1');
+        redirect('/advertise?sent=1');
+    }
+
+    if (!RateLimiter::attempt('advertise_submit', clientIp(), 5, 600)) {
+        keepFormOld($_POST);
+        flash('advertise_error', 'Too many attempts — please wait a few minutes before trying again.');
+        redirect('/advertise');
+    }
+
+    $pubName = trim((string) ($_POST['publisher_name'] ?? ''));
+    $pubEmail = trim((string) ($_POST['publisher_email'] ?? ''));
+    $pubPhone = trim((string) ($_POST['publisher_phone'] ?? ''));
+    $title = trim((string) ($_POST['title'] ?? ''));
+    $destUrl = trim((string) ($_POST['destination_url'] ?? ''));
+    $targetPlatform = in_array($_POST['target_platform'] ?? '', ['web', 'app', 'both'], true) ? $_POST['target_platform'] : 'both';
+    $durationId = (int) ($_POST['duration_id'] ?? 0);
+    $mediaType = in_array($_POST['media_type'] ?? '', ['image', 'video'], true) ? $_POST['media_type'] : 'image';
+    $paymentMethod = in_array($_POST['payment_method'] ?? '', ['online', 'manual', 'free'], true) ? $_POST['payment_method'] : 'free';
+
+    $stmt = $pdo->prepare('SELECT * FROM ad_durations WHERE id = ? AND is_active = 1');
+    $stmt->execute([$durationId]);
+    $dur = $stmt->fetch();
+
+    if (!$dur) {
+        keepFormOld($_POST);
+        flash('advertise_error', 'Please select a valid ad duration package.');
+        redirect('/advertise');
+    }
+
+    $durationDays = (int) $dur['days'];
+    $price = (float) $dur['price'];
+    $isFree = (bool) $dur['is_free'];
+    $displayFreq = (string) ($dur['display_frequency'] ?? '5_min');
+
+    if ($isFree) {
+        $paymentMethod = 'free';
+        $paymentStatus = 'paid';
+        $displayFreq = 'once_daily';
+    } else {
+        $paymentStatus = 'unpaid';
+    }
+
+    $errors = [];
+    if ($pubName === '' || !filter_var($pubEmail, FILTER_VALIDATE_EMAIL)) {
+        $errors[] = 'Please enter your name and a valid email address.';
+    }
+    if ($title === '') {
+        $errors[] = 'Please enter an Ad title.';
+    }
+    if ($destUrl !== '' && !filter_var($destUrl, FILTER_VALIDATE_URL)) {
+        $errors[] = 'Please enter a valid website destination URL (including http:// or https://).';
+    }
+
+    $fileUpload = $_FILES['media_file'] ?? null;
+    if (!$fileUpload || empty($fileUpload['tmp_name']) || ($fileUpload['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        $errors[] = 'Please upload an image or video for your advert.';
+    }
+
+    $proofPath = null;
+    if (!$isFree && $paymentMethod === 'manual') {
+        $proofUpload = $_FILES['payment_proof'] ?? null;
+        if (!$proofUpload || empty($proofUpload['tmp_name']) || ($proofUpload['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+            $errors[] = 'Please upload your bank transfer payment receipt / proof.';
+        } else {
+            $proofName = MediaProcessor::processImage($proofUpload['tmp_name'], UPLOADS_PATH . '/ads/proofs');
+            if ($proofName) {
+                $proofPath = 'ads/proofs/' . $proofName;
+                $paymentStatus = 'pending_review';
+            } else {
+                $errors[] = 'Failed to process payment proof image.';
+            }
+        }
+    }
+
+    if ($errors) {
+        keepFormOld($_POST);
+        flash('advertise_error', implode(' ', $errors));
+        redirect('/advertise');
+    }
+
+    // Find or create publisher
+    $stmt = $pdo->prepare('SELECT id, token FROM ad_publishers WHERE email = ? LIMIT 1');
+    $stmt->execute([$pubEmail]);
+    $pub = $stmt->fetch();
+    if ($pub) {
+        $publisherId = (int) $pub['id'];
+        $pubToken = $pub['token'];
+    } else {
+        $pubToken = bin2hex(random_bytes(24));
+        $stmt = $pdo->prepare('INSERT INTO ad_publishers (name, email, phone, token) VALUES (?, ?, ?, ?)');
+        $stmt->execute([$pubName, $pubEmail, $pubPhone ?: null, $pubToken]);
+        $publisherId = (int) $pdo->lastInsertId();
+    }
+
+    // Process media into 9:16 vertical aspect ratio
+    $filePath = null;
+    $thumbPath = null;
+
+    if ($mediaType === 'image') {
+        $processed = MediaProcessor::processAdImage($fileUpload['tmp_name'], UPLOADS_PATH . '/ads');
+        if (!$processed) {
+            flash('advertise_error', 'Failed to process the uploaded image. Please ensure it is a valid JPG, PNG, or WebP image.');
+            keepFormOld($_POST);
+            redirect('/advertise');
+        }
+        $filePath = 'ads/' . $processed;
+    } else {
+        $res = MediaProcessor::processAdVideo($fileUpload['tmp_name'], UPLOADS_PATH . '/ads/reels', UPLOADS_PATH . '/ads/thumbs');
+        if (empty($res['file'])) {
+            flash('advertise_error', 'Failed to process the uploaded video. Please ensure it is a valid MP4 or MOV video.');
+            keepFormOld($_POST);
+            redirect('/advertise');
+        }
+        $filePath = 'ads/reels/' . $res['file'];
+        if (!empty($res['thumbnail'])) {
+            $thumbPath = 'ads/thumbs/' . $res['thumbnail'];
+        }
+    }
+
+    $reference = 'PH_AD_' . time() . '_' . mt_rand(1000, 9999);
+
+    $stmt = $pdo->prepare('INSERT INTO ads (publisher_id, title, media_type, file_path, thumbnail_path, destination_url, target_platform, duration_days, price, is_free, display_frequency, payment_status, payment_method, payment_proof_path, payment_reference, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "pending")');
+    $stmt->execute([
+        $publisherId, $title, $mediaType, $filePath, $thumbPath, $destUrl ?: null, $targetPlatform,
+        $durationDays, $price, $isFree ? 1 : 0, $displayFreq, $paymentStatus, $paymentMethod, $proofPath, $reference
+    ]);
+    $adId = (int) $pdo->lastInsertId();
+
+    // Log payment record if applicable
+    if (!$isFree) {
+        $stmt = $pdo->prepare('INSERT INTO ad_payments (ad_id, publisher_id, amount, payment_method, reference, status, proof_path) VALUES (?, ?, ?, ?, ?, ?, ?)');
+        $stmt->execute([$adId, $publisherId, $price, $paymentMethod, $reference, $paymentStatus === 'paid' ? 'success' : 'pending', $proofPath]);
+    }
+
+    // Notify Super Admin of new submission
+    $adminEmail = (string) setting('contact_email');
+    if ($adminEmail !== '') {
+        try {
+            Mailer::send($adminEmail, 'New Ad Submission: ' . $title, "Hello Admin,\n\nA new advertisement '{$title}' has been submitted by {$pubName} ({$pubEmail}).\nPackage: {$dur['title']}\nPayment Method: {$paymentMethod}\nPayment Status: {$paymentStatus}\n\nPlease review it in the Admin Ads Management panel.");
+        } catch (Throwable $e) {}
+    }
+
+    // Online Payment via Payhub
+    if (!$isFree && $paymentMethod === 'online' && setting('payhub_enabled') && setting('payhub_secret_key')) {
+        $secKey = (string) setting('payhub_secret_key');
+        $callbackUrl = baseUrl('payment/payhub/callback');
+        $koboAmount = (int) round($price * 100);
+
+        $payload = json_encode([
+            'email' => $pubEmail,
+            'amount' => $koboAmount,
+            'reference' => $reference,
+            'name' => $pubName,
+            'phone' => $pubPhone,
+            'callback_url' => $callbackUrl,
+            'metadata' => ['ad_id' => $adId, 'publisher_id' => $publisherId]
+        ]);
+
+        if (function_exists('curl_init')) {
+            $ch = curl_init('https://merchant.payhub.com.ng/api/transaction/initialize');
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_POST => true,
+                CURLOPT_POSTFIELDS => $payload,
+                CURLOPT_HTTPHEADER => [
+                    'Content-Type: application/json',
+                    'Authorization: Bearer ' . $secKey
+                ],
+            ]);
+            $res = curl_exec($ch);
+            curl_close($ch);
+
+            $data = json_decode((string) $res, true);
+            if (!empty($data['data']['authorization_url'])) {
+                clearFormOld();
+                redirect($data['data']['authorization_url']);
+            }
+        }
+    }
+
+    clearFormOld();
+    flash('advertise_sent', '1');
+    redirect('/advertise?sent=1');
+});
+
 // Public church-admin self-registration (super admin approves afterwards).
 $router->get('/register', function () {
     render('register', [

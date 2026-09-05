@@ -6,6 +6,25 @@ declare(strict_types=1);
  * endpoints. Loaded once from bootstrap.php. Kept framework-free on purpose.
  */
 
+if (!function_exists('str_starts_with')) {
+    function str_starts_with(string $haystack, string $needle): bool
+    {
+        return $needle === '' || strpos($haystack, $needle) === 0;
+    }
+}
+if (!function_exists('str_contains')) {
+    function str_contains(string $haystack, string $needle): bool
+    {
+        return $needle === '' || strpos($haystack, $needle) !== false;
+    }
+}
+if (!function_exists('str_ends_with')) {
+    function str_ends_with(string $haystack, string $needle): bool
+    {
+        return $needle === '' || ($needle !== '' && substr($haystack, -strlen($needle)) === $needle);
+    }
+}
+
 function e(?string $value): string
 {
     return htmlspecialchars($value ?? '', ENT_QUOTES, 'UTF-8');
@@ -46,7 +65,7 @@ function mediaPinnedColumnsExist(PDO $pdo): bool
         $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'media_posts' AND COLUMN_NAME IN ('is_pinned','pinned_at','pinned_expires_at')");
         $stmt->execute();
         $cached = (int) $stmt->fetchColumn() === 3;
-    } catch (Throwable) {
+    } catch (Throwable $e) {
         $cached = false;
     }
     return $cached;
@@ -63,13 +82,13 @@ function uploadUrl(?string $path): ?string
     return baseUrl('uploads/' . ltrim($path, '/'));
 }
 
-function redirect(string $path): never
+function redirect(string $path)
 {
     header('Location: ' . $path);
     exit;
 }
 
-function jsonResponse(array $payload, int $status = 200): never
+function jsonResponse(array $payload, int $status = 200)
 {
     http_response_code($status);
     header('Content-Type: application/json; charset=utf-8');
@@ -81,7 +100,7 @@ function jsonResponse(array $payload, int $status = 200): never
  * Streams rows as an Excel-friendly CSV download and exits. fputcsv handles
  * quoting/escaping, and the UTF-8 BOM makes it open correctly in Excel.
  */
-function csvDownload(string $filename, array $headers, array $rows): never
+function csvDownload(string $filename, array $headers, array $rows)
 {
     http_response_code(200);
     header('Content-Type: text/csv; charset=utf-8');
@@ -225,13 +244,13 @@ function settings(): array
             ->query('SELECT * FROM settings ORDER BY id ASC LIMIT 1')
             ->fetch();
         $cache = $row ? array_merge($defaults, array_filter($row, fn ($v) => $v !== null)) : $defaults;
-    } catch (Throwable) {
+    } catch (Throwable $e) {
         $cache = $defaults;
     }
     return $cache;
 }
 
-function setting(string $key, mixed $default = null): mixed
+function setting(string $key, $default = null)
 {
     return settings()[$key] ?? $default;
 }
@@ -440,7 +459,7 @@ function keepFormOld(array $input): void
 }
 
 /** Returns the previously submitted value for a form input (string for scalar fields, array for checkbox). */
-function formOld(string $key, mixed $default = ''): mixed
+function formOld(string $key, $default = '')
 {
     $old = $_SESSION['_form_old'] ?? [];
     return array_key_exists($key, $old) ? $old[$key] : $default;

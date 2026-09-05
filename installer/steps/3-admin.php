@@ -14,7 +14,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
             $_SESSION['install']['max_step'] = max($_SESSION['install']['max_step'], 4);
             redirect('/install?step=4');
         }
-    } catch (Throwable) {
+    } catch (Throwable $e) {
         // ignore — show the form normally
     }
 }
