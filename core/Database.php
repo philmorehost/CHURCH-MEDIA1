@@ -651,6 +651,7 @@ class Database
                     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     INDEX `idx_pub_email` (`email`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+                self::addColumnIfMissing($pdo, 'ad_publishers', 'phone', 'VARCHAR(45) NULL', 'email');
 
                 // Advertisements table
                 $pdo->exec("CREATE TABLE IF NOT EXISTS `ads` (

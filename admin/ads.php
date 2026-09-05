@@ -111,7 +111,7 @@ if ($action === 'delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // List Ads
 $statusFilter = $_GET['status'] ?? 'all';
-$sql = 'SELECT a.*, p.name AS pub_name, p.email AS pub_email, p.phone AS pub_phone, p.token AS pub_token FROM ads a JOIN ad_publishers p ON a.publisher_id = p.id';
+$sql = 'SELECT a.*, p.name AS pub_name, p.email AS pub_email, p.token AS pub_token FROM ads a JOIN ad_publishers p ON a.publisher_id = p.id';
 $params = [];
 if (in_array($statusFilter, ['pending', 'approved', 'rejected'], true)) {
     $sql .= ' WHERE a.status = ?';
@@ -233,7 +233,7 @@ require __DIR__ . '/partials/layout-open.php';
             <td>
               <strong><?= e($ad['pub_name']) ?></strong><br>
               <span style="font-size:12px; color:var(--ink-faint);"><?= e($ad['pub_email']) ?></span>
-              <?php if ($ad['pub_phone']): ?><br><span style="font-size:12px; color:var(--ink-faint);"><?= e($ad['pub_phone']) ?></span><?php endif; ?>
+              <?php if (!empty($ad['pub_phone'])): ?><br><span style="font-size:12px; color:var(--ink-faint);"><?= e($ad['pub_phone']) ?></span><?php endif; ?>
               <br><a href="<?= e(baseUrl('ad-manager?token=' . rawurlencode($ad['pub_token']))) ?>" target="_blank" style="font-size:11px; color:var(--gold-soft);">🔑 Manager Link</a>
             </td>
 
