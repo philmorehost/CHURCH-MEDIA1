@@ -149,15 +149,29 @@ function fetchKeyless(string $book, int $chapter, string $verse, string $version
     if ($lang === 'es') {
         $translation = 'rvr1960'; // Spanish Reina-Valera 1960 (only Spanish option here)
     } else {
-        $translation = match ($version) {
-            'KJV' => 'kjv',
-            'WEB' => 'web',
-            'BBE' => 'bbe',
-            'YLT' => 'ylt',
-            'ASV' => 'asv',
-            'DARBY' => 'darby',
-            default => 'web',
-        };
+        switch ($version) {
+            case 'KJV':
+                $translation = 'kjv';
+                break;
+            case 'WEB':
+                $translation = 'web';
+                break;
+            case 'BBE':
+                $translation = 'bbe';
+                break;
+            case 'YLT':
+                $translation = 'ylt';
+                break;
+            case 'ASV':
+                $translation = 'asv';
+                break;
+            case 'DARBY':
+                $translation = 'darby';
+                break;
+            default:
+                $translation = 'web';
+                break;
+        }
     }
 
     $url = 'https://bible-api.com/' . rawurlencode($query) . '?translation=' . $translation;

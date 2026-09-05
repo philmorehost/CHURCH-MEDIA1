@@ -75,13 +75,23 @@ if ($action === 'update_status' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('/admin/newcomers');
     }
     $pdo->prepare('UPDATE newcomers SET follow_up_status = ? WHERE id = ?')->execute([$newStatus, $targetId]);
-    $statusLabel = match ($newStatus) {
-        'contacted' => 'Contacted',
-        'followed_up' => 'Followed Up',
-        'returned' => 'Returned',
-        'inactive' => 'Inactive',
-        default => 'New',
-    };
+    switch ($newStatus) {
+        case 'contacted':
+            $statusLabel = 'Contacted';
+            break;
+        case 'followed_up':
+            $statusLabel = 'Followed Up';
+            break;
+        case 'returned':
+            $statusLabel = 'Returned';
+            break;
+        case 'inactive':
+            $statusLabel = 'Inactive';
+            break;
+        default:
+            $statusLabel = 'New';
+            break;
+    }
     flash('success', 'Follow-up status updated to ' . $statusLabel . '.');
     redirect('/admin/newcomers' . ($statusFilter !== '' ? '?status=' . rawurlencode($statusFilter) : ''));
 }
