@@ -86,12 +86,47 @@ $metaDescription = 'Advertise on our website and Mobile App. Place video or imag
           </div>
 
           <div>
-            <label for="duration_days" style="display:block; margin-bottom:6px; font-weight:600; font-size:14px;">Ad Display Duration *</label>
-            <select id="duration_days" name="duration_days" required style="width:100%; padding:10px 12px; border-radius:6px; border:1px solid var(--border); background:var(--bg-input, #1e1b2e); color:inherit;">
+            <label for="duration_id" style="display:block; margin-bottom:6px; font-weight:600; font-size:14px;">Ad Display Duration Package *</label>
+            <select id="duration_id" name="duration_id" required onchange="updatePaymentOptions()" style="width:100%; padding:10px 12px; border-radius:6px; border:1px solid var(--border); background:var(--bg-input, #1e1b2e); color:inherit;">
               <?php foreach ($durations as $d): ?>
-                <option value="<?= (int) $d['days'] ?>" <?= (int) formOld('duration_days') === (int) $d['days'] ? 'selected' : '' ?>><?= e($d['title']) ?> (<?= (int) $d['days'] ?> Days)</option>
+                <option value="<?= (int) $d['id'] ?>" data-free="<?= (int) $d['is_free'] ?>" data-price="<?= (float) $d['price'] ?>" <?= (int) formOld('duration_id') === (int) $d['id'] ? 'selected' : '' ?>>
+                  <?= e($d['title']) ?> (<?= (int) $d['days'] ?> Days) — <?= $d['is_free'] ? 'FREE' : '₦' . number_format((float) $d['price'], 2) ?>
+                </option>
               <?php endforeach; ?>
             </select>
+          </div>
+        </div>
+
+        <div id="payment_section" style="margin-top:20px; padding:18px; border-radius:8px; background:rgba(255,255,255,0.03); border:1px solid var(--border);">
+          <h4 style="margin-top:0; margin-bottom:12px; font-size:16px;">Payment Selection</h4>
+          <div id="free_notice" style="display:none; color:#34d399; font-weight:600; font-size:14px;">
+            🎉 This package is FREE! No payment required.
+          </div>
+          <div id="paid_options" style="display:none;">
+            <label style="display:block; margin-bottom:8px; font-weight:600; font-size:14px;">Choose Payment Method *</label>
+            <div style="display:flex; flex-direction:column; gap:10px;">
+              <?php if (setting('payhub_enabled')): ?>
+                <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                  <input type="radio" name="payment_method" value="online" checked onclick="togglePaymentMethod('online')"> 💳 Pay Online via Payhub (Instant Gateway)
+                </label>
+              <?php endif; ?>
+              <?php if (setting('manual_payment_enabled', 1)): ?>
+                <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                  <input type="radio" name="payment_method" value="manual" <?= !setting('payhub_enabled') ? 'checked' : '' ?> onclick="togglePaymentMethod('manual')"> 🏦 Manual Bank Transfer
+                </label>
+              <?php endif; ?>
+            </div>
+
+            <?php if (setting('manual_payment_enabled', 1)): ?>
+              <div id="manual_details" style="margin-top:16px; padding:12px; border-radius:6px; background:rgba(0,0,0,0.2); font-size:13px; line-height:1.6; display:none;">
+                <strong>Bank Transfer Details:</strong><br>
+                <?= nl2br(e((string) setting('manual_payment_instructions', 'Contact admin for payment details.'))) ?>
+                <div style="margin-top:12px;">
+                  <label for="payment_proof" style="display:block; margin-bottom:4px; font-weight:600;">Upload Bank Transfer Receipt / Proof *</label>
+                  <input type="file" id="payment_proof" name="payment_proof" accept="image/*,application/pdf" style="width:100%; padding:8px; border-radius:4px; border:1px solid var(--border); background:var(--bg-input, rgba(255,255,255,0.05)); color:inherit;">
+                </div>
+              </div>
+            <?php endif; ?>
           </div>
         </div>
 
@@ -134,4 +169,28 @@ function toggleMediaType(type) {
     fileInput.accept = 'image/*';
   }
 }
+
+function updatePaymentOptions() {
+  var sel = document.getElementById('duration_id');
+  var opt = sel.options[sel.selectedIndex];
+  if (!opt) return;
+  var isFree = opt.getAttribute('data-free') === '1';
+  document.getElementById('free_notice').style.display = isFree ? 'block' : 'none';
+  document.getElementById('paid_options').style.display = isFree ? 'none' : 'block';
+  if (!isFree) {
+    var manualRadio = document.querySelector('input[name="payment_method"][value="manual"]');
+    var onlineRadio = document.querySelector('input[name="payment_method"][value="online"]');
+    if (onlineRadio && onlineRadio.checked) togglePaymentMethod('online');
+    else if (manualRadio) togglePaymentMethod('manual');
+  }
+}
+
+function togglePaymentMethod(method) {
+  var manualDetails = document.getElementById('manual_details');
+  if (manualDetails) {
+    manualDetails.style.display = method === 'manual' ? 'block' : 'none';
+  }
+}
+
+document.addEventListener('DOMContentLoaded', updatePaymentOptions);
 </script>

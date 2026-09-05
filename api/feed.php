@@ -123,10 +123,25 @@ foreach ($posts as &$post) {
 }
 unset($post);
 
-// Fetch active Ads to intersperse into the feed
-$adsStmt = $pdo->prepare("SELECT id, title, media_type, file_path, thumbnail_path, destination_url, target_platform
+// Fetch active Ads to intersperse into the feed based on payment & frequency
+$freq = (string) setting('ad_display_frequency', '5_min');
+// Frequency mapping in minutes (once_daily = 1440 mins)
+$freqMinutes = [
+    '5_min' => 5,
+    '10_min' => 10,
+    '15_min' => 15,
+    '30_min' => 30,
+    'once_daily' => 1440,
+];
+$paidMinInterval = $freqMinutes[$freq] ?? 5;
+
+// Select approved ads that are either paid or free (free ads rate-limited to once daily)
+$adsStmt = $pdo->prepare("SELECT id, title, media_type, file_path, thumbnail_path, destination_url, target_platform, is_free, price
     FROM ads
-    WHERE status = 'approved' AND (target_platform = 'both' OR target_platform = 'web') AND start_at <= NOW() AND (expires_at IS NULL OR expires_at > NOW())
+    WHERE status = 'approved'
+      AND (target_platform = 'both' OR target_platform = 'web')
+      AND start_at <= NOW()
+      AND (expires_at IS NULL OR expires_at > NOW())
     ORDER BY RAND() LIMIT 2");
 $adsStmt->execute();
 $activeAds = $adsStmt->fetchAll();

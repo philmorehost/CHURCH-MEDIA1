@@ -622,26 +622,30 @@ class Database
                 self::addColumnIfMissing($pdo, 'pending_registrations', 'created_email', 'VARCHAR(190) NULL', 'email_created');
             },
             '2026_08_advertising_system' => function (PDO $pdo): void {
-                // Ad duration presets managed by super admin (e.g. 7 days, 14 days, 30 days)
+                // Ad duration presets managed by super admin
                 $pdo->exec("CREATE TABLE IF NOT EXISTS `ad_durations` (
                     `id` INT AUTO_INCREMENT PRIMARY KEY,
                     `title` VARCHAR(100) NOT NULL,
                     `days` INT NOT NULL,
+                    `price` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+                    `is_free` TINYINT(1) NOT NULL DEFAULT 0,
                     `is_active` TINYINT(1) NOT NULL DEFAULT 1,
                     `sort_order` INT NOT NULL DEFAULT 0,
                     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+                self::addColumnIfMissing($pdo, 'ad_durations', 'price', 'DECIMAL(10,2) NOT NULL DEFAULT 0.00', 'days');
+                self::addColumnIfMissing($pdo, 'ad_durations', 'is_free', 'TINYINT(1) NOT NULL DEFAULT 0', 'price');
 
                 // Seed default ad durations if empty
                 if ((int) $pdo->query('SELECT COUNT(*) FROM ad_durations')->fetchColumn() === 0) {
-                    $pdo->exec("INSERT INTO ad_durations (title, days, sort_order) VALUES
-                        ('7 Days', 7, 1),
-                        ('14 Days', 14, 2),
-                        ('30 Days', 30, 3),
-                        ('60 Days', 60, 4)");
+                    $pdo->exec("INSERT INTO ad_durations (title, days, price, is_free, sort_order) VALUES
+                        ('Free Trial (7 Days)', 7, 0.00, 1, 1),
+                        ('7 Days Premium', 7, 5000.00, 0, 2),
+                        ('14 Days Premium', 14, 9000.00, 0, 3),
+                        ('30 Days Premium', 30, 15000.00, 0, 4)");
                 }
 
-                // Ad publishers (advertisers) who get access via unique tokens
+                // Ad publishers (advertisers)
                 $pdo->exec("CREATE TABLE IF NOT EXISTS `ad_publishers` (
                     `id` INT AUTO_INCREMENT PRIMARY KEY,
                     `name` VARCHAR(150) NOT NULL,
@@ -654,7 +658,7 @@ class Database
                 self::addColumnIfMissing($pdo, 'ad_publishers', 'phone', 'VARCHAR(45) NULL', 'email');
                 self::addColumnIfMissing($pdo, 'ad_publishers', 'token', 'VARCHAR(64) NULL', 'phone');
 
-                // Advertisements table
+                // Advertisements table with payment tracking
                 $pdo->exec("CREATE TABLE IF NOT EXISTS `ads` (
                     `id` INT AUTO_INCREMENT PRIMARY KEY,
                     `publisher_id` INT NOT NULL,
@@ -665,6 +669,12 @@ class Database
                     `destination_url` VARCHAR(500) NULL,
                     `target_platform` ENUM('web','app','both') NOT NULL DEFAULT 'both',
                     `duration_days` INT NOT NULL,
+                    `price` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+                    `is_free` TINYINT(1) NOT NULL DEFAULT 0,
+                    `payment_status` ENUM('unpaid','pending_review','paid') NOT NULL DEFAULT 'unpaid',
+                    `payment_method` ENUM('online','manual','free') NOT NULL DEFAULT 'free',
+                    `payment_proof_path` VARCHAR(255) NULL,
+                    `payment_reference` VARCHAR(100) NULL,
                     `status` ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
                     `start_at` DATETIME NULL,
                     `expires_at` DATETIME NULL,
@@ -675,8 +685,14 @@ class Database
                     FOREIGN KEY (`publisher_id`) REFERENCES `ad_publishers`(`id`) ON DELETE CASCADE,
                     INDEX `idx_ad_status_expires` (`status`, `start_at`, `expires_at`, `target_platform`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+                self::addColumnIfMissing($pdo, 'ads', 'price', 'DECIMAL(10,2) NOT NULL DEFAULT 0.00', 'duration_days');
+                self::addColumnIfMissing($pdo, 'ads', 'is_free', 'TINYINT(1) NOT NULL DEFAULT 0', 'price');
+                self::addColumnIfMissing($pdo, 'ads', 'payment_status', "ENUM('unpaid','pending_review','paid') NOT NULL DEFAULT 'unpaid'", 'is_free');
+                self::addColumnIfMissing($pdo, 'ads', 'payment_method', "ENUM('online','manual','free') NOT NULL DEFAULT 'free'", 'payment_status');
+                self::addColumnIfMissing($pdo, 'ads', 'payment_proof_path', 'VARCHAR(255) NULL', 'payment_method');
+                self::addColumnIfMissing($pdo, 'ads', 'payment_reference', 'VARCHAR(100) NULL', 'payment_proof_path');
 
-                // Detailed ad interaction logs for advanced analytics
+                // Ad interaction logs
                 $pdo->exec("CREATE TABLE IF NOT EXISTS `ad_events` (
                     `id` INT AUTO_INCREMENT PRIMARY KEY,
                     `ad_id` INT NOT NULL,
@@ -688,6 +704,31 @@ class Database
                     FOREIGN KEY (`ad_id`) REFERENCES `ads`(`id`) ON DELETE CASCADE,
                     INDEX `idx_ad_event_time` (`ad_id`, `event_type`, `created_at`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                // Transaction history table for ad payments
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `ad_payments` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `ad_id` INT NOT NULL,
+                    `publisher_id` INT NOT NULL,
+                    `amount` DECIMAL(10,2) NOT NULL,
+                    `payment_method` ENUM('online','manual','free') NOT NULL,
+                    `reference` VARCHAR(100) NOT NULL,
+                    `status` ENUM('pending','success','failed') NOT NULL DEFAULT 'pending',
+                    `proof_path` VARCHAR(255) NULL,
+                    `gateway_response` TEXT NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (`ad_id`) REFERENCES `ads`(`id`) ON DELETE CASCADE,
+                    FOREIGN KEY (`publisher_id`) REFERENCES `ad_publishers`(`id`) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                // Settings for Payhub, Manual Payment & Ad Display Frequencies
+                self::addColumnIfMissing($pdo, 'settings', 'payhub_enabled', 'TINYINT(1) NOT NULL DEFAULT 0', 'app_redirect_mode');
+                self::addColumnIfMissing($pdo, 'settings', 'payhub_public_key', 'VARCHAR(255) NULL', 'payhub_enabled');
+                self::addColumnIfMissing($pdo, 'settings', 'payhub_secret_key', 'VARCHAR(255) NULL', 'payhub_public_key');
+                self::addColumnIfMissing($pdo, 'settings', 'manual_payment_enabled', 'TINYINT(1) NOT NULL DEFAULT 1', 'payhub_secret_key');
+                self::addColumnIfMissing($pdo, 'settings', 'manual_payment_instructions', 'TEXT NULL', 'manual_payment_enabled');
+                self::addColumnIfMissing($pdo, 'settings', 'ad_display_frequency', "VARCHAR(20) NOT NULL DEFAULT '5_min'", 'manual_payment_instructions');
+                self::addColumnIfMissing($pdo, 'settings', 'free_ad_frequency', "VARCHAR(20) NOT NULL DEFAULT 'once_daily'", 'ad_display_frequency');
             },
         ];
     }

@@ -44,6 +44,52 @@ foreach ($ids as $id) {
 }
 
 $stillQueued = count($ids) - $converted - $failed - $skipped;
+
+// Send Daily Ad Performance Email to Publishers (Runs once per day at 8 AM)
+$todayStampFile = STORAGE_PATH . '/cache/daily_ad_stats_' . date('Y-m-d') . '.flag';
+if (!is_file($todayStampFile) && (int) date('H') >= 8) {
+    @file_put_contents($todayStampFile, date('c'));
+    $publishersStmt = $pdo->query('SELECT p.id, p.name, p.email, p.token FROM ad_publishers p JOIN ads a ON a.publisher_id = p.id WHERE a.status = "approved" GROUP BY p.id');
+    $publishers = $publishersStmt->fetchAll();
+
+    foreach ($publishers as $pub) {
+        $adsStmt = $pdo->prepare('SELECT id, title, views_count, clicks_count, status, start_at, expires_at FROM ads WHERE publisher_id = ? AND status = "approved"');
+        $adsStmt->execute([(int) $pub['id']]);
+        $pubAds = $adsStmt->fetchAll();
+
+        if ($pubAds) {
+            $adListHtml = "";
+            $totalV = 0;
+            $totalC = 0;
+            foreach ($pubAds as $pa) {
+                $v = (int) $pa['views_count'];
+                $c = (int) $pa['clicks_count'];
+                $totalV += $v;
+                $totalC += $c;
+                $ctr = $v > 0 ? round(($c / $v) * 100, 2) : 0.0;
+                $adListHtml .= "- \"{$pa['title']}\": {$v} Views, {$c} Clicks (CTR: {$ctr}%)\n";
+            }
+            $overallCtr = $totalV > 0 ? round(($totalC / $totalV) * 100, 2) : 0.0;
+            $managerUrl = baseUrl('ad-manager?token=' . rawurlencode($pub['token']));
+
+            $body = "Hi {$pub['name']},\n\n" .
+                "Here is your daily advertisement performance summary for " . date('F j, Y') . ":\n\n" .
+                "Total Views: {$totalV}\n" .
+                "Total Clicks: {$totalC}\n" .
+                "Average CTR: {$overallCtr}%\n\n" .
+                "Campaign Breakdown:\n" .
+                $adListHtml . "\n" .
+                "View detailed analytics or create new ads in your Publisher Portal:\n" .
+                "{$managerUrl}\n\n" .
+                "Best regards,\n" . setting('site_title');
+
+            try {
+                Mailer::send($pub['email'], 'Your Daily Advert Performance Report · ' . setting('site_title'), $body);
+            } catch (Throwable $e) {}
+        }
+    }
+}
+
 $line = sprintf(
     "[%s] media_worker: %d converted, %d failed, %d skipped, %d still queued\n",
     date('Y-m-d H:i:s'),

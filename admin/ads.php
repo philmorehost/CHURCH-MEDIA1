@@ -9,26 +9,44 @@ $action = $_GET['action'] ?? 'list';
 $id = (int) ($_GET['id'] ?? 0);
 $errors = [];
 
-// Manage Durations
-if ($action === 'durations') {
+// Manage Settings & Durations (Super Admin)
+if ($action === 'settings' || $action === 'durations') {
     if (!Auth::isSuperAdmin()) {
         http_response_code(403);
-        exit('Only super admin can manage duration options.');
+        exit('Only super admin can manage ad settings.');
+    }
+
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_settings'])) {
+        Csrf::requireValid();
+        $payhubEnabled = isset($_POST['payhub_enabled']) ? 1 : 0;
+        $payhubPub = trim((string) ($_POST['payhub_public_key'] ?? ''));
+        $payhubSec = trim((string) ($_POST['payhub_secret_key'] ?? ''));
+        $manualEnabled = isset($_POST['manual_payment_enabled']) ? 1 : 0;
+        $manualInstructions = trim((string) ($_POST['manual_payment_instructions'] ?? ''));
+        $freq = in_array($_POST['ad_display_frequency'] ?? '', ['5_min', '10_min', '15_min', '30_min', 'once_daily'], true) ? $_POST['ad_display_frequency'] : '5_min';
+
+        $pdo->prepare('UPDATE settings SET payhub_enabled = ?, payhub_public_key = ?, payhub_secret_key = ?, manual_payment_enabled = ?, manual_payment_instructions = ?, ad_display_frequency = ? WHERE id = (SELECT id FROM (SELECT id FROM settings LIMIT 1) t)')
+            ->execute([$payhubEnabled, $payhubPub, $payhubSec, $manualEnabled, $manualInstructions, $freq]);
+
+        flash('success', 'Ad settings updated successfully.');
+        redirect('/admin/ads?action=settings');
     }
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_duration'])) {
         Csrf::requireValid();
         $title = trim((string) ($_POST['title'] ?? ''));
         $days = (int) ($_POST['days'] ?? 0);
+        $price = (float) ($_POST['price'] ?? 0.00);
+        $isFree = isset($_POST['is_free']) ? 1 : 0;
         $sortOrder = (int) ($_POST['sort_order'] ?? 0);
 
         if ($title === '' || $days <= 0) {
             $errors[] = 'Please enter a valid title and number of days.';
         } else {
-            $stmt = $pdo->prepare('INSERT INTO ad_durations (title, days, sort_order) VALUES (?, ?, ?)');
-            $stmt->execute([$title, $days, $sortOrder]);
+            $stmt = $pdo->prepare('INSERT INTO ad_durations (title, days, price, is_free, sort_order) VALUES (?, ?, ?, ?, ?)');
+            $stmt->execute([$title, $days, $isFree ? 0.00 : $price, $isFree, $sortOrder]);
             flash('success', 'Duration option added.');
-            redirect('/admin/ads?action=durations');
+            redirect('/admin/ads?action=settings');
         }
     }
 
@@ -37,10 +55,18 @@ if ($action === 'durations') {
         $durId = (int) ($_POST['duration_id'] ?? 0);
         $pdo->prepare('DELETE FROM ad_durations WHERE id = ?')->execute([$durId]);
         flash('success', 'Duration option deleted.');
-        redirect('/admin/ads?action=durations');
+        redirect('/admin/ads?action=settings');
     }
 
     $durations = $pdo->query('SELECT * FROM ad_durations ORDER BY sort_order ASC, days ASC')->fetchAll();
+}
+
+// Mark Payment as Paid (Super Admin manual review)
+if ($action === 'mark_paid' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    Csrf::requireValid();
+    $pdo->prepare('UPDATE ads SET payment_status = "paid" WHERE id = ?')->execute([$id]);
+    flash('success', 'Payment status updated to Paid.');
+    redirect('/admin/ads');
 }
 
 // Approve Ad
@@ -55,7 +81,8 @@ if ($action === 'approve' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $startAt = date('Y-m-d H:i:s');
         $expiresAt = date('Y-m-d H:i:s', strtotime("+{$days} days"));
 
-        $pdo->prepare('UPDATE ads SET status = "approved", start_at = ?, expires_at = ? WHERE id = ?')
+        // If manual/unpaid, approving also sets payment_status to paid if not rejected
+        $pdo->prepare('UPDATE ads SET status = "approved", payment_status = "paid", start_at = ?, expires_at = ? WHERE id = ?')
             ->execute([$startAt, $expiresAt, $id]);
 
         $managerUrl = baseUrl('ad-manager?token=' . rawurlencode($ad['pub_token']));
@@ -111,7 +138,7 @@ if ($action === 'delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // List Ads
 $statusFilter = $_GET['status'] ?? 'all';
-$sql = 'SELECT a.*, p.name AS pub_name, p.email AS pub_email, p.token AS pub_token FROM ads a JOIN ad_publishers p ON a.publisher_id = p.id';
+$sql = 'SELECT a.*, p.name AS pub_name, p.email AS pub_email, p.phone AS pub_phone, p.token AS pub_token FROM ads a JOIN ad_publishers p ON a.publisher_id = p.id';
 $params = [];
 if (in_array($statusFilter, ['pending', 'approved', 'rejected'], true)) {
     $sql .= ' WHERE a.status = ?';
@@ -130,19 +157,67 @@ require __DIR__ . '/partials/layout-open.php';
 
 <?php foreach ($errors as $error): ?><div class="alert error"><?= e($error) ?></div><?php endforeach; ?>
 
-<?php if ($action === 'durations'): ?>
+<?php if ($action === 'settings' || $action === 'durations'): ?>
   <div class="btn-row" style="margin-bottom:16px;">
     <a class="btn secondary sm" href="/admin/ads">← Back to Ads</a>
   </div>
 
-  <div class="card" style="max-width:600px; margin-bottom:24px;">
-    <h2>Add Duration Option</h2>
-    <form method="post" action="/admin/ads?action=durations">
+  <div class="card" style="margin-bottom:24px;">
+    <h2>Ad Gateway &amp; Display Frequency Settings</h2>
+    <form method="post" action="/admin/ads?action=settings">
+      <?= Csrf::field() ?>
+      <input type="hidden" name="save_settings" value="1">
+
+      <h3 style="margin-top:0;">💳 Payhub Payment Gateway (Online Payments)</h3>
+      <p class="sub">Payhub integration allows publishers to pay online for ad packages. Get your API keys at <a href="https://merchant.payhub.com.ng" target="_blank">merchant.payhub.com.ng</a>.</p>
+
+      <div class="checkbox-row" style="margin-bottom:12px;">
+        <input type="checkbox" id="payhub_enabled" name="payhub_enabled" <?= !empty(setting('payhub_enabled')) ? 'checked' : '' ?>>
+        <label for="payhub_enabled" style="margin:0;">Enable Payhub Online Payments</label>
+      </div>
+
+      <div class="row two">
+        <div>
+          <label for="payhub_public_key">Payhub Public Key</label>
+          <input type="text" id="payhub_public_key" name="payhub_public_key" value="<?= e((string) setting('payhub_public_key')) ?>" placeholder="YOUR_PUBLIC_KEY">
+        </div>
+        <div>
+          <label for="payhub_secret_key">Payhub Secret Key</label>
+          <input type="password" id="payhub_secret_key" name="payhub_secret_key" value="<?= e((string) setting('payhub_secret_key')) ?>" placeholder="sk_live_xxxx">
+        </div>
+      </div>
+
+      <h3 style="margin-top:20px;">🏦 Manual Bank Transfer Payment Method</h3>
+      <p class="sub">Allow advertisers to pay via bank transfer and upload proof of payment for review.</p>
+      <div class="checkbox-row" style="margin-bottom:12px;">
+        <input type="checkbox" id="manual_payment_enabled" name="manual_payment_enabled" <?= !empty(setting('manual_payment_enabled', 1)) ? 'checked' : '' ?>>
+        <label for="manual_payment_enabled" style="margin:0;">Enable Manual Payment Method</label>
+      </div>
+      <label for="manual_payment_instructions">Bank Account Details &amp; Payment Instructions</label>
+      <textarea id="manual_payment_instructions" name="manual_payment_instructions" rows="3" placeholder="Bank Name: GTBank&#10;Account Name: Grace & Life Church&#10;Account Number: 0123456789"><?= e((string) setting('manual_payment_instructions')) ?></textarea>
+
+      <h3 style="margin-top:20px;">⏱ Paid Ads Display Frequency</h3>
+      <p class="sub">How often active paid ads surface in the public media feed / mobile app (Free ads display once per day by default).</p>
+      <select id="ad_display_frequency" name="ad_display_frequency">
+        <option value="5_min" <?= setting('ad_display_frequency') === '5_min' ? 'selected' : '' ?>>Every 5 Minutes (Default for Paid Ads)</option>
+        <option value="10_min" <?= setting('ad_display_frequency') === '10_min' ? 'selected' : '' ?>>Every 10 Minutes</option>
+        <option value="15_min" <?= setting('ad_display_frequency') === '15_min' ? 'selected' : '' ?>>Every 15 Minutes</option>
+        <option value="30_min" <?= setting('ad_display_frequency') === '30_min' ? 'selected' : '' ?>>Every 30 Minutes</option>
+        <option value="once_daily" <?= setting('ad_display_frequency') === 'once_daily' ? 'selected' : '' ?>>Once Daily</option>
+      </select>
+
+      <button type="submit" class="btn" style="margin-top:16px;">Save Gateway &amp; Frequency Settings</button>
+    </form>
+  </div>
+
+  <div class="card" style="max-width:700px; margin-bottom:24px;">
+    <h2>Add Ad Package / Duration</h2>
+    <form method="post" action="/admin/ads?action=settings">
       <?= Csrf::field() ?>
       <input type="hidden" name="add_duration" value="1">
       <div class="row two">
         <div>
-          <label for="title">Title (e.g. 14 Days)</label>
+          <label for="title">Title (e.g. 14 Days Premium)</label>
           <input type="text" id="title" name="title" required placeholder="e.g. 14 Days Special">
         </div>
         <div>
@@ -150,23 +225,37 @@ require __DIR__ . '/partials/layout-open.php';
           <input type="number" id="days" name="days" min="1" required placeholder="14">
         </div>
       </div>
-      <label for="sort_order">Sort Order</label>
-      <input type="number" id="sort_order" name="sort_order" value="0">
-      <button type="submit" class="btn" style="margin-top:12px;">Add Duration</button>
+      <div class="row two" style="margin-top:10px;">
+        <div>
+          <label for="price">Price (₦) *</label>
+          <input type="number" step="0.01" id="price" name="price" value="0.00" placeholder="5000">
+        </div>
+        <div>
+          <label for="sort_order">Sort Order</label>
+          <input type="number" id="sort_order" name="sort_order" value="0">
+        </div>
+      </div>
+      <div class="checkbox-row" style="margin-top:10px;">
+        <input type="checkbox" id="is_free" name="is_free">
+        <label for="is_free" style="margin:0;">Mark as FREE package (no payment required)</label>
+      </div>
+      <button type="submit" class="btn" style="margin-top:14px;">Add Package</button>
     </form>
   </div>
 
   <div class="card">
-    <h2>Active Duration Options</h2>
+    <h2>Configured Ad Packages</h2>
     <table>
-      <tr><th>Title</th><th>Days</th><th>Sort Order</th><th></th></tr>
+      <tr><th>Title</th><th>Days</th><th>Price</th><th>Type</th><th>Sort Order</th><th></th></tr>
       <?php foreach ($durations as $d): ?>
         <tr>
           <td><strong><?= e($d['title']) ?></strong></td>
           <td><?= (int) $d['days'] ?> days</td>
+          <td><?= $d['is_free'] ? 'FREE' : '₦' . number_format((float) $d['price'], 2) ?></td>
+          <td><?= $d['is_free'] ? '<span class="badge ok">Free</span>' : '<span class="badge info">Paid</span>' ?></td>
           <td><?= (int) $d['sort_order'] ?></td>
           <td>
-            <form method="post" action="/admin/ads?action=durations" onsubmit="return confirm('Delete this duration?');" style="display:inline;">
+            <form method="post" action="/admin/ads?action=settings" onsubmit="return confirm('Delete this duration?');" style="display:inline;">
               <?= Csrf::field() ?>
               <input type="hidden" name="delete_duration" value="1">
               <input type="hidden" name="duration_id" value="<?= (int) $d['id'] ?>">
@@ -187,7 +276,7 @@ require __DIR__ . '/partials/layout-open.php';
       <a class="btn secondary sm <?= $statusFilter === 'rejected' ? 'active' : '' ?>" href="/admin/ads?status=rejected">Rejected</a>
     </div>
     <?php if (Auth::isSuperAdmin()): ?>
-      <a class="btn secondary sm" href="/admin/ads?action=durations">⚙ Manage Display Durations</a>
+      <a class="btn secondary sm" href="/admin/ads?action=settings">⚙ Manage Settings &amp; Packages</a>
     <?php endif; ?>
   </div>
 
@@ -199,7 +288,7 @@ require __DIR__ . '/partials/layout-open.php';
         <tr>
           <th>Ad / Media</th>
           <th>Publisher</th>
-          <th>Target / Duration</th>
+          <th>Package / Payment</th>
           <th>Stats</th>
           <th>Status</th>
           <th>Actions</th>
@@ -239,7 +328,24 @@ require __DIR__ . '/partials/layout-open.php';
 
             <td>
               <span class="badge ok"><?= e(strtoupper($ad['target_platform'])) ?></span><br>
-              <small style="color:var(--ink-dim);"><?= (int) $ad['duration_days'] ?> Days Duration</small>
+              <small style="color:var(--ink-dim);"><?= (int) $ad['duration_days'] ?> Days (<?= $ad['is_free'] ? 'FREE' : '₦' . number_format((float) $ad['price'], 2) ?>)</small><br>
+
+              <?php if ($ad['is_free']): ?>
+                <span class="badge ok" style="font-size:10px;">Free Package</span>
+              <?php else: ?>
+                <?php if ($ad['payment_status'] === 'paid'): ?>
+                  <span class="badge ok" style="font-size:10px;">Paid (<?= e(ucfirst((string)$ad['payment_method'])) ?>)</span>
+                <?php elseif ($ad['payment_status'] === 'pending_review'): ?>
+                  <span class="badge warn" style="font-size:10px;">Payment Review</span>
+                <?php else: ?>
+                  <span class="badge fail" style="font-size:10px;">Unpaid</span>
+                <?php endif; ?>
+              <?php endif; ?>
+
+              <?php if (!empty($ad['payment_proof_path'])): ?>
+                <br><a href="<?= e(uploadUrl($ad['payment_proof_path'])) ?>" target="_blank" style="font-size:11px; color:var(--gold-soft);">🖼 View Receipt</a>
+              <?php endif; ?>
+
               <?php if ($ad['start_at'] && $ad['expires_at']): ?>
                 <br><small style="font-size:11px; color:var(--ink-faint);">Live: <?= e(date('M j', strtotime($ad['start_at']))) ?> – <?= e(date('M j, Y', strtotime($ad['expires_at']))) ?></small>
               <?php endif; ?>
@@ -265,6 +371,13 @@ require __DIR__ . '/partials/layout-open.php';
             </td>
 
             <td style="white-space:nowrap;">
+              <?php if ($ad['payment_status'] !== 'paid' && !$ad['is_free']): ?>
+                <form method="post" action="/admin/ads?action=mark_paid&id=<?= (int) $ad['id'] ?>" style="display:inline;">
+                  <?= Csrf::field() ?>
+                  <button type="submit" class="btn sm secondary" onclick="return confirm('Mark payment as Paid?');">Mark Paid</button>
+                </form>
+              <?php endif; ?>
+
               <?php if ($ad['status'] === 'pending'): ?>
                 <form method="post" action="/admin/ads?action=approve&id=<?= (int) $ad['id'] ?>" style="display:inline;">
                   <?= Csrf::field() ?>
