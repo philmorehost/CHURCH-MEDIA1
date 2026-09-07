@@ -28,6 +28,7 @@ require __DIR__ . '/partials/layout-open.php';
   <div class="guide-toc">
     <a href="#roles">Roles &amp; Permissions</a>
     <a href="#dashboard">Dashboard</a>
+    <a href="#ads">Ads Management</a>
     <a href="#media">Media &amp; Reels</a>
     <a href="#pinned">Pinned Reels</a>
     <a href="#comments">Comments</a>
@@ -68,6 +69,18 @@ require __DIR__ . '/partials/layout-open.php';
     <h2 id="dashboard">Dashboard (<code>/admin</code>)</h2>
     <p>Your landing page. It shows your church's key numbers (media posts, upcoming events, sermons, new prayer requests, newsletter subscribers, blocked IPs) and your latest posts. It also shows <strong>📍 My Unit</strong> so you always know which church you're managing, plus any <strong>🔔 Notifications</strong> sent to your church.</p>
     <p>With the growth tools enabled you'll also see a <strong>Newcomers (7 days)</strong> stat and a <strong>Recent Newcomers</strong> card with tap-to-chat WhatsApp links and follow-up status badges — so the follow-up queue is visible the moment you log in.</p>
+  </div>
+
+  <div class="card" style="margin-bottom:18px;">
+    <h2 id="ads">Ads Management (<code>/admin/ads</code>) <span class="pill super">SUPER</span></h2>
+    <p>Monetize and manage vertical 9:16 display advertisements for the website and Mobile App.</p>
+    <ul>
+      <li><strong>Ad Gateway Settings:</strong> Configure Payhub Online Gateway keys (`payhub_public_key`, `payhub_secret_key`) and Manual Bank Transfer details for advertiser checkout.</li>
+      <li><strong>Packages &amp; Pricing:</strong> Create and edit ad duration packages with custom pricing and display frequencies (every 5m, 10m, 15m, 30m, once daily). Free packages default to once daily.</li>
+      <li><strong>Review &amp; Approval:</strong> Review advertiser submissions, view uploaded bank transfer receipts, and approve/reject campaigns.</li>
+      <li><strong>Publisher Ad Manager Portal:</strong> Approved publishers receive a secure link via email to track their ad impressions, clicks, CTR, and create additional ads.</li>
+      <li><strong>Daily Performance Emails:</strong> Publishers automatically receive daily summary report emails of their ad statistics.</li>
+    </ul>
   </div>
 
   <div class="card" style="margin-bottom:18px;">
@@ -186,6 +199,7 @@ require __DIR__ . '/partials/layout-open.php';
     <p>Manage the <strong>Province → Zone → Area → Parish</strong> hierarchy. Create parishes/zones/areas/provinces, and each one gets its own public directory page and media roll-up. Super-admin only.</p>
     <ul>
       <li><strong>⬆ Import Churches (CSV)</strong> — bulk-add the whole hierarchy from a CSV with columns <code>Province, Zone, Area, Parish</code> (one church per row; Parish optional). Use the <strong>⬇ Download sample CSV</strong> template so you get the exact format, then fill it in. Names are stored in <strong>CAPS</strong> and existing units are matched automatically, so there are no duplicates.</li>
+      <li><strong>⬇ Export Units (CSV)</strong> — download a complete CSV list of all church units, hierarchies, and parent links (available to Super Admin and Church Admins scoped to their units).</li>
       <li><strong>🏷 Name Corrections</strong> — review church name corrections flagged from the registration page. <em>Approve</em> automatically renames the church to the suggested spelling; <em>Reject</em> makes no changes.</li>
     </ul>
   </div>
@@ -205,7 +219,7 @@ require __DIR__ . '/partials/layout-open.php';
 
   <div class="card" style="margin-bottom:18px;">
     <h2 id="settings">Settings (<code>/admin/settings</code>) <span class="pill super">SUPER</span></h2>
-    <p>Site-wide configuration — name, tagline, hero content, contact details, social links, live stream link, giving URL, footer &amp; SEO, Bible source, and <strong>Email (SMTP)</strong> settings used for all outgoing mail (newsletters, notifications, security alerts).</p>
+    <p>Site-wide configuration — name, tagline, hero content, contact details (supports multiple comma/newline-separated phone numbers), social links, live stream link, giving URL, footer &amp; SEO, Bible source, and <strong>Email (SMTP)</strong> settings used for all outgoing mail (newsletters, notifications, security alerts).</p>
     <p>It also includes the <strong>Mobile App Download Button</strong> — enable it, paste your Google Play link, and choose whether it shows on <code>all</code> pages or only selected ones (e.g. <code>/, /feed, /events</code>). A floating “Get it on Google Play” button then appears on the left edge of the public site.</p>
     <p><strong>Admin &amp; App Only Mode</strong> (same card): optionally nudge <strong>Android phone</strong> visitors to the app to boost adoption. Choose <em>Off</em> (default), a small <em>dismissible banner</em> (light touch), a <em>“Get the App” landing page</em> (with a “Continue to website” link), or <em>Force</em> (send straight to the Play link). iPhone and desktop visitors always keep the website, and search engines are never redirected — so SEO is unaffected.</p>
     <p>The <strong>Video Conversion (Cron Job)</strong> card explains how to keep the 9:16 video conversion running automatically on your server. Super-admin only.</p>
