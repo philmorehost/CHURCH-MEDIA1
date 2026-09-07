@@ -90,6 +90,11 @@ class Database
                     return false;
                 }
             }
+            // Check that at least one admin/user exists to consider it a fully initialized existing install
+            $stmt = $pdo->query('SELECT COUNT(*) FROM users');
+            if ((int) $stmt->fetchColumn() === 0) {
+                return false;
+            }
             return true;
         } catch (Throwable $e) {
             return false;
