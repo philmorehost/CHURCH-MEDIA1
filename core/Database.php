@@ -622,6 +622,7 @@ class Database
                 self::addColumnIfMissing($pdo, 'pending_registrations', 'created_email', 'VARCHAR(190) NULL', 'email_created');
             },
             '2026_08_security_restore' => function (PDO $pdo): void {
+                self::addColumnIfMissing($pdo, 'users', 'alt_email', 'VARCHAR(190) NULL', 'email');
                 self::addColumnIfMissing($pdo, 'users', 'unblock_pin_hash', 'VARCHAR(255) NULL', 'password');
                 self::addColumnIfMissing($pdo, 'users', 'reset_otp', 'VARCHAR(10) NULL', 'unblock_pin_hash');
                 self::addColumnIfMissing($pdo, 'users', 'reset_otp_expires_at', 'DATETIME NULL', 'reset_otp');

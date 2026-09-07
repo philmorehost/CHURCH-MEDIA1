@@ -15,8 +15,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $errors[] = 'Please enter your username or email address.';
         } else {
             $pdo = Database::getInstance()->getConnection();
-            $stmt = $pdo->prepare('SELECT * FROM users WHERE username = ? OR email = ? OR alt_email = ? LIMIT 1');
-            $stmt->execute([$usernameOrEmail, $usernameOrEmail, $usernameOrEmail]);
+            // Check if alt_email column exists before using it in WHERE clause
+            $hasAltEmail = (int) $pdo->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'alt_email'")->fetchColumn() > 0;
+            $sql = 'SELECT * FROM users WHERE username = ? OR email = ?';
+            $params = [$usernameOrEmail, $usernameOrEmail];
+            if ($hasAltEmail) {
+                $sql .= ' OR alt_email = ?';
+                $params[] = $usernameOrEmail;
+            }
+            $sql .= ' LIMIT 1';
+
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($params);
             $user = $stmt->fetch();
 
             if (!$user) {
