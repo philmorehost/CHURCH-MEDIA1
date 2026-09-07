@@ -65,6 +65,29 @@ CREATE TABLE IF NOT EXISTS `org_units` (
   FOREIGN KEY (`parent_id`) REFERENCES `org_units`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS `users` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `name` VARCHAR(150) NOT NULL,
+  `username` VARCHAR(100) NOT NULL UNIQUE,
+  `email` VARCHAR(150) NOT NULL UNIQUE,
+  `alt_email` VARCHAR(190) NULL,
+  `password` VARCHAR(255) NOT NULL,
+  `unblock_pin_hash` VARCHAR(255) NULL,
+  `reset_otp` VARCHAR(10) NULL,
+  `reset_otp_expires_at` DATETIME NULL,
+  `role` ENUM('admin','media_team','editor') NOT NULL DEFAULT 'media_team',
+  `is_super_admin` TINYINT(1) NOT NULL DEFAULT 0,
+  `org_unit_id` INT NULL,
+  `is_suspended` TINYINT(1) NOT NULL DEFAULT 0,
+  `notify_on_login` TINYINT(1) NOT NULL DEFAULT 1,
+  `bio` TEXT NULL,
+  `avatar` VARCHAR(255) NULL,
+  `last_login_at` TIMESTAMP NULL,
+  `last_login_ip` VARCHAR(45) NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Public church-admin self-registrations awaiting super-admin approval.
 CREATE TABLE IF NOT EXISTS `pending_registrations` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
@@ -73,6 +96,7 @@ CREATE TABLE IF NOT EXISTS `pending_registrations` (
   `phone` VARCHAR(45) NULL,
   `username` VARCHAR(100) NOT NULL,
   `password_hash` VARCHAR(255) NOT NULL,
+  `unblock_pin_hash` VARCHAR(255) NULL,
   `province_id` INT NULL,
   `zone_id` INT NULL,
   `area_id` INT NULL,
@@ -109,25 +133,6 @@ CREATE TABLE IF NOT EXISTS `church_name_flags` (
   FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL,
   FOREIGN KEY (`reviewed_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
   INDEX `idx_flag_status` (`status`, `created_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-CREATE TABLE IF NOT EXISTS `users` (
-  `id` INT AUTO_INCREMENT PRIMARY KEY,
-  `name` VARCHAR(150) NOT NULL,
-  `username` VARCHAR(100) NOT NULL UNIQUE,
-  `email` VARCHAR(150) NOT NULL UNIQUE,
-  `password` VARCHAR(255) NOT NULL,
-  `role` ENUM('admin','media_team','editor') NOT NULL DEFAULT 'media_team',
-  `is_super_admin` TINYINT(1) NOT NULL DEFAULT 0,
-  `org_unit_id` INT NULL,
-  `is_suspended` TINYINT(1) NOT NULL DEFAULT 0,
-  `notify_on_login` TINYINT(1) NOT NULL DEFAULT 1,
-  `bio` TEXT NULL,
-  `avatar` VARCHAR(255) NULL,
-  `last_login_at` TIMESTAMP NULL,
-  `last_login_ip` VARCHAR(45) NULL,
-  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `security_logs` (
@@ -517,4 +522,82 @@ CREATE TABLE IF NOT EXISTS `newcomers` (
   INDEX `idx_newcomer_unit_status` (`org_unit_id`, `follow_up_status`),
   FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL,
   FOREIGN KEY (`attendance_id`) REFERENCES `attendance_records`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Advertising System Tables
+CREATE TABLE IF NOT EXISTS `ad_durations` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `title` VARCHAR(100) NOT NULL,
+  `days` INT NOT NULL,
+  `price` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  `is_free` TINYINT(1) NOT NULL DEFAULT 0,
+  `display_frequency` VARCHAR(20) NOT NULL DEFAULT '5_min',
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `sort_order` INT NOT NULL DEFAULT 0,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `ad_publishers` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `name` VARCHAR(150) NOT NULL,
+  `email` VARCHAR(150) NOT NULL,
+  `phone` VARCHAR(45) NULL,
+  `token` VARCHAR(64) NOT NULL UNIQUE,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_pub_email` (`email`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `ads` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `publisher_id` INT NOT NULL,
+  `title` VARCHAR(200) NOT NULL,
+  `media_type` ENUM('image','video') NOT NULL,
+  `file_path` VARCHAR(255) NOT NULL,
+  `thumbnail_path` VARCHAR(255) NULL,
+  `destination_url` VARCHAR(500) NULL,
+  `target_platform` ENUM('web','app','both') NOT NULL DEFAULT 'both',
+  `duration_days` INT NOT NULL,
+  `price` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  `is_free` TINYINT(1) NOT NULL DEFAULT 0,
+  `display_frequency` VARCHAR(20) NOT NULL DEFAULT '5_min',
+  `payment_status` ENUM('unpaid','pending_review','paid') NOT NULL DEFAULT 'unpaid',
+  `payment_method` ENUM('online','manual','free') NOT NULL DEFAULT 'free',
+  `payment_proof_path` VARCHAR(255) NULL,
+  `payment_reference` VARCHAR(100) NULL,
+  `status` ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+  `start_at` DATETIME NULL,
+  `expires_at` DATETIME NULL,
+  `views_count` INT NOT NULL DEFAULT 0,
+  `clicks_count` INT NOT NULL DEFAULT 0,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (`publisher_id`) REFERENCES `ad_publishers`(`id`) ON DELETE CASCADE,
+  INDEX `idx_ad_status_expires` (`status`, `start_at`, `expires_at`, `target_platform`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `ad_events` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `ad_id` INT NOT NULL,
+  `event_type` ENUM('view','click') NOT NULL,
+  `platform` VARCHAR(20) NOT NULL DEFAULT 'web',
+  `ip_address` VARCHAR(45) NULL,
+  `user_agent` VARCHAR(255) NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (`ad_id`) REFERENCES `ads`(`id`) ON DELETE CASCADE,
+  INDEX `idx_ad_event_time` (`ad_id`, `event_type`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `ad_payments` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `ad_id` INT NOT NULL,
+  `publisher_id` INT NOT NULL,
+  `amount` DECIMAL(10,2) NOT NULL,
+  `payment_method` ENUM('online','manual','free') NOT NULL,
+  `reference` VARCHAR(100) NOT NULL,
+  `status` ENUM('pending','success','failed') NOT NULL DEFAULT 'pending',
+  `proof_path` VARCHAR(255) NULL,
+  `gateway_response` TEXT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (`ad_id`) REFERENCES `ads`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`publisher_id`) REFERENCES `ad_publishers`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
