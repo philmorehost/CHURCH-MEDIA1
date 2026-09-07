@@ -578,6 +578,10 @@ $router->get('/privacy-policy', function () {
     render('page', ['slug' => 'privacy-policy']);
 });
 
+$router->get('/page/privacy-policy', function () {
+    render('page', ['slug' => 'privacy-policy']);
+});
+
 $router->get('/page/{slug}', function (array $params) {
     render('page', ['slug' => $params['slug']]);
 });

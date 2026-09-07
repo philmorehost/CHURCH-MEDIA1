@@ -559,6 +559,7 @@ function resolvePageTokens(array $section): array
         '{{contact_email}}' => (string) ($s['contact_email'] ?? ''),
         '{{contact_phone}}' => (string) ($s['contact_phone'] ?? ''),
         '{{address}}'       => (string) ($s['address'] ?? ''),
+        '{{site_url}}'      => rtrim(baseUrl(), '/'),
         '{{effective_date}}' => date('F j, Y'),
     ];
     foreach ($section as $key => $value) {
