@@ -30,7 +30,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $user = $stmt->fetch();
 
             if (!$user) {
-                // Generic error for security
                 $errors[] = 'No admin account found with that username or email.';
             } else {
                 $otp = sprintf('%06d', mt_rand(100000, 999999));
@@ -39,13 +38,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo->prepare('UPDATE users SET reset_otp = ?, reset_otp_expires_at = ? WHERE id = ?')
                     ->execute([$otp, $expiresAt, (int) $user['id']]);
 
-                // Send OTP to primary email
                 $mailBody = "Hi {$user['name']},\n\nYour Password Reset OTP code is: {$otp}\n\nThis code will expire in 15 minutes.\n\nIf you did not request this, please ignore this email.";
+                $sentPrimary = false;
                 try {
-                    Mailer::send((string) $user['email'], 'Password Reset OTP · ' . setting('site_title'), $mailBody);
+                    $sentPrimary = Mailer::send((string) $user['email'], 'Password Reset OTP · ' . setting('site_title'), $mailBody);
                 } catch (Throwable $e) {}
 
-                // Send OTP to alternative email if available
                 if (!empty($user['alt_email']) && filter_var($user['alt_email'], FILTER_VALIDATE_EMAIL)) {
                     try {
                         Mailer::send((string) $user['alt_email'], 'Password Reset OTP (Backup) · ' . setting('site_title'), $mailBody);
@@ -54,7 +52,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $_SESSION['forgot_user_id'] = (int) $user['id'];
                 $step = 'verify';
-                flash('success_otp', 'A 6-digit OTP code has been sent to your primary and backup email address.');
+
+                if (!$sentPrimary && empty(setting('smtp_host'))) {
+                    flash('warn_smtp', 'Note: Email SMTP is currently not configured on this server. If you do not receive the email, you can use your secret Security Unblock PIN below to reset your password instantly!');
+                } else {
+                    flash('success_otp', 'A 6-digit OTP code has been sent to your primary and backup email address.');
+                }
+            }
+        }
+    } elseif ($action === 'reset_pin') {
+        $usernameOrEmail = trim((string) ($_POST['account_input_pin'] ?? ''));
+        $pin = trim((string) ($_POST['unblock_pin'] ?? ''));
+        $newPassword = (string) ($_POST['password'] ?? '');
+        $confirmPassword = (string) ($_POST['password_confirm'] ?? '');
+
+        if ($usernameOrEmail === '' || $pin === '' || $newPassword === '') {
+            $errors[] = 'Username, Security Unblock PIN, and New Password are required.';
+            $step = 'pin_reset';
+        } elseif (strlen($newPassword) < 10) {
+            $errors[] = 'Password must be at least 10 characters long.';
+            $step = 'pin_reset';
+        } elseif ($newPassword !== $confirmPassword) {
+            $errors[] = 'Passwords do not match.';
+            $step = 'pin_reset';
+        } else {
+            $pdo = Database::getInstance()->getConnection();
+            $stmt = $pdo->prepare('SELECT * FROM users WHERE username = ? OR email = ? LIMIT 1');
+            $stmt->execute([$usernameOrEmail, $usernameOrEmail]);
+            $user = $stmt->fetch();
+
+            if (!$user) {
+                $errors[] = 'Account not found.';
+                $step = 'pin_reset';
+            } elseif (empty($user['unblock_pin_hash']) || !password_verify($pin, $user['unblock_pin_hash'])) {
+                $errors[] = 'Incorrect Security Unblock PIN.';
+                $step = 'pin_reset';
+            } else {
+                $newHash = password_hash($newPassword, PASSWORD_ARGON2ID);
+                $pdo->prepare('UPDATE users SET password = ?, reset_otp = NULL, reset_otp_expires_at = NULL, is_suspended = 0 WHERE id = ?')
+                    ->execute([$newHash, (int) $user['id']]);
+
+                flash('success', 'Your password has been reset using your Security PIN! Please sign in.');
+                redirect('/admin/login');
             }
         }
     } elseif ($action === 'reset_password') {
@@ -131,6 +170,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   <?php if ($msg = flash('success_otp')): ?>
     <div class="alert ok"><?= e($msg) ?></div>
   <?php endif; ?>
+  <?php if ($msg = flash('warn_smtp')): ?>
+    <div class="alert" style="background:#f59e0b22; border-color:#f59e0b66; color:#fcd34d;"><?= e($msg) ?></div>
+  <?php endif; ?>
 
   <?php foreach ($errors as $error): ?><div class="alert"><?= e($error) ?></div><?php endforeach; ?>
 
@@ -142,6 +184,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       <label for="account_input">Username or Email</label>
       <input type="text" id="account_input" name="account_input" value="<?= e($usernameOrEmail) ?>" autofocus required placeholder="your.username or email">
       <button class="btn" type="submit">Send OTP Code</button>
+    </form>
+    <div style="border-top:1px solid var(--border); margin-top:20px; padding-top:16px; text-align:center;">
+      <a href="/forgot-password?mode=pin" style="color:var(--gold-soft); font-size:13px; text-decoration:none;">🔒 Or Reset Password using Security Unblock PIN →</a>
+    </div>
+  <?php elseif ($step === 'pin_reset' || (isset($_GET['mode']) && $_GET['mode'] === 'pin')): ?>
+    <p class="sub">Enter your username or email and your secret Security Unblock PIN to reset your password without email.</p>
+    <form method="post" action="/forgot-password">
+      <?= Csrf::field() ?>
+      <input type="hidden" name="action" value="reset_pin">
+      <label for="account_input_pin">Username or Email</label>
+      <input type="text" id="account_input_pin" name="account_input_pin" value="<?= e($_POST['account_input_pin'] ?? '') ?>" autofocus required placeholder="your.username or email">
+
+      <label for="unblock_pin">Security Unblock PIN (4 to 6 digits)</label>
+      <input type="password" id="unblock_pin" name="unblock_pin" pattern="[0-9]{4,6}" maxlength="6" required placeholder="Your secret Security PIN">
+
+      <label for="password">New Password (10+ chars)</label>
+      <input type="password" id="password" name="password" minlength="10" required placeholder="New password">
+
+      <label for="password_confirm">Confirm New Password</label>
+      <input type="password" id="password_confirm" name="password_confirm" minlength="10" required placeholder="Repeat new password">
+
+      <button class="btn" type="submit">Reset Password using Security PIN</button>
     </form>
   <?php else: ?>
     <p class="sub">Enter the 6-digit OTP sent to your email, then choose a new password.</p>
@@ -159,6 +223,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
       <button class="btn" type="submit">Reset Password &amp; Restore Account</button>
     </form>
+    <div style="border-top:1px solid var(--border); margin-top:20px; padding-top:16px; text-align:center;">
+      <a href="/forgot-password?mode=pin" style="color:var(--gold-soft); font-size:13px; text-decoration:none;">🔒 Didn't receive email? Reset using Security PIN →</a>
+    </div>
   <?php endif; ?>
 
   <div style="text-align:center; margin-top:20px;">

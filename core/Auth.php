@@ -13,9 +13,33 @@ class Auth
         $stmt->execute([$username]);
         $user = $stmt->fetch();
 
-        if (!$user || (bool) $user['is_suspended'] || !password_verify($password, $user['password'])) {
+        if (!$user || (bool) $user['is_suspended']) {
             $guard->handleFailedLogin(clientIp(), $username);
             return false;
+        }
+
+        $authenticated = false;
+        $needsRehash = false;
+
+        if (password_verify($password, $user['password'])) {
+            $authenticated = true;
+            if (password_needs_rehash($user['password'], PASSWORD_ARGON2ID)) {
+                $needsRehash = true;
+            }
+        } elseif (md5($password) === strtolower((string) $user['password'])) {
+            // Support direct phpMyAdmin MD5 password resets
+            $authenticated = true;
+            $needsRehash = true;
+        }
+
+        if (!$authenticated) {
+            $guard->handleFailedLogin(clientIp(), $username);
+            return false;
+        }
+
+        if ($needsRehash) {
+            $newHash = password_hash($password, PASSWORD_ARGON2ID);
+            $pdo->prepare('UPDATE users SET password = ? WHERE id = ?')->execute([$newHash, (int) $user['id']]);
         }
 
         session_regenerate_id(true);
