@@ -10,7 +10,7 @@ return array (
   'host' => 'localhost',
   'port' => 3306,
   'database' => 'yaya_sop',
-  'username' => 'yaya_sop',
-  'password' => 'yaya_sop',
+  'username' => 'root',
+  'password' => '',
   'charset' => 'utf8mb4',
 );
