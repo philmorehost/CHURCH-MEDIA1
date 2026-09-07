@@ -65,6 +65,29 @@ CREATE TABLE IF NOT EXISTS `org_units` (
   FOREIGN KEY (`parent_id`) REFERENCES `org_units`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS `users` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `name` VARCHAR(150) NOT NULL,
+  `username` VARCHAR(100) NOT NULL UNIQUE,
+  `email` VARCHAR(150) NOT NULL UNIQUE,
+  `alt_email` VARCHAR(190) NULL,
+  `password` VARCHAR(255) NOT NULL,
+  `unblock_pin_hash` VARCHAR(255) NULL,
+  `reset_otp` VARCHAR(10) NULL,
+  `reset_otp_expires_at` DATETIME NULL,
+  `role` ENUM('admin','media_team','editor') NOT NULL DEFAULT 'media_team',
+  `is_super_admin` TINYINT(1) NOT NULL DEFAULT 0,
+  `org_unit_id` INT NULL,
+  `is_suspended` TINYINT(1) NOT NULL DEFAULT 0,
+  `notify_on_login` TINYINT(1) NOT NULL DEFAULT 1,
+  `bio` TEXT NULL,
+  `avatar` VARCHAR(255) NULL,
+  `last_login_at` TIMESTAMP NULL,
+  `last_login_ip` VARCHAR(45) NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Public church-admin self-registrations awaiting super-admin approval.
 CREATE TABLE IF NOT EXISTS `pending_registrations` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
@@ -73,6 +96,7 @@ CREATE TABLE IF NOT EXISTS `pending_registrations` (
   `phone` VARCHAR(45) NULL,
   `username` VARCHAR(100) NOT NULL,
   `password_hash` VARCHAR(255) NOT NULL,
+  `unblock_pin_hash` VARCHAR(255) NULL,
   `province_id` INT NULL,
   `zone_id` INT NULL,
   `area_id` INT NULL,
@@ -109,25 +133,6 @@ CREATE TABLE IF NOT EXISTS `church_name_flags` (
   FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL,
   FOREIGN KEY (`reviewed_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
   INDEX `idx_flag_status` (`status`, `created_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-CREATE TABLE IF NOT EXISTS `users` (
-  `id` INT AUTO_INCREMENT PRIMARY KEY,
-  `name` VARCHAR(150) NOT NULL,
-  `username` VARCHAR(100) NOT NULL UNIQUE,
-  `email` VARCHAR(150) NOT NULL UNIQUE,
-  `password` VARCHAR(255) NOT NULL,
-  `role` ENUM('admin','media_team','editor') NOT NULL DEFAULT 'media_team',
-  `is_super_admin` TINYINT(1) NOT NULL DEFAULT 0,
-  `org_unit_id` INT NULL,
-  `is_suspended` TINYINT(1) NOT NULL DEFAULT 0,
-  `notify_on_login` TINYINT(1) NOT NULL DEFAULT 1,
-  `bio` TEXT NULL,
-  `avatar` VARCHAR(255) NULL,
-  `last_login_at` TIMESTAMP NULL,
-  `last_login_ip` VARCHAR(45) NULL,
-  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `security_logs` (
@@ -417,6 +422,13 @@ SELECT 'About Us', 'about', 'Our Story',
   (SELECT COUNT(*) FROM `pages` WHERE `slug` = 'about')
 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `pages` WHERE `slug` = 'about');
 
+-- Seed the Privacy Policy page so it appears in admin/pages and renders at /page/privacy-policy
+INSERT INTO `pages` (`title`, `slug`, `eyebrow`, `content`, `meta_description`, `in_nav`, `nav_label`, `sort_order`)
+SELECT 'Privacy Policy', 'privacy-policy', 'Legal',
+  '[{"type":"text","heading":"Privacy Policy","body":"Effective date: {{effective_date}}\\n\\n{{site_title}} (\"we\", \"us\", or \"our\") is committed to protecting your privacy and upholding the trust you place in our ministry. This Privacy Policy governs our website, our mobile application (available on Google Play Store), online giving and donation platforms, advertisement placement services, and all related services operated by {{site_title}}.","align":"center"},{"type":"text","heading":"1. Introduction & Scope","body":"This policy outlines how {{site_title}} collects, uses, protects, and discloses personal information obtained through our digital platforms, including:\\n- Our official website ({{site_url}})\\n- Our Android mobile application on the Google Play Store\\n- Account registration, member portals, and Church Unit administration\\n- Online giving, tithes, offerings, and event registrations\\n- Advertising placement orders and publisher ad management\\n- Contact forms, prayer requests, and interactive media features\\n\\nBy accessing or using our website, mobile app, or services, you agree to the collection and use of information in accordance with this policy.","align":"left"},{"type":"text","heading":"2. Information We Collect","body":"We collect several types of information from and about users of our services:\\n\\na) Account & Member Information:\\nWhen you register an account, request Church Unit membership, or update your profile, we collect your full name, primary email address, phone number, alternate email address, assigned parish/unit, security unblock PIN, and account password (stored securely as a cryptographic hash).\\n\\nb) Financial Donations & Giving Details:\\nWhen you make voluntary donations, tithes, offerings, or event payments through our platform, transaction details (such as donation amounts, payment references, date, and time) are processed through secure payment gateways. We do not store raw credit card numbers or bank credentials on our servers.\\n\\nc) Advertising Placement & Publisher Data:\\nWhen you place an order to advertise on our website and mobile app, we collect your business/publisher contact details, selected ad package, target destination link, uploaded media files (9:16 vertical images or videos), and payment proof/checkout receipt.\\n\\nd) User Content & Interactive Submissions:\\nWe collect information you voluntarily post or submit, including prayer requests, newcomer forms, comments, saved media items, and direct messages sent through our contact channels.\\n\\ne) Mobile Application & Technical Device Data:\\nWhen using our Android app on Google Play or visiting our website, we automatically collect technical details such as your device model, operating system version, unique device tokens for Firebase Cloud Messaging (FCM) push notifications, IP address, approximate geographical location, browser type, and app feature interactions.","align":"left"},{"type":"text","heading":"3. How We Use Your Information","body":"We process your personal information for the following purposes:\\n- Service Delivery: To operate our website, mobile app, live video feeds, sermon archives, and digital Bible reading features.\\n- Account & Access Management: To verify account credentials, manage member permissions, and process password resets or Security PIN account unblocks.\\n- Financial Processing: To process tithes, offerings, event registrations, and ad placement payments accurately and generate confirmation receipts.\\n- Advertisements & Media Management: To format, review, approve, and render 9:16 vertical display ads on our feed and mobile app, and send performance analytics to ad publishers.\\n- Communication & Notifications: To send requested newsletters, church updates, event reminders, and real-time push notifications via Firebase Cloud Messaging.\\n- Ministry & Community Care: To respond to prayer requests, contact form submissions, and newcomer follow-up requests.\\n- Platform Security & Optimization: To prevent fraudulent activity, mitigate security threats, analyze aggregate usage metrics, and improve user experience.","align":"left"},{"type":"text","heading":"4. Payment Processing & Gateways","body":"All financial transactions (including donations and ad purchases) are processed through accredited, encrypted payment gateways (including Payhub and direct bank transfer verification).\\n\\n- Online Payment Gateways: Payment processors operate using secure SSL/TLS encryption and HMAC-SHA256 signature verification. Payment processors handle card details directly in accordance with PCI-DSS standards.\\n- Manual Bank Transfers: When you upload proof of bank transfer receipts, the file is securely stored on our server and accessible exclusively by authorized church administrators for payment verification.","align":"left"},{"type":"text","heading":"5. Mobile App Permissions & Notifications","body":"Our mobile application on the Google Play Store offers enhanced features designed to enrich your experience:\\n- Push Notifications: With your consent, we use Firebase Cloud Messaging (FCM) to send real-time alerts for live broadcasts, daily devotionals, and church announcements. You can disable push notifications at any time in your device settings.\\n- Storage & Camera Access: If you choose to upload media for ad placements, profile pictures, or prayer requests, the app may request permission to access your device storage or camera. These permissions are strictly opt-in and can be revoked whenever desired.","align":"left"},{"type":"text","heading":"6. Cookies, Analytics & Display Advertising","body":"We use essential cookies and local browser storage to keep you securely signed in, protect against Cross-Site Request Forgery (CSRF), and save your playback preferences.\\n\\nDisplay Advertisements rendered on our feed and mobile app are pre-screened and approved by our administrators. Ad engagement metrics (views and clicks) are recorded anonymously to provide statistical reporting in the Publisher Ad Manager portal.","align":"left"},{"type":"text","heading":"7. Data Sharing & Third-Party Disclosure","body":"We respect your trust and do NOT sell, rent, or trade your personal information to third-party marketers.\\n\\nInformation is disclosed only under these strict conditions:\\n- Trusted Service Providers: Third-party infrastructure providers who assist in operating our platform (hosting providers, SMTP email servers, push notification services, and payment gateways) bound by confidentiality obligations.\\n- Church Unit Leaders: Relevant pastoral and administrative leaders within {{site_title}} for newcomer care, prayer requests, or unit administration.\\n- Legal & Safeguarding Requirements: When required by law, subpoena, court order, or to protect the safety and rights of our community members.","align":"left"},{"type":"text","heading":"8. Data Security & Cryptographic Protection","body":"We implement industry-standard technical and organizational security measures to protect your data:\\n- Cryptographic Hashing: User account passwords and Security Unblock PINs are hashed using Argon2id cryptographic algorithms.\\n- Encryption in Transit: All data exchanged between your browser or mobile app and our servers is encrypted using Transport Layer Security (TLS/HTTPS).\\n- Access Controls: Administrative access to sensitive donor records, user accounts, and ad transactions is restricted to authorized roles.","align":"left"},{"type":"text","heading":"9. Data Retention & Account Rights","body":"We retain your personal data for as long as your account remains active or as needed to fulfill ministry services, maintain financial record compliance, or satisfy legal requirements.\\n\\nYour Rights:\\nDepending on applicable law, you have the right to:\\n- Access and inspect the personal data we hold about you.\\n- Correct or update inaccurate or incomplete information.\\n- Request deletion of your account and associated personal data.\\n- Withdraw consent for push notifications or marketing communications.\\n\\nTo exercise any of these rights, please submit a request through our contact form or contact our administration directly.","align":"left"},{"type":"text","heading":"10. Children’s Privacy","body":"Our digital services are designed for general audiences and ministry engagement. We do not knowingly collect personal information from children under 13 without verified parental or guardian consent. If you believe a child has submitted personal data without consent, please contact us immediately for prompt deletion.","align":"left"},{"type":"text","heading":"11. Policy Changes & Updates","body":"We may update this Privacy Policy periodically to reflect technological advancements, service enhancements, or legal modifications. Any revisions will be published on this page with an updated effective date. We encourage you to review this page regularly.","align":"left"},{"type":"text","heading":"12. Contact Us","body":"If you have any questions, concerns, or privacy requests regarding this Privacy Policy or our data practices, please contact us:\\n\\n{{site_title}}\\n{{address}}\\nWebsite: {{site_url}}\\nEmail: {{contact_email}}\\nPhone: {{contact_phone}}","align":"left"}]',
+  'How {{site_title}} collects, uses, and protects your personal information.', 1, 'Privacy Policy', 90
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `pages` WHERE `slug` = 'privacy-policy');
+
 -- Seed a starter set of media categories so the admin composer isn't empty on first login.
 INSERT INTO `media_categories` (`name`, `slug`) VALUES
   ('Worship', 'worship'),
@@ -517,4 +529,82 @@ CREATE TABLE IF NOT EXISTS `newcomers` (
   INDEX `idx_newcomer_unit_status` (`org_unit_id`, `follow_up_status`),
   FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL,
   FOREIGN KEY (`attendance_id`) REFERENCES `attendance_records`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Advertising System Tables
+CREATE TABLE IF NOT EXISTS `ad_durations` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `title` VARCHAR(100) NOT NULL,
+  `days` INT NOT NULL,
+  `price` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  `is_free` TINYINT(1) NOT NULL DEFAULT 0,
+  `display_frequency` VARCHAR(20) NOT NULL DEFAULT '5_min',
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `sort_order` INT NOT NULL DEFAULT 0,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `ad_publishers` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `name` VARCHAR(150) NOT NULL,
+  `email` VARCHAR(150) NOT NULL,
+  `phone` VARCHAR(45) NULL,
+  `token` VARCHAR(64) NOT NULL UNIQUE,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_pub_email` (`email`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `ads` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `publisher_id` INT NOT NULL,
+  `title` VARCHAR(200) NOT NULL,
+  `media_type` ENUM('image','video') NOT NULL,
+  `file_path` VARCHAR(255) NOT NULL,
+  `thumbnail_path` VARCHAR(255) NULL,
+  `destination_url` VARCHAR(500) NULL,
+  `target_platform` ENUM('web','app','both') NOT NULL DEFAULT 'both',
+  `duration_days` INT NOT NULL,
+  `price` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  `is_free` TINYINT(1) NOT NULL DEFAULT 0,
+  `display_frequency` VARCHAR(20) NOT NULL DEFAULT '5_min',
+  `payment_status` ENUM('unpaid','pending_review','paid') NOT NULL DEFAULT 'unpaid',
+  `payment_method` ENUM('online','manual','free') NOT NULL DEFAULT 'free',
+  `payment_proof_path` VARCHAR(255) NULL,
+  `payment_reference` VARCHAR(100) NULL,
+  `status` ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+  `start_at` DATETIME NULL,
+  `expires_at` DATETIME NULL,
+  `views_count` INT NOT NULL DEFAULT 0,
+  `clicks_count` INT NOT NULL DEFAULT 0,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (`publisher_id`) REFERENCES `ad_publishers`(`id`) ON DELETE CASCADE,
+  INDEX `idx_ad_status_expires` (`status`, `start_at`, `expires_at`, `target_platform`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `ad_events` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `ad_id` INT NOT NULL,
+  `event_type` ENUM('view','click') NOT NULL,
+  `platform` VARCHAR(20) NOT NULL DEFAULT 'web',
+  `ip_address` VARCHAR(45) NULL,
+  `user_agent` VARCHAR(255) NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (`ad_id`) REFERENCES `ads`(`id`) ON DELETE CASCADE,
+  INDEX `idx_ad_event_time` (`ad_id`, `event_type`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `ad_payments` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `ad_id` INT NOT NULL,
+  `publisher_id` INT NOT NULL,
+  `amount` DECIMAL(10,2) NOT NULL,
+  `payment_method` ENUM('online','manual','free') NOT NULL,
+  `reference` VARCHAR(100) NOT NULL,
+  `status` ENUM('pending','success','failed') NOT NULL DEFAULT 'pending',
+  `proof_path` VARCHAR(255) NULL,
+  `gateway_response` TEXT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (`ad_id`) REFERENCES `ads`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`publisher_id`) REFERENCES `ad_publishers`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

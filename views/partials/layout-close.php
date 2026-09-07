@@ -67,7 +67,7 @@ $socials = [
       <div class="legal-links">
         <a href="/prayer">Prayer Wall</a>
         <a href="/search">Search</a>
-        <a href="/privacy-policy">Privacy Policy</a>
+        <a href="/page/privacy-policy">Privacy Policy</a>
         <a href="/admin">Admin</a>
       </div>
     </div>

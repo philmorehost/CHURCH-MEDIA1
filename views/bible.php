@@ -89,6 +89,19 @@ $bibleBooks = [
           <span class="bible-tag d-none" id="bible-tag"></span>
         </div>
         <div class="bible-reader-actions">
+          <!-- Voice Reading / Audio Bible Controls -->
+          <div id="tts-controls" class="bible-tts-wrap d-none" style="display:flex; align-items:center; gap:8px;">
+            <button id="btn-tts-play" type="button" class="btn btn-gold btn-sm" style="display:inline-flex; align-items:center; gap:6px;">
+              <span>🔊 Listen</span>
+            </button>
+            <select id="tts-rate" class="btn-sm" style="background:var(--panel-solid); color:var(--ink); border:1px solid var(--border); border-radius:6px; padding:4px 8px; font-size:12px;" title="Reading Speed">
+              <option value="0.75">0.75x</option>
+              <option value="1" selected>1.0x</option>
+              <option value="1.25">1.25x</option>
+              <option value="1.5">1.5x</option>
+            </select>
+          </div>
+
           <button id="btn-copy" type="button" class="btn btn-ghost btn-sm btn-icon d-none" title="Copy passage" aria-label="Copy passage">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <rect x="9" y="9" width="11" height="11" rx="2"/>
@@ -181,7 +194,8 @@ $bibleBooks = [
   .btn-locate svg{width:20px; height:20px;}
   .bible-reader-actions .btn.copied{color:var(--success); border-color:var(--success);}
   .bible-content{min-height:320px; line-height:1.9; font-size:1.1rem;}
-  .bible-verse{margin-bottom:.6rem;}
+  .bible-verse{margin-bottom:.6rem; transition:background-color 0.3s ease, color 0.3s ease; padding:2px 6px; border-radius:4px;}
+  .bible-verse.reading-active{background:rgba(232,185,95,0.2); color:var(--gold-soft); font-weight:600;}
   .verse-num{font-weight:700; font-size:.78rem; color:var(--ink-faint); margin-right:.6rem; vertical-align:super;}
   .bible-empty{color:var(--ink-faint); text-align:center; padding:70px 20px; margin:0; display:flex; flex-direction:column; align-items:center; gap:14px;}
   .bible-empty svg{width:44px; height:44px; opacity:.5;}
@@ -209,6 +223,9 @@ $bibleBooks = [
   const searchEl = document.getElementById('bible-search');
   const locateBtn = document.getElementById('btn-locate');
   const copyBtn = document.getElementById('btn-copy');
+  const ttsControls = document.getElementById('tts-controls');
+  const ttsPlayBtn = document.getElementById('btn-tts-play');
+  const ttsRateSel = document.getElementById('tts-rate');
   const readerNav = document.getElementById('bible-reader-nav');
   const contentEl = document.getElementById('bible-content');
   const refEl = document.getElementById('bible-ref');
@@ -216,6 +233,8 @@ $bibleBooks = [
   const PREFIX = 'bible:';
   let lastData = null;
   let lastParams = null;
+  let isSpeaking = false;
+  let ttsUtterance = null;
 
   function currentParams() {
     return {
@@ -243,6 +262,7 @@ $bibleBooks = [
   }
 
   function render(data, p) {
+    stopTTS();
     if (data.error || !Array.isArray(data.verses)) {
       contentEl.innerHTML = data.error
         ? '<p class="bible-error">' + esc(data.error) + '</p>'
@@ -252,6 +272,7 @@ $bibleBooks = [
       readerNav.classList.add('d-none');
       copyBtn.classList.add('d-none');
       locateBtn.classList.add('d-none');
+      if (ttsControls) ttsControls.classList.add('d-none');
       return false;
     }
 
@@ -272,7 +293,70 @@ $bibleBooks = [
     lastParams = p;
     readerNav.classList.remove('d-none');
     copyBtn.classList.remove('d-none');
+    if ('speechSynthesis' in window && ttsControls) {
+      ttsControls.classList.remove('d-none');
+    }
     return true;
+  }
+
+  function stopTTS() {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+    isSpeaking = false;
+    if (ttsPlayBtn) ttsPlayBtn.innerHTML = '<span>🔊 Listen</span>';
+    document.querySelectorAll('.bible-verse').forEach(el => el.classList.remove('reading-active'));
+  }
+
+  function startTTS() {
+    if (!('speechSynthesis' in window) || !lastData || !Array.isArray(lastData.verses) || !lastData.verses.length) return;
+    window.speechSynthesis.cancel();
+
+    const verses = lastData.verses;
+    const verseEls = document.querySelectorAll('.bible-verse');
+    let idx = 0;
+
+    function speakNext() {
+      if (idx >= verses.length || !isSpeaking) {
+        stopTTS();
+        return;
+      }
+
+      verseEls.forEach((el, i) => el.classList.toggle('reading-active', i === idx));
+      if (verseEls[idx]) {
+        verseEls[idx].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+
+      const v = verses[idx];
+      const textToRead = 'Verse ' + v.verse + '. ' + v.text;
+      const utt = new SpeechSynthesisUtterance(textToRead);
+      utt.rate = parseFloat(ttsRateSel.value || '1');
+
+      utt.onend = function () {
+        idx++;
+        speakNext();
+      };
+      utt.onerror = function () {
+        idx++;
+        speakNext();
+      };
+
+      window.speechSynthesis.speak(utt);
+    }
+
+    isSpeaking = true;
+    if (ttsPlayBtn) ttsPlayBtn.innerHTML = '<span>⏹ Stop</span>';
+    speakNext();
+  }
+
+  if (ttsPlayBtn) {
+    ttsPlayBtn.addEventListener('click', () => {
+      if (isSpeaking) {
+        stopTTS();
+      } else {
+        startTTS();
+      }
+    });
   }
 
   async function search(ev) {

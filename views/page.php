@@ -6,6 +6,19 @@ $stmt = $pdo->prepare('SELECT * FROM pages WHERE slug = ? LIMIT 1');
 $stmt->execute([$slug]);
 $page = $stmt->fetch();
 
+if (!$page) {
+    // Self-healing schema check: run Database::migrate() to automatically create missing tables/rows
+    Database::migrate();
+    $stmt->execute([$slug]);
+    $page = $stmt->fetch();
+}
+
+if ($page && empty($page['is_published']) && ($slug === 'privacy-policy' || $slug === 'about')) {
+    // Default core policy and about pages should always be published and viewable
+    $pdo->prepare('UPDATE pages SET is_published = 1 WHERE id = ?')->execute([(int) $page['id']]);
+    $page['is_published'] = 1;
+}
+
 if (!$page || empty($page['is_published'])) {
     http_response_code(404);
     render('404', [], true);

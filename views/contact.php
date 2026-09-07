@@ -39,7 +39,14 @@ $s = settings();
         <div class="glass-card" style="padding:28px; margin-bottom:20px;">
           <h3 style="font-size:16px;">Get in Touch</h3>
           <?php if ($s['address'] ?? null): ?><p style="color:var(--ink-dim);">📍 <?= e($s['address']) ?></p><?php endif; ?>
-          <?php if ($s['contact_phone'] ?? null): ?><p style="color:var(--ink-dim);">📞 <a href="tel:<?= e($s['contact_phone']) ?>" style="color:var(--gold-soft);"><?= e($s['contact_phone']) ?></a></p><?php endif; ?>
+          <?php if (!empty($s['contact_phone'])): ?>
+            <?php
+              $phones = array_filter(array_map('trim', preg_split('/[,\n]+/', (string) $s['contact_phone']) ?: []));
+            ?>
+            <?php foreach ($phones as $phone): ?>
+              <p style="color:var(--ink-dim); margin-bottom:6px;">📞 <a href="tel:<?= e(preg_replace('/[^0-9+]/', '', $phone)) ?>" style="color:var(--gold-soft);"><?= e($phone) ?></a></p>
+            <?php endforeach; ?>
+          <?php endif; ?>
           <?php if ($s['contact_email'] ?? null): ?><p style="color:var(--ink-dim); margin:0;">✉️ <a href="mailto:<?= e($s['contact_email']) ?>" style="color:var(--gold-soft);"><?= e($s['contact_email']) ?></a></p><?php endif; ?>
         </div>
         <?php $serviceTimes = $s['service_times'] ? (json_decode((string) $s['service_times'], true) ?: []) : []; ?>

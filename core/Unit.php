@@ -27,12 +27,16 @@ class Unit
     /** Valid parent type for a unit type (null = top level). */
     public static function parentType(?string $type): ?string
     {
-        return match ($type) {
-            'zone' => 'province',
-            'area' => 'zone',
-            'parish' => 'area',
-            default => null, // province (and anything unknown) has no parent
-        };
+        switch ($type) {
+            case 'zone':
+                return 'province';
+            case 'area':
+                return 'zone';
+            case 'parish':
+                return 'area';
+            default:
+                return null;
+        }
     }
 
     public static function all(string $order = 'sort_order ASC, name ASC'): array

@@ -57,21 +57,22 @@ define('APP_IS_LOCAL', $isLocal);
 // is not proof (config/database.php may be copied or credentials rotated), and
 // a missing lock is not proof of a fresh install either: an update upload that
 // replaces storage/ wipes storage/installed.lock, which used to force a full
-// reinstall. So if the DB already contains the app schema we treat the site as
-// installed and heal the missing lock automatically; we only drop the lock (and
-// show the installer) when the DB is genuinely unreachable or empty.
+// reinstall. So if the DB already contains the app schema AND users, we treat
+// the site as installed and heal the missing lock automatically (unless currently
+// running through the /install route).
 $lockExists = is_file(INSTALL_LOCK_FILE);
+$isInstallRoute = (strpos($_SERVER['REQUEST_URI'] ?? '', '/install') !== false) || (PHP_SAPI !== 'cli' && strpos($_SERVER['SCRIPT_NAME'] ?? '', '/installer/') !== false);
 $hasSchema = false;
-if (!$lockExists) {
+if (!$lockExists && !$isInstallRoute) {
     $hasSchema = Database::hasAppSchema();
 }
-$installed = $lockExists || $hasSchema;
+$installed = $lockExists || ($hasSchema && !$isInstallRoute);
 
 if ($lockExists && !Database::isReachable() && !$hasSchema) {
     @unlink(INSTALL_LOCK_FILE);
     $installed = false;
 }
-if ($installed && !$lockExists) {
+if ($installed && !$lockExists && !$isInstallRoute) {
     // Heal a lock wiped by an update upload (contents are informational only).
     @file_put_contents(INSTALL_LOCK_FILE, json_encode(['installed_at' => date('c')]));
     $lockExists = true;

@@ -117,13 +117,24 @@ $mark = e(mb_substr((string) $s['site_title'], 0, 1));
 
       <div class="appf-card">
         <div class="ic">📖</div>
-        <h3>Offline Holy Bible</h3>
+        <h3>Holy Bible &amp; Audio Reader</h3>
         <ul>
+          <li>🔊 Voice Reading / Audio Bible with active verse highlighting</li>
+          <li>Speed controls (0.75x, 1x, 1.25x, 1.5x) and auto-scrolling</li>
           <li>KJV &amp; BBE read fully offline — no internet needed</li>
-          <li>Modern online versions (NIV, NLT, NKJV) with languages</li>
-          <li>Book, chapter &amp; verse dropdowns — pick, don't type</li>
-          <li>Bookmarks, highlights, notes, and font sizing</li>
+          <li>Modern online versions (NIV, NLT, NKJV) with multi-language support</li>
           <li>Search a verse and it scrolls straight to it</li>
+        </ul>
+      </div>
+
+      <div class="appf-card">
+        <div class="ic">📢</div>
+        <h3>Advertise &amp; Ad Manager</h3>
+        <ul>
+          <li>Promote your brand, ministry, or business with 9:16 vertical ads</li>
+          <li>Target website, mobile app, or both</li>
+          <li>Pay online via Payhub or bank transfer with receipt upload</li>
+          <li>Publisher Ad Portal with real-time impression, click, and CTR stats</li>
         </ul>
       </div>
 

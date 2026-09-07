@@ -10,7 +10,7 @@ $current = require CONFIG_PATH . '/database.php';
 $currentHasSchema = false;
 try {
     $currentHasSchema = Database::databaseHasSchema(Database::testConnection($current['host'], (int) $current['port'], $current['database'], $current['username'], $current['password'] ?? ''));
-} catch (Throwable) {
+} catch (Throwable $e) {
     $currentHasSchema = false;
 }
 

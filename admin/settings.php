@@ -121,7 +121,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         $setSql = implode(', ', array_map(fn ($k) => "$k = :$k", array_keys($fields)));
-        $pdo->prepare("UPDATE settings SET $setSql WHERE id = :id")->execute([...$fields, 'id' => $row['id']]);
+        $executeParams = array_merge($fields, ['id' => $row['id']]);
+        $pdo->prepare("UPDATE settings SET $setSql WHERE id = :id")->execute($executeParams);
         if ($imageErrors) {
             flash('error', implode(' ', $imageErrors) . ' Other settings were still saved.');
         } else {
@@ -219,7 +220,7 @@ require __DIR__ . '/partials/layout-open.php';
     <h2>Contact &amp; Service Times</h2>
     <div class="row two">
       <div><label for="contact_email">Contact Email</label><input type="email" id="contact_email" name="contact_email" value="<?= e((string) $row['contact_email']) ?>"></div>
-      <div><label for="contact_phone">Contact Phone</label><input type="text" id="contact_phone" name="contact_phone" value="<?= e((string) $row['contact_phone']) ?>"></div>
+      <div><label for="contact_phone">Contact Phone (separate multiple numbers with commas or newlines)</label><input type="text" id="contact_phone" name="contact_phone" value="<?= e((string) $row['contact_phone']) ?>" placeholder="+234 812 345 6789, +234 809 876 5432"></div>
     </div>
     <label for="address">Address</label>
     <input type="text" id="address" name="address" value="<?= e((string) $row['address']) ?>">

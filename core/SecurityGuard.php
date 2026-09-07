@@ -41,10 +41,21 @@ class SecurityGuard
         }
     }
 
-    private function deny(string $message): never
+    private function deny(string $message): void
     {
         http_response_code(403);
-        exit($message);
+        $unblockUrl = baseUrl('unblock');
+        echo '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">';
+        echo '<title>Access Denied · Security System</title>';
+        echo '<style>body{margin:0;min-height:100vh;background:#0b0a14;color:#f1eefc;font-family:sans-serif;display:flex;align-items:center;justify-content:center;padding:20px;}';
+        echo '.card{max-width:440px;background:#181632;border:1px solid #2c2850;padding:32px;border-radius:16px;text-align:center;}';
+        echo 'a.btn{display:inline-block;margin-top:16px;padding:12px 20px;background:#e8b95f;color:#1a1530;font-weight:700;text-decoration:none;border-radius:8px;}</style></head><body>';
+        echo '<div class="card"><div style="font-size:40px;margin-bottom:12px;">🚫</div><h2>Access Restricted</h2>';
+        echo '<p style="color:#a9a4c9;line-height:1.6;">' . htmlspecialchars($message) . '</p>';
+        echo '<p style="color:#a9a4c9;font-size:13px;">If you are an admin and were accidentally blocked, you can unblock your IP using your Security Unblock PIN:</p>';
+        echo '<a href="' . htmlspecialchars($unblockUrl) . '" class="btn">🔓 Unblock Security Access</a>';
+        echo '</div></body></html>';
+        exit;
     }
 
     /** Best-effort country lookup — works behind Cloudflare or with the geoip PECL extension; null otherwise (check simply no-ops). */
