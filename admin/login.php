@@ -57,6 +57,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <input type="password" id="password" name="password" required>
     <button class="btn" type="submit">Sign In</button>
   </form>
+  <div style="margin-top:20px; text-align:center; display:flex; justify-content:space-between; font-size:12.5px;">
+    <a href="/forgot-password" style="color:var(--gold-soft); text-decoration:none;">Forgot Password?</a>
+    <a href="/unblock" style="color:var(--ink-dim); text-decoration:none;">🔓 Unblock Access</a>
+  </div>
 </div>
 </body>
 </html>

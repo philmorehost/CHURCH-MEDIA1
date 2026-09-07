@@ -43,6 +43,22 @@ $router->get('/units', function () {
     render('units');
 });
 
+// Forgot Password / OTP Reset route
+$router->get('/forgot-password', function () {
+    render('forgot-password', [], false);
+});
+$router->post('/forgot-password', function () {
+    render('forgot-password', [], false);
+});
+
+// Unblock Security Access route
+$router->get('/unblock', function () {
+    render('unblock', [], false);
+});
+$router->post('/unblock', function () {
+    render('unblock', [], false);
+});
+
 // Publisher Ad Manager Portal
 $router->get('/ad-manager', function () {
     render('ad-manager');
@@ -441,6 +457,7 @@ $router->post('/register', function () {
     $username = trim($_POST['username'] ?? '');
     $password = (string) ($_POST['password'] ?? '');
     $confirm = (string) ($_POST['password_confirm'] ?? '');
+    $unblockPin = trim((string) ($_POST['unblock_pin'] ?? ''));
     $role = in_array($_POST['role'] ?? '', ['admin', 'editor', 'media_team'], true) ? $_POST['role'] : 'admin';
     $altEmail = trim($_POST['alt_email'] ?? '');
     $provinceId = (int) ($_POST['province_id'] ?? 0);
@@ -466,6 +483,9 @@ $router->post('/register', function () {
     } elseif (cpanelPasswordScore($password) < 65) {
         $pwError = true;
         $errors[] = 'Password strength is below cPanel minimum (65) — add uppercase, lowercase, numbers, and a symbol. Your other details are kept; just fix the password and resubmit.';
+    }
+    if (!preg_match('/^[0-9]{4,6}$/', $unblockPin)) {
+        $errors[] = 'Security Unblock PIN must be 4 to 6 digits.';
     }
     if ($altEmail !== '' && !filter_var($altEmail, FILTER_VALIDATE_EMAIL)) {
         $errors[] = 'The alternative email address is not valid.';
@@ -512,13 +532,14 @@ $router->post('/register', function () {
         $parish = Unit::findByName('parish', $parishName, $areaId);
     }
 
-    $stmt = $pdo->prepare('INSERT INTO pending_registrations (name, email, phone, username, password_hash, password_enc, role, alt_email, province_id, zone_id, area_id, parish_name, parish_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "pending")');
+    $stmt = $pdo->prepare('INSERT INTO pending_registrations (name, email, phone, username, password_hash, unblock_pin_hash, password_enc, role, alt_email, province_id, zone_id, area_id, parish_name, parish_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "pending")');
     $stmt->execute([
         mb_substr($name, 0, 150),
         mb_substr($email, 0, 150),
         mb_substr($phone, 0, 45) ?: null,
         mb_substr($username, 0, 100),
         password_hash($password, PASSWORD_ARGON2ID),
+        password_hash($unblockPin, PASSWORD_DEFAULT),
         encryptSecret($password),
         $role,
         $altEmail !== '' ? mb_substr($altEmail, 0, 190) : null,

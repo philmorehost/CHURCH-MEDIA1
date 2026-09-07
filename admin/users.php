@@ -83,15 +83,26 @@ if ($action === 'edit' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($check->fetch()) {
             $errors[] = 'That username or email is already taken.';
         } else {
-            if ($password !== '') {
-                $pdo->prepare('UPDATE users SET name = ?, username = ?, email = ?, role = ?, password = ?, org_unit_id = ? WHERE id = ?')
-                    ->execute([$name, $username, $email, $role, password_hash($password, PASSWORD_ARGON2ID), $orgUnitId, $targetId]);
+            $unblockPin = trim((string) ($_POST['unblock_pin'] ?? ''));
+            if ($unblockPin !== '' && !preg_match('/^[0-9]{4,6}$/', $unblockPin)) {
+                $errors[] = 'Security Unblock PIN must be 4 to 6 digits.';
             } else {
-                $pdo->prepare('UPDATE users SET name = ?, username = ?, email = ?, role = ?, org_unit_id = ? WHERE id = ?')
-                    ->execute([$name, $username, $email, $role, $orgUnitId, $targetId]);
+                if ($password !== '' && $unblockPin !== '') {
+                    $pdo->prepare('UPDATE users SET name = ?, username = ?, email = ?, role = ?, password = ?, unblock_pin_hash = ?, org_unit_id = ? WHERE id = ?')
+                        ->execute([$name, $username, $email, $role, password_hash($password, PASSWORD_ARGON2ID), password_hash($unblockPin, PASSWORD_DEFAULT), $orgUnitId, $targetId]);
+                } elseif ($password !== '') {
+                    $pdo->prepare('UPDATE users SET name = ?, username = ?, email = ?, role = ?, password = ?, org_unit_id = ? WHERE id = ?')
+                        ->execute([$name, $username, $email, $role, password_hash($password, PASSWORD_ARGON2ID), $orgUnitId, $targetId]);
+                } elseif ($unblockPin !== '') {
+                    $pdo->prepare('UPDATE users SET name = ?, username = ?, email = ?, role = ?, unblock_pin_hash = ?, org_unit_id = ? WHERE id = ?')
+                        ->execute([$name, $username, $email, $role, password_hash($unblockPin, PASSWORD_DEFAULT), $orgUnitId, $targetId]);
+                } else {
+                    $pdo->prepare('UPDATE users SET name = ?, username = ?, email = ?, role = ?, org_unit_id = ? WHERE id = ?')
+                        ->execute([$name, $username, $email, $role, $orgUnitId, $targetId]);
+                }
+                flash('success', 'User updated.');
+                redirect('/admin/users');
             }
-            flash('success', 'User updated.');
-            redirect('/admin/users');
         }
     }
 }
@@ -223,6 +234,8 @@ require __DIR__ . '/partials/layout-open.php';
       <input type="email" id="email" name="email" value="<?= e($editUser['email']) ?>" required>
       <label for="password">New Password <small style="color:var(--ink-faint);">(leave blank to keep current)</small></label>
       <input type="password" id="password" name="password" minlength="10">
+      <label for="unblock_pin">Security Unblock PIN <small style="color:var(--ink-faint);">(4 to 6 digits, leave blank to keep current)</small></label>
+      <input type="password" id="unblock_pin" name="unblock_pin" pattern="[0-9]{4,6}" maxlength="6">
       <label for="role">Role</label>
       <?php if ((int) $editUser['id'] === (int) $currentUser['id']): ?>
         <input type="hidden" name="role" value="<?= e($editUser['role']) ?>">

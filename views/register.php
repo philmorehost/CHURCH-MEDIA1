@@ -88,6 +88,12 @@ $oldJson = json_encode([
         </div>
 
         <div class="form-field">
+          <label class="form-label" for="unblock_pin"><span class="field-num">5b</span><span>Security Unblock PIN (4 to 6 digits) *</span></label>
+          <input type="password" id="unblock_pin" name="unblock_pin" pattern="[0-9]{4,6}" maxlength="6" required placeholder="e.g. 1234 (4 to 6 digits)">
+          <div class="cascade-note">Keep this PIN safe — if your account or IP is ever blocked by security, you can use this PIN to instantly unblock yourself.</div>
+        </div>
+
+        <div class="form-field">
           <label class="form-label" for="province"><span class="field-num">6</span><span>Your Church Location *</span></label>
           <div class="cascade-selects">
             <select id="province" data-province required><option value="">Select Province…</option></select>
