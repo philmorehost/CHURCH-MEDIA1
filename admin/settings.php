@@ -12,6 +12,21 @@ $errors = [];
 $row = $pdo->query('SELECT * FROM settings ORDER BY id ASC LIMIT 1')->fetch();
 $serviceTimes = $row && $row['service_times'] ? (json_decode($row['service_times'], true) ?: []) : [];
 
+// Run media worker on demand
+if (($_GET['action'] ?? '') === 'run_worker' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    Csrf::requireValid();
+    try {
+        ob_start();
+        require __DIR__ . '/../cli/media_worker.php';
+        $workerLog = ob_get_clean();
+        flash('success', 'Media worker executed successfully! Processed video conversions and daily publisher reports.');
+    } catch (Throwable $e) {
+        if (ob_get_level()) { ob_end_clean(); }
+        flash('error', 'Worker execution notice: ' . $e->getMessage());
+    }
+    redirect('/admin/settings');
+}
+
 // Test the cPanel connection using the values currently in the form.
 if (($_GET['action'] ?? '') === 'test_cpanel' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     Csrf::requireValid();
@@ -371,6 +386,11 @@ require __DIR__ . '/partials/layout-open.php';
   <p class="hint">
     If <code>/usr/bin/php</code> isn't found on your host, run <code>which php</code> in cPanel's Terminal to find it (often <code>/usr/local/bin/php</code>). Each run converts whatever originals are still waiting and stops after ~4 minutes; it is safe to run more often. Progress is logged to <code><?= e(STORAGE_PATH . '/logs/media_worker.log') ?></code>.
   </p>
+
+  <form method="post" action="/admin/settings?action=run_worker" style="margin-top:16px;">
+    <?= Csrf::field() ?>
+    <button type="submit" class="btn">▶ Run Media Worker Now</button>
+  </form>
 </div>
 
 <?php require __DIR__ . '/partials/layout-close.php'; ?>
