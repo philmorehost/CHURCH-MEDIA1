@@ -128,21 +128,33 @@ class Database
     public static function migrate(): void
     {
         try {
+            $pdo = self::getInstance()->getConnection();
+
+            // Self-healing: Apply idempotent schema.sql to automatically create any
+            // missing core tables or default seed pages (e.g. privacy-policy, about).
+            try {
+                self::importSqlFile($pdo, INSTALLER_PATH . '/schema.sql');
+            } catch (Throwable $e) {
+                error_log('Schema import auto-heal notice: ' . $e->getMessage());
+            }
+
             $stampFile = STORAGE_PATH . '/migrations.json';
             $done = [];
             if (is_file($stampFile)) {
                 $decoded = json_decode((string) file_get_contents($stampFile), true);
                 $done = is_array($decoded) ? $decoded : [];
             }
-            $pdo = self::getInstance()->getConnection();
             foreach (self::migrations() as $name => $fn) {
-                if (in_array($name, $done, true)) {
-                    continue;
+                try {
+                    $fn($pdo);
+                } catch (Throwable $e) {
+                    error_log('Migration ' . $name . ' auto-heal notice: ' . $e->getMessage());
                 }
-                $fn($pdo);
-                $done[] = $name;
-                @file_put_contents($stampFile, json_encode($done));
+                if (!in_array($name, $done, true)) {
+                    $done[] = $name;
+                }
             }
+            @file_put_contents($stampFile, json_encode($done));
         } catch (Throwable $e) {
             error_log('Database::migrate skipped: ' . $e->getMessage());
         }
