@@ -422,6 +422,28 @@ SELECT 'About Us', 'about', 'Our Story',
   (SELECT COUNT(*) FROM `pages` WHERE `slug` = 'about')
 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `pages` WHERE `slug` = 'about');
 
+-- Donations table for online giving, tithes, offerings, and manual bank transfers
+CREATE TABLE IF NOT EXISTS `donations` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `donor_name` VARCHAR(150) NULL,
+  `donor_email` VARCHAR(255) NULL,
+  `donor_phone` VARCHAR(50) NULL,
+  `category` VARCHAR(100) NOT NULL DEFAULT 'Tithe',
+  `amount` DECIMAL(12,2) NOT NULL,
+  `currency` VARCHAR(10) NOT NULL DEFAULT 'NGN',
+  `description` TEXT NULL,
+  `payment_method` ENUM('online', 'manual_bank') NOT NULL DEFAULT 'online',
+  `payment_status` ENUM('pending', 'completed', 'failed') NOT NULL DEFAULT 'pending',
+  `payment_reference` VARCHAR(100) NULL,
+  `receipt_path` VARCHAR(255) NULL,
+  `org_unit_id` INT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_donation_status` (`payment_status`, `payment_method`),
+  INDEX `idx_donation_category` (`category`),
+  FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Seed the Privacy Policy page so it appears in admin/pages and renders at /page/privacy-policy
 INSERT INTO `pages` (`title`, `slug`, `eyebrow`, `content`, `meta_description`, `in_nav`, `nav_label`, `sort_order`)
 SELECT 'Privacy Policy', 'privacy-policy', 'Legal',
