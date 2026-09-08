@@ -40,6 +40,8 @@ $socials = [
         <a href="/about">About Us</a>
         <a href="/contact">Contact</a>
         <a href="/give">Give</a>
+        <a href="/advertise">Advertise with Us</a>
+        <a href="/ad-manager">Publisher Portal</a>
         <?php if ($s['contact_email'] ?? null): ?><a href="mailto:<?= e($s['contact_email']) ?>"><?= e($s['contact_email']) ?></a><?php endif; ?>
         <?php if ($s['contact_phone'] ?? null): ?><a href="tel:<?= e($s['contact_phone']) ?>"><?= e($s['contact_phone']) ?></a><?php endif; ?>
       </div>

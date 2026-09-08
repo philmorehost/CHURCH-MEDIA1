@@ -37,6 +37,14 @@ $oldJson = json_encode([
         <a class="form-submit ghost" href="/">Back to Homepage</a>
       </div>
     <?php else: ?>
+      <div style="background:rgba(212,175,55,0.08); border:1px solid rgba(212,175,55,0.25); border-radius:12px; padding:16px 20px; margin-bottom:24px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
+        <div>
+          <strong style="color:var(--gold); font-size:15px; display:block;">📢 Want to Advertise Your Brand, Business or Ministry?</strong>
+          <span style="font-size:13px; color:var(--ink-dim);">Place 9:16 vertical display ads on our website and Mobile App with performance analytics.</span>
+        </div>
+        <a href="/advertise" class="btn btn-gold btn-sm" style="white-space:nowrap; text-decoration:none; display:inline-block; padding:8px 16px; border-radius:8px; background:var(--gold); color:#000; font-weight:600;">Place an Advert &rarr;</a>
+      </div>
+
       <div class="form-banner">
         <div class="form-mark"><?= e(mb_substr(setting('site_title'), 0, 1)) ?></div>
         <div>

@@ -20,6 +20,7 @@ $navLinks = [
     '/live' => 'Live',
     '/about' => 'About',
     '/contact' => 'Contact',
+    '/advertise' => 'Advertise',
     '/register' => 'Register',
 ];
 try {
