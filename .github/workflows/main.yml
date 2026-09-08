@@ -1,0 +1,109 @@
+name: Build APK & AAB
+
+# Builds the Android app automatically whenever code is pushed to main.
+# Find the run + downloadable artifacts under: Actions → "Build APK & AAB" → latest run → artifacts.
+# - church-media-apk: signed release APK (for direct install / sideload)
+# - church-media-aab: signed release App Bundle (for Google Play Console → App → Release)
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: apk-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-apk:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Accept Android SDK licenses
+        run: yes | flutter doctor --android-licenses
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('mobile/android/**/*.gradle*', 'mobile/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Install dependencies
+        working-directory: mobile
+        run: flutter pub get
+
+      - name: Set up release signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            mkdir -p mobile/android/keystore
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > mobile/android/keystore/release.keystore
+            printf 'storeFile=../keystore/release.keystore\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+              "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > mobile/android/key.properties
+            echo "Release signing configured."
+          else
+            echo "No keystore secret set - release build will fall back to the debug key."
+          fi
+
+      - name: Build release APK
+        working-directory: mobile
+        run: |
+          flutter build apk --release \
+            --build-name "1.0.${{ github.run_number }}" \
+            --build-number "${{ github.run_number }}"
+
+      - name: Build release AAB
+        working-directory: mobile
+        run: |
+          flutter build appbundle --release \
+            --build-name "1.0.${{ github.run_number }}" \
+            --build-number "${{ github.run_number }}"
+
+      - name: Verify APK signature
+        working-directory: mobile
+        run: |
+          APKSIGNER=$(ls $ANDROID_HOME/build-tools/*/apksigner 2>/dev/null | tail -1)
+          if [ -n "$APKSIGNER" ]; then
+            "$APKSIGNER" verify --print-certs build/app/outputs/flutter-apk/app-release.apk
+          else
+            echo "apksigner not found; skipping verification"
+          fi
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: church-media-apk
+          path: mobile/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+
+      - name: Upload AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: church-media-aab
+          path: mobile/build/app/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+
+      # Publishing to Google Play is done manually: download the
+      # church-media-aab artifact from this run and upload it in
+      # Play Console → App → Production (or another track).
+      # This avoids needing a Play service-account key in CI.
