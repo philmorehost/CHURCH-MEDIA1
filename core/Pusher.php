@@ -17,6 +17,12 @@ class Pusher
 {
     private static ?string $token = null;
     private static int $tokenExpires = 0;
+    private static ?string $lastError = null;
+
+    public static function getLastError(): ?string
+    {
+        return self::$lastError;
+    }
 
     private static function config(): array
     {
@@ -31,10 +37,17 @@ class Pusher
 
     private static function serviceAccountPath(): string
     {
-        return (string) (self::config()['service_account'] ?? '');
+        $path = (string) (self::config()['service_account'] ?? '');
+        if ($path === '' || !is_file($path)) {
+            $default = STORAGE_PATH . '/service-account.json';
+            if (is_file($default)) {
+                return $default;
+            }
+        }
+        return $path;
     }
 
-    private static function base64Url(string $data): string
+    public static function base64Url(string $data): string
     {
         return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
     }
@@ -46,10 +59,12 @@ class Pusher
         }
         $path = self::serviceAccountPath();
         if ($path === '' || !is_file($path)) {
+            self::$lastError = 'Service account key file not found at: ' . $path;
             return null;
         }
         $json = json_decode((string) file_get_contents($path), true);
         if (!is_array($json) || empty($json['client_email']) || empty($json['private_key'])) {
+            self::$lastError = 'Service account key JSON is invalid or missing client_email / private_key.';
             return null;
         }
         $now = time();
@@ -63,7 +78,11 @@ class Pusher
         ]));
         $signingInput = $b64h . '.' . $b64c;
         $signature = '';
-        openssl_sign($signingInput, $signature, $json['private_key'], OPENSSL_ALGO_SHA256);
+        $signOk = @openssl_sign($signingInput, $signature, $json['private_key'], OPENSSL_ALGO_SHA256);
+        if (!$signOk) {
+            self::$lastError = 'OpenSSL failed to sign JWT with service account private key.';
+            return null;
+        }
         $jwt = $signingInput . '.' . self::base64Url($signature);
 
         $ctx = stream_context_create(['http' => [
@@ -71,13 +90,17 @@ class Pusher
             'header' => "Content-Type: application/x-www-form-urlencoded\r\n",
             'content' => http_build_query(['grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer', 'assertion' => $jwt]),
             'timeout' => 15,
+            'ignore_errors' => true,
         ]]);
         $res = @file_get_contents('https://oauth2.googleapis.com/token', false, $ctx);
         if ($res === false) {
+            self::$lastError = 'Network request to Google OAuth2 token endpoint failed.';
             return null;
         }
         $data = json_decode($res, true);
         if (!is_array($data) || empty($data['access_token'])) {
+            $errDetail = $data['error_description'] ?? $data['error'] ?? $res;
+            self::$lastError = 'Google OAuth2 error: ' . $errDetail;
             return null;
         }
         self::$token = (string) $data['access_token'];
@@ -93,7 +116,11 @@ class Pusher
     {
         $token = self::accessToken();
         $projectId = self::projectId();
-        if ($token === null || $projectId === '') {
+        if ($token === null) {
+            return false;
+        }
+        if ($projectId === '') {
+            self::$lastError = 'Firebase Project ID is not configured.';
             return false;
         }
         $message = ['notification' => ['title' => $title, 'body' => $body]];
@@ -118,10 +145,17 @@ class Pusher
         ]]);
         $res = @file_get_contents($url, false, $ctx);
         if ($res === false) {
+            self::$lastError = 'Network request to FCM endpoint failed.';
             return false;
         }
         $parsed = json_decode($res, true);
-        return is_array($parsed) && !empty($parsed['name']);
+        if (is_array($parsed) && !empty($parsed['name'])) {
+            self::$lastError = null;
+            return true;
+        }
+        $errMsg = $parsed['error']['message'] ?? $res;
+        self::$lastError = 'FCM API error: ' . $errMsg;
+        return false;
     }
 
     /** Broadcast to every subscribed device (topic 'all'). */

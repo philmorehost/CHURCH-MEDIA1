@@ -29490,3 +29490,7 @@ Stack trace:
 Stack trace:
 #0 {main}
   thrown in /home/yaya/public_html/cli/media_worker.php on line 56
+[08-Sep-2026 16:27:47 Africa/Lagos] PHP Fatal error:  Uncaught Error: Call to private method Pusher::base64Url() from global scope in /app/test_fcm.php:6
+Stack trace:
+#0 {main}
+  thrown in /app/test_fcm.php on line 6
