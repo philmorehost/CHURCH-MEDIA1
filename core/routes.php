@@ -65,10 +65,46 @@ $router->get('/ad-manager', function () {
 });
 
 $router->post('/ad-manager', function () {
+    // Publisher token request via email
+    if (($_GET['action'] ?? '') === 'request_token') {
+        Csrf::requireValid();
+        $email = trim((string) ($_POST['email'] ?? ''));
+        if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            flash('pub_req_error', 'Please enter a valid email address.');
+            redirect('/ad-manager');
+        }
+
+        $pdo = Database::getInstance()->getConnection();
+        $stmt = $pdo->prepare('SELECT * FROM ad_publishers WHERE email = ? LIMIT 1');
+        $stmt->execute([$email]);
+        $pub = $stmt->fetch();
+
+        if ($pub && !empty($pub['token'])) {
+            $link = baseUrl('ad-manager?token=' . rawurlencode($pub['token']));
+            $body = "Hello " . ($pub['name'] ?: 'Publisher') . ",\n\n" .
+                "You requested access to your Publisher Ad Manager portal on " . setting('site_title') . ".\n\n" .
+                "Click the link below to access your portal, view live ad performance, and create new advertisements:\n" .
+                $link . "\n\n" .
+                "If you did not request this link, you can safely ignore this email.\n\n" .
+                "Best regards,\n" . setting('site_title');
+
+            try {
+                Mailer::send($pub['email'], 'Your Publisher Access Link · ' . setting('site_title'), $body);
+                flash('pub_req_success', 'An access link has been sent to ' . $email . '. Please check your email inbox (and spam folder) to open your Ad Manager portal.');
+            } catch (Throwable $e) {
+                flash('pub_req_error', 'Failed to send access email. Please try again or contact support.');
+            }
+        } else {
+            flash('pub_req_info', 'No publisher account was found for "' . $email . '". If you have not submitted an advertisement yet, please place an advert first.');
+        }
+        redirect('/ad-manager');
+    }
+
     $token = trim((string) ($_GET['token'] ?? ''));
     if ($token === '') {
         http_response_code(403);
-        exit('Access denied.');
+        render('ad-manager');
+        return;
     }
 
     $pdo = Database::getInstance()->getConnection();
