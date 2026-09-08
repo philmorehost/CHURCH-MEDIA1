@@ -11,6 +11,15 @@ declare(strict_types=1);
  * admin to inspect.
  */
 
+if (!defined('STDERR')) {
+    $errStream = @fopen('php://stderr', 'wb');
+    define('STDERR', $errStream ?: fopen('php://output', 'wb'));
+}
+if (!defined('STDOUT')) {
+    $outStream = @fopen('php://stdout', 'wb');
+    define('STDOUT', $outStream ?: fopen('php://output', 'wb'));
+}
+
 require __DIR__ . '/../bootstrap.php';
 
 if (!defined('APP_IS_INSTALLED') || !APP_IS_INSTALLED) {
