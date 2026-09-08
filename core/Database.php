@@ -442,7 +442,7 @@ class Database
                 $existingId = $check->fetchColumn();
 
                 if ($existingId) {
-                    $pdo->prepare('UPDATE pages SET title = ?, eyebrow = ?, content = ?, meta_description = ?, is_published = 1 WHERE id = ?')
+                    $pdo->prepare('UPDATE pages SET title = ?, eyebrow = ?, content = ?, meta_description = ?, in_nav = 0, is_published = 1 WHERE id = ?')
                         ->execute([
                             'Privacy Policy',
                             'Legal',
@@ -451,7 +451,7 @@ class Database
                             $existingId,
                         ]);
                 } else {
-                    $pdo->prepare('INSERT INTO pages (title, slug, eyebrow, content, meta_description, in_nav, nav_label, is_published, sort_order) VALUES (?, ?, ?, ?, ?, 1, ?, 90)')
+                    $pdo->prepare('INSERT INTO pages (title, slug, eyebrow, content, meta_description, in_nav, nav_label, is_published, sort_order) VALUES (?, ?, ?, ?, ?, 0, ?, 90)')
                         ->execute([
                             'Privacy Policy',
                             'privacy-policy',
@@ -461,6 +461,7 @@ class Database
                             'Privacy Policy',
                         ]);
                 }
+                $pdo->exec("UPDATE pages SET in_nav = 0 WHERE slug = 'privacy-policy'");
             },
             '2026_08_app_download' => function (PDO $pdo): void {
                 // Floating "Get it on Google Play" button on the public website.
