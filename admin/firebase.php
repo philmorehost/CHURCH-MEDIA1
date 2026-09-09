@@ -77,7 +77,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($ok) {
             flash('success', 'Test push sent — check your phone for the notification.');
         } else {
-            flash('error', 'Push is not active yet — complete the setup below first.');
+            $err = Pusher::getLastError();
+            flash('error', 'Push failed' . ($err ? ': ' . $err : ' — complete the setup below first.'));
         }
         redirect('/admin/firebase');
     }

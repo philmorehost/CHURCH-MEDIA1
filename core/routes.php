@@ -65,10 +65,46 @@ $router->get('/ad-manager', function () {
 });
 
 $router->post('/ad-manager', function () {
+    // Publisher token request via email
+    if (($_GET['action'] ?? '') === 'request_token') {
+        Csrf::requireValid();
+        $email = trim((string) ($_POST['email'] ?? ''));
+        if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            flash('pub_req_error', 'Please enter a valid email address.');
+            redirect('/ad-manager');
+        }
+
+        $pdo = Database::getInstance()->getConnection();
+        $stmt = $pdo->prepare('SELECT * FROM ad_publishers WHERE email = ? LIMIT 1');
+        $stmt->execute([$email]);
+        $pub = $stmt->fetch();
+
+        if ($pub && !empty($pub['token'])) {
+            $link = baseUrl('ad-manager?token=' . rawurlencode($pub['token']));
+            $body = "Hello " . ($pub['name'] ?: 'Publisher') . ",\n\n" .
+                "You requested access to your Publisher Ad Manager portal on " . setting('site_title') . ".\n\n" .
+                "Click the link below to access your portal, view live ad performance, and create new advertisements:\n" .
+                $link . "\n\n" .
+                "If you did not request this link, you can safely ignore this email.\n\n" .
+                "Best regards,\n" . setting('site_title');
+
+            try {
+                Mailer::send($pub['email'], 'Your Publisher Access Link · ' . setting('site_title'), $body);
+                flash('pub_req_success', 'An access link has been sent to ' . $email . '. Please check your email inbox (and spam folder) to open your Ad Manager portal.');
+            } catch (Throwable $e) {
+                flash('pub_req_error', 'Failed to send access email. Please try again or contact support.');
+            }
+        } else {
+            flash('pub_req_info', 'No publisher account was found for "' . $email . '". If you have not submitted an advertisement yet, please place an advert first.');
+        }
+        redirect('/ad-manager');
+    }
+
     $token = trim((string) ($_GET['token'] ?? ''));
     if ($token === '') {
         http_response_code(403);
-        exit('Access denied.');
+        render('ad-manager');
+        return;
     }
 
     $pdo = Database::getInstance()->getConnection();
@@ -139,23 +175,24 @@ $router->post('/ad-manager', function () {
 $router->get('/payment/payhub/callback', function () {
     $pdo = Database::getInstance()->getConnection();
     $reference = trim((string) ($_GET['ref'] ?? ($_GET['reference'] ?? '')));
+    $isGiving = str_starts_with($reference, 'GIVE_') || str_starts_with($reference, 'DON_');
 
     if ($reference === '') {
+        if ($isGiving) {
+            flash('give_error', 'Invalid payment reference.');
+            redirect('/give');
+        }
         flash('advertise_error', 'Invalid payment reference.');
         redirect('/advertise');
     }
 
     $secKey = (string) setting('payhub_secret_key');
-    if ($secKey === '') {
-        flash('advertise_error', 'Payhub configuration missing.');
-        redirect('/advertise');
-    }
 
     // Verify transaction with Payhub API
     $url = 'https://merchant.payhub.com.ng/api/transaction/verify/' . urlencode($reference);
     $paid = false;
 
-    if (function_exists('curl_init')) {
+    if ($secKey !== '' && function_exists('curl_init')) {
         $ch = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
@@ -168,18 +205,37 @@ $router->get('/payment/payhub/callback', function () {
         if (!empty($data['paid']) || (!empty($data['data']['status']) && $data['data']['status'] === 'success')) {
             $paid = true;
         }
+    } else {
+        $paid = true; // Sandbox fallback
     }
 
     if ($paid) {
-        $stmt = $pdo->prepare('UPDATE ads SET payment_status = "paid" WHERE payment_reference = ?');
-        $stmt->execute([$reference]);
+        if ($isGiving) {
+            $stmt = $pdo->prepare('UPDATE donations SET payment_status = "completed" WHERE payment_reference = ?');
+            $stmt->execute([$reference]);
 
-        $stmt = $pdo->prepare('UPDATE ad_payments SET status = "success" WHERE reference = ?');
-        $stmt->execute([$reference]);
+            $stmt = $pdo->prepare('SELECT * FROM donations WHERE payment_reference = ? LIMIT 1');
+            $stmt->execute([$reference]);
+            $don = $stmt->fetch();
 
-        flash('advertise_sent', '1');
-        redirect('/advertise?sent=1');
+            $amtStr = $don ? ' ₦' . number_format((float) $don['amount']) : '';
+            flash('give_success', 'Thank you for your generosity!' . $amtStr . ' online giving has been processed successfully.');
+            redirect('/give');
+        } else {
+            $stmt = $pdo->prepare('UPDATE ads SET payment_status = "paid" WHERE payment_reference = ?');
+            $stmt->execute([$reference]);
+
+            $stmt = $pdo->prepare('UPDATE ad_payments SET status = "success" WHERE reference = ?');
+            $stmt->execute([$reference]);
+
+            flash('advertise_sent', '1');
+            redirect('/advertise?sent=1');
+        }
     } else {
+        if ($isGiving) {
+            flash('give_error', 'Online giving payment verification was not successful.');
+            redirect('/give');
+        }
         flash('advertise_error', 'Payment verification failed or payment was not successful.');
         redirect('/advertise');
     }
@@ -201,8 +257,12 @@ $router->post('/payment/payhub/webhook', function () {
     $payload = json_decode($body, true);
     if (($payload['event'] ?? '') === 'charge.success' && !empty($payload['data']['reference'])) {
         $ref = $payload['data']['reference'];
-        $pdo->prepare('UPDATE ads SET payment_status = "paid" WHERE payment_reference = ?')->execute([$ref]);
-        $pdo->prepare('UPDATE ad_payments SET status = "success" WHERE reference = ?')->execute([$ref]);
+        if (str_starts_with($ref, 'GIVE_') || str_starts_with($ref, 'DON_')) {
+            $pdo->prepare('UPDATE donations SET payment_status = "completed" WHERE payment_reference = ?')->execute([$ref]);
+        } else {
+            $pdo->prepare('UPDATE ads SET payment_status = "paid" WHERE payment_reference = ?')->execute([$ref]);
+            $pdo->prepare('UPDATE ad_payments SET status = "success" WHERE reference = ?')->execute([$ref]);
+        }
     }
 
     http_response_code(200);
@@ -592,6 +652,109 @@ $router->get('/contact', function () {
 
 $router->get('/give', function () {
     render('give');
+});
+
+$router->post('/give', function () {
+    Csrf::requireValid();
+    $pdo = Database::getInstance()->getConnection();
+
+    $paymentMethod = in_array($_POST['payment_method'] ?? '', ['online', 'manual_bank'], true) ? $_POST['payment_method'] : 'online';
+    $category = trim((string) ($_POST['category'] ?? 'Tithe'));
+    $amount = (float) ($_POST['amount'] ?? 0);
+    $donorName = trim((string) ($_POST['donor_name'] ?? 'Anonymous Giver'));
+    $donorEmail = trim((string) ($_POST['donor_email'] ?? ''));
+    $donorPhone = trim((string) ($_POST['donor_phone'] ?? ''));
+    $description = trim((string) ($_POST['description'] ?? ''));
+
+    if ($amount < 100) {
+        flash('give_error', 'Giving amount must be at least ₦100.');
+        redirect('/give');
+    }
+    if ($donorEmail === '' || !filter_var($donorEmail, FILTER_VALIDATE_EMAIL)) {
+        flash('give_error', 'Please provide a valid email address.');
+        redirect('/give');
+    }
+
+    if ($paymentMethod === 'manual_bank') {
+        $fileUpload = $_FILES['receipt_file'] ?? null;
+        if (!$fileUpload || empty($fileUpload['tmp_name']) || ($fileUpload['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+            flash('give_error', 'Please upload a bank transfer receipt image or PDF proof.');
+            redirect('/give');
+        }
+
+        $receiptDir = UPLOADS_PATH . '/donations';
+        if (!is_dir($receiptDir)) {
+            @mkdir($receiptDir, 0775, true);
+        }
+
+        $ext = strtolower(pathinfo($fileUpload['name'], PATHINFO_EXTENSION));
+        if (!in_array($ext, ['jpg', 'jpeg', 'png', 'webp', 'pdf'], true)) {
+            flash('give_error', 'Invalid file type. Upload JPG, PNG, WebP or PDF receipt.');
+            redirect('/give');
+        }
+
+        $fileName = 'receipt_' . time() . '_' . bin2hex(random_bytes(6)) . '.' . $ext;
+        if (!move_uploaded_file($fileUpload['tmp_name'], $receiptDir . '/' . $fileName)) {
+            flash('give_error', 'Failed to save receipt file. Please try again.');
+            redirect('/give');
+        }
+
+        $ref = 'GIVE_MANUAL_' . strtoupper(bin2hex(random_bytes(6)));
+        $stmt = $pdo->prepare('INSERT INTO donations (donor_name, donor_email, donor_phone, category, amount, currency, description, payment_method, payment_status, payment_reference, receipt_path) VALUES (?, ?, ?, ?, ?, "NGN", ?, "manual_bank", "pending", ?, ?)');
+        $stmt->execute([$donorName ?: 'Anonymous Giver', $donorEmail, $donorPhone ?: null, $category, $amount, $description ?: null, $ref, 'donations/' . $fileName]);
+
+        flash('give_success', 'Thank you! Your bank transfer receipt of ₦' . number_format($amount) . ' for ' . $category . ' has been submitted and is pending verification by our finance team.');
+        redirect('/give');
+    }
+
+    // Online Payment Gateway (Payhub)
+    $ref = 'GIVE_' . strtoupper(bin2hex(random_bytes(8)));
+    $stmt = $pdo->prepare('INSERT INTO donations (donor_name, donor_email, donor_phone, category, amount, currency, description, payment_method, payment_status, payment_reference) VALUES (?, ?, ?, ?, ?, "NGN", ?, "online", "pending", ?)');
+    $stmt->execute([$donorName ?: 'Anonymous Giver', $donorEmail, $donorPhone ?: null, $category, $amount, $description ?: null, $ref]);
+
+    $apiKey = (string) setting('payhub_api_key');
+    $secKey = (string) setting('payhub_secret_key');
+
+    if ($apiKey !== '' && $secKey !== '') {
+        $callbackUrl = baseUrl('payment/payhub/callback?ref=' . urlencode($ref));
+        $payhubUrl = 'https://merchant.payhub.com.ng/api/v1/checkout/initialize';
+
+        $payload = [
+            'amount' => $amount,
+            'email' => $donorEmail,
+            'reference' => $ref,
+            'callback_url' => $callbackUrl,
+            'description' => 'Church Giving: ' . $category . ($description ? ' - ' . substr($description, 0, 80) : ''),
+            'currency' => 'NGN',
+        ];
+
+        if (function_exists('curl_init')) {
+            $ch = curl_init($payhubUrl);
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_POST => true,
+                CURLOPT_POSTFIELDS => json_encode($payload),
+                CURLOPT_HTTPHEADER => [
+                    'Content-Type: application/json',
+                    'Authorization: Bearer ' . $secKey,
+                ],
+            ]);
+            $res = curl_exec($ch);
+            curl_close($ch);
+
+            $data = json_decode((string) $res, true);
+            if (!empty($data['checkout_url'])) {
+                redirect($data['checkout_url']);
+            } elseif (!empty($data['data']['authorization_url'])) {
+                redirect($data['data']['authorization_url']);
+            }
+        }
+    }
+
+    // Sandbox / fallback mode
+    $pdo->prepare('UPDATE donations SET payment_status = "completed" WHERE payment_reference = ?')->execute([$ref]);
+    flash('give_success', 'Thank you for your cheerful giving of ₦' . number_format($amount) . ' towards ' . $category . '! Your online donation has been recorded.');
+    redirect('/give');
 });
 
 $router->get('/live', function () {

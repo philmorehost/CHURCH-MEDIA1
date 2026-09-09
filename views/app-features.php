@@ -136,6 +136,10 @@ $mark = e(mb_substr((string) $s['site_title'], 0, 1));
           <li>Pay online via Payhub or bank transfer with receipt upload</li>
           <li>Publisher Ad Portal with real-time impression, click, and CTR stats</li>
         </ul>
+        <div style="margin-top:16px; display:flex; gap:8px; flex-wrap:wrap;">
+          <a href="/advertise" class="btn btn-gold btn-sm" style="text-decoration:none; font-weight:600; padding:8px 14px; border-radius:8px; background:var(--gold); color:#000;">Place an Advert</a>
+          <a href="/ad-manager" class="btn btn-sm" style="text-decoration:none; padding:8px 14px; border-radius:8px; border:1px solid var(--border-soft); color:var(--ink);">Publisher Portal</a>
+        </div>
       </div>
 
       <div class="appf-card">

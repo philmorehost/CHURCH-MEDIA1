@@ -29,6 +29,7 @@ require __DIR__ . '/partials/layout-open.php';
     <a href="#roles">Roles &amp; Permissions</a>
     <a href="#dashboard">Dashboard</a>
     <a href="#ads">Ads Management</a>
+    <a href="#donations">Donations &amp; Giving</a>
     <a href="#media">Media &amp; Reels</a>
     <a href="#pinned">Pinned Reels</a>
     <a href="#comments">Comments</a>
@@ -69,6 +70,17 @@ require __DIR__ . '/partials/layout-open.php';
     <h2 id="dashboard">Dashboard (<code>/admin</code>)</h2>
     <p>Your landing page. It shows your church's key numbers (media posts, upcoming events, sermons, new prayer requests, newsletter subscribers, blocked IPs) and your latest posts. It also shows <strong>📍 My Unit</strong> so you always know which church you're managing, plus any <strong>🔔 Notifications</strong> sent to your church.</p>
     <p>With the growth tools enabled you'll also see a <strong>Newcomers (7 days)</strong> stat and a <strong>Recent Newcomers</strong> card with tap-to-chat WhatsApp links and follow-up status badges — so the follow-up queue is visible the moment you log in.</p>
+  </div>
+
+  <div class="card" style="margin-bottom:18px;">
+    <h2 id="donations">Donations &amp; Giving (<code>/admin/donations</code>) <span class="pill admin">ADMIN</span></h2>
+    <p>Track, manage, and audit all online giving, tithes, offerings, special seed pledges, and manual bank transfer receipts.</p>
+    <ul>
+      <li><strong>Giving KPI Summary:</strong> Live totals for completed online payments, verified bank transfers, and pending bank receipts.</li>
+      <li><strong>Search &amp; Filters:</strong> Filter giving records by donor name, email, phone, reference, giving category, payment method (Online Payhub vs Bank Transfer), or payment status.</li>
+      <li><strong>Bank Transfer Receipt Verification:</strong> Review uploaded bank transfer receipt images/PDFs and verify or mark transfers as completed or failed.</li>
+      <li><strong>CSV Export:</strong> Download full CSV reports of all giving transactions for financial auditing.</li>
+    </ul>
   </div>
 
   <div class="card" style="margin-bottom:18px;">

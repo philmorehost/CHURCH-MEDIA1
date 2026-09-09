@@ -442,7 +442,7 @@ class Database
                 $existingId = $check->fetchColumn();
 
                 if ($existingId) {
-                    $pdo->prepare('UPDATE pages SET title = ?, eyebrow = ?, content = ?, meta_description = ?, is_published = 1 WHERE id = ?')
+                    $pdo->prepare('UPDATE pages SET title = ?, eyebrow = ?, content = ?, meta_description = ?, in_nav = 0, is_published = 1 WHERE id = ?')
                         ->execute([
                             'Privacy Policy',
                             'Legal',
@@ -451,7 +451,7 @@ class Database
                             $existingId,
                         ]);
                 } else {
-                    $pdo->prepare('INSERT INTO pages (title, slug, eyebrow, content, meta_description, in_nav, nav_label, is_published, sort_order) VALUES (?, ?, ?, ?, ?, 1, ?, 90)')
+                    $pdo->prepare('INSERT INTO pages (title, slug, eyebrow, content, meta_description, in_nav, nav_label, is_published, sort_order) VALUES (?, ?, ?, ?, ?, 0, ?, 90)')
                         ->execute([
                             'Privacy Policy',
                             'privacy-policy',
@@ -461,6 +461,29 @@ class Database
                             'Privacy Policy',
                         ]);
                 }
+                $pdo->exec("UPDATE pages SET in_nav = 0 WHERE slug = 'privacy-policy'");
+            },
+            '2026_08_donations_and_giving' => function (PDO $pdo): void {
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `donations` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `donor_name` VARCHAR(150) NULL,
+                    `donor_email` VARCHAR(255) NULL,
+                    `donor_phone` VARCHAR(50) NULL,
+                    `category` VARCHAR(100) NOT NULL DEFAULT 'Tithe',
+                    `amount` DECIMAL(12,2) NOT NULL,
+                    `currency` VARCHAR(10) NOT NULL DEFAULT 'NGN',
+                    `description` TEXT NULL,
+                    `payment_method` ENUM('online', 'manual_bank') NOT NULL DEFAULT 'online',
+                    `payment_status` ENUM('pending', 'completed', 'failed') NOT NULL DEFAULT 'pending',
+                    `payment_reference` VARCHAR(100) NULL,
+                    `receipt_path` VARCHAR(255) NULL,
+                    `org_unit_id` INT NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    INDEX `idx_donation_status` (`payment_status`, `payment_method`),
+                    INDEX `idx_donation_category` (`category`),
+                    FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
             },
             '2026_08_app_download' => function (PDO $pdo): void {
                 // Floating "Get it on Google Play" button on the public website.

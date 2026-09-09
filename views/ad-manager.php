@@ -2,19 +2,66 @@
 declare(strict_types=1);
 
 $token = trim((string) ($_GET['token'] ?? ''));
-if ($token === '') {
-    http_response_code(403);
-    exit('Access denied — invalid or missing access token.');
+$publisher = null;
+$pdo = Database::getInstance()->getConnection();
+
+if ($token !== '') {
+    $stmt = $pdo->prepare('SELECT * FROM ad_publishers WHERE token = ? LIMIT 1');
+    $stmt->execute([$token]);
+    $publisher = $stmt->fetch() ?: null;
 }
 
-$pdo = Database::getInstance()->getConnection();
-$stmt = $pdo->prepare('SELECT * FROM ad_publishers WHERE token = ? LIMIT 1');
-$stmt->execute([$token]);
-$publisher = $stmt->fetch();
-
 if (!$publisher) {
-    http_response_code(403);
-    exit('Access denied — publisher account not found.');
+    // Render Publisher Access Token Request & Explanation Page
+    $metaTitle = 'Publisher Ad Manager · Access Required';
+    $metaDescription = 'Enter your email address to receive your secure Publisher Ad Manager access link.';
+?>
+<div class="container section" style="max-width:680px; padding-top:60px; padding-bottom:80px;">
+  <div class="card glass-card" style="padding:36px; border-radius:16px;">
+    <div style="text-align:center; margin-bottom:28px;">
+      <div style="font-size:48px; margin-bottom:12px;">🔐</div>
+      <span class="eyebrow" style="color:var(--gold-soft); font-weight:700; text-transform:uppercase; letter-spacing:1px; font-size:12px;">Publisher Portal Access</span>
+      <h1 style="margin:8px 0 12px; font-size:26px;">Secure Ad Manager Login</h1>
+      <p style="color:var(--ink-dim); font-size:14px; line-height:1.6; margin:0 auto; max-width:520px;">
+        To protect advertiser privacy and campaign analytics, the Publisher Ad Manager uses <strong>token-authenticated access links</strong> instead of passwords. Direct access without a valid security token is restricted.
+      </p>
+    </div>
+
+    <?php if ($info = flash('pub_req_info')): ?>
+      <div class="alert info" style="margin-bottom:20px; padding:14px 18px; background:rgba(59,130,246,0.1); border:1px solid rgba(59,130,246,0.3); color:#93c5fd; border-radius:10px; font-size:14px; line-height:1.5;">
+        <?= e($info) ?>
+        <div style="margin-top:12px;">
+          <a href="/advertise" class="btn btn-gold btn-sm" style="text-decoration:none; display:inline-block; font-weight:600; padding:8px 16px; border-radius:6px; background:var(--gold); color:#000;">Place an Advert Now &rarr;</a>
+        </div>
+      </div>
+    <?php endif; ?>
+
+    <?php if ($msg = flash('pub_req_error')): ?>
+      <div class="alert error" style="margin-bottom:20px; padding:14px 18px; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); color:#f87171; border-radius:10px; font-size:14px;"><?= e($msg) ?></div>
+    <?php endif; ?>
+
+    <?php if ($msg = flash('pub_req_success')): ?>
+      <div class="alert success" style="margin-bottom:20px; padding:14px 18px; background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.3); color:#34d399; border-radius:10px; font-size:14px; line-height:1.5;"><?= e($msg) ?></div>
+    <?php endif; ?>
+
+    <form method="post" action="/ad-manager?action=request_token" style="margin-top:20px;">
+      <?= Csrf::field() ?>
+      <label for="pub_email" style="display:block; margin-bottom:8px; font-weight:600; font-size:14px;">Enter Your Registered Email Address</label>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <input type="email" id="pub_email" name="email" required placeholder="advertiser@example.com" style="flex:1; min-width:240px; padding:12px 14px; border-radius:8px; border:1px solid var(--border-soft); background:rgba(255,255,255,0.05); color:inherit; font-size:14px;">
+        <button type="submit" class="btn btn-gold" style="white-space:nowrap; padding:12px 20px;">Get Access Link 📧</button>
+      </div>
+      <p style="font-size:12px; color:var(--ink-faint); margin-top:10px;">We'll email you a secure, instant link to access your active ad campaigns and performance reports.</p>
+    </form>
+
+    <div style="margin-top:32px; padding-top:24px; border-top:1px solid var(--border-soft); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+      <span style="font-size:13px; color:var(--ink-dim);">New advertiser?</span>
+      <a href="/advertise" style="font-size:13px; color:var(--gold-soft); font-weight:600; text-decoration:none;">Create a New Advert &rarr;</a>
+    </div>
+  </div>
+</div>
+<?php
+    return;
 }
 
 // Fetch publisher's ads with live stats
