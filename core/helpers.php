@@ -341,7 +341,7 @@ function embedUrl(?string $url, bool $autoplay = true): ?string
 
     // Facebook video / reel / watch / fb.watch / fb.com
     if (str_contains($url, 'facebook.com') || str_contains($url, 'fb.watch') || str_contains($url, 'fb.com')) {
-        return 'https://www.facebook.com/plugins/video.php?href=' . rawurlencode($url) . ($autoplay ? '&autoplay=1&mute=0' : '');
+        return 'https://www.facebook.com/plugins/video.php?href=' . rawurlencode($url) . '&show_text=false' . ($autoplay ? '&autoplay=1&mute=0' : '');
     }
 
     // Vimeo

@@ -28,6 +28,11 @@ $metaDescription = $sermon['description'] ? mb_strimwidth($sermon['description']
       <div class="glass-card" style="aspect-ratio:16/9; margin-bottom:28px;">
         <iframe src="<?= e(embedUrl($sermon['video_embed_url'], true)) ?>" style="width:100%; height:100%; border:0;" allowfullscreen allow="autoplay; encrypted-media; picture-in-picture" loading="eager"></iframe>
       </div>
+      <?php if (str_contains((string) $sermon['video_embed_url'], 'facebook.com') || str_contains((string) $sermon['video_embed_url'], 'fb.watch')): ?>
+        <div style="text-align:center; margin:-18px 0 24px; font-size:13px; color:var(--ink-dim);">
+          Video not loading? <a href="<?= e($sermon['video_embed_url']) ?>" target="_blank" rel="noopener" style="color:var(--gold-soft); text-decoration:underline;">Watch directly on Facebook ↗</a>
+        </div>
+      <?php endif; ?>
     <?php elseif ($sermon['cover_image']): ?>
       <div class="glass-card" style="aspect-ratio:16/8; margin-bottom:28px;">
         <img src="<?= e(uploadUrl($sermon['cover_image'])) ?>" alt="" style="width:100%; height:100%; object-fit:cover;">
