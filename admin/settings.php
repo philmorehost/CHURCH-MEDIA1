@@ -53,6 +53,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'hero_tagline' => trim($_POST['hero_tagline'] ?? ''),
         'hero_scripture' => trim($_POST['hero_scripture'] ?? ''),
         'hero_eyebrow' => trim($_POST['hero_eyebrow'] ?? ''),
+        'hero_type' => in_array($_POST['hero_type'] ?? 'gradient', ['gradient', 'image', 'video_upload', 'youtube'], true) ? $_POST['hero_type'] : 'gradient',
+        'hero_youtube_url' => trim($_POST['hero_youtube_url'] ?? ''),
         'hero_cta_primary_label' => trim($_POST['hero_cta_primary_label'] ?? ''),
         'hero_cta_primary_url' => trim($_POST['hero_cta_primary_url'] ?? ''),
         'hero_cta_secondary_label' => trim($_POST['hero_cta_secondary_label'] ?? ''),
@@ -135,6 +137,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
+        if (isset($_POST['remove_hero_video'])) {
+            $fields['hero_video_path'] = null;
+        } elseif (!empty($_FILES['hero_video']['name'])) {
+            if (($_FILES['hero_video']['error'] ?? UPLOAD_ERR_OK) !== UPLOAD_ERR_OK) {
+                $imageErrors[] = 'Hero video upload failed — the file may be too large for the server (increase upload_max_filesize/post_max_size in php.ini).';
+            } else {
+                $ext = strtolower(pathinfo($_FILES['hero_video']['name'], PATHINFO_EXTENSION));
+                if (!in_array($ext, ['mp4', 'webm', 'ogg', 'mov'], true)) {
+                    $imageErrors[] = 'Hero video must be an MP4, WebM, OGG, or MOV file.';
+                } else {
+                    $videoDir = UPLOADS_PATH . '/videos';
+                    if (!is_dir($videoDir)) {
+                        @mkdir($videoDir, 0775, true);
+                    }
+                    $videoName = uniqid('hero_vid_', true) . '.' . $ext;
+                    if (move_uploaded_file($_FILES['hero_video']['tmp_name'], $videoDir . '/' . $videoName)) {
+                        $fields['hero_video_path'] = 'videos/' . $videoName;
+                    } else {
+                        $imageErrors[] = 'Hero video could not be saved.';
+                    }
+                }
+            }
+        }
+
         $setSql = implode(', ', array_map(fn ($k) => "$k = :$k", array_keys($fields)));
         $executeParams = array_merge($fields, ['id' => $row['id']]);
         $pdo->prepare("UPDATE settings SET $setSql WHERE id = :id")->execute($executeParams);
@@ -191,18 +217,49 @@ require __DIR__ . '/partials/layout-open.php';
 
   <div class="card">
     <h2>Homepage Hero</h2>
-    <p class="sub">The large banner at the top of the homepage. Upload a background image (compressed to WebP automatically) and edit the text that sits on top of it.</p>
-    <label for="hero_image">Hero Background Image <?= $row['hero_image_path'] ? '(currently set)' : '' ?></label>
-    <input type="file" id="hero_image" name="hero_image" accept="image/*">
-    <?php if ($row['hero_image_path']): ?>
-      <div style="display:flex; align-items:center; gap:14px; margin:10px 0;">
-        <img src="<?= e(uploadUrl($row['hero_image_path'])) ?>" class="thumb" alt="" style="width:120px; height:68px; object-fit:cover; border-radius:10px;">
-        <label class="checkbox-row" style="margin:0;">
-          <input type="checkbox" id="remove_hero_image" name="remove_hero_image">
-          <label for="remove_hero_image" style="margin:0;">Remove current image (back to the animated gradient)</label>
-        </label>
-      </div>
-    <?php endif; ?>
+    <p class="sub">The large banner at the top of the homepage. Choose between an animated gradient, background image, uploaded background video, or YouTube video background, and edit the text that sits on top of it.</p>
+
+    <label for="hero_type">Hero Background Type</label>
+    <select id="hero_type" name="hero_type">
+      <option value="gradient" <?= ($row['hero_type'] ?? 'gradient') === 'gradient' ? 'selected' : '' ?>>Animated Gradient</option>
+      <option value="image" <?= ($row['hero_type'] ?? '') === 'image' ? 'selected' : '' ?>>Background Image</option>
+      <option value="video_upload" <?= ($row['hero_type'] ?? '') === 'video_upload' ? 'selected' : '' ?>>Uploaded Background Video (MP4/WebM)</option>
+      <option value="youtube" <?= ($row['hero_type'] ?? '') === 'youtube' ? 'selected' : '' ?>>YouTube Video Link</option>
+    </select>
+
+    <div id="hero-image-wrap" style="<?= in_array(($row['hero_type'] ?? 'gradient'), ['image', 'gradient'], true) ? '' : 'display:none;' ?>">
+      <label for="hero_image">Hero Background Image <?= $row['hero_image_path'] ? '(currently set)' : '' ?></label>
+      <input type="file" id="hero_image" name="hero_image" accept="image/*">
+      <?php if ($row['hero_image_path']): ?>
+        <div style="display:flex; align-items:center; gap:14px; margin:10px 0;">
+          <img src="<?= e(uploadUrl($row['hero_image_path'])) ?>" class="thumb" alt="" style="width:120px; height:68px; object-fit:cover; border-radius:10px;">
+          <label class="checkbox-row" style="margin:0;">
+            <input type="checkbox" id="remove_hero_image" name="remove_hero_image">
+            <label for="remove_hero_image" style="margin:0;">Remove current image</label>
+          </label>
+        </div>
+      <?php endif; ?>
+    </div>
+
+    <div id="hero-video-wrap" style="<?= ($row['hero_type'] ?? '') === 'video_upload' ? '' : 'display:none;' ?>">
+      <label for="hero_video">Hero Background Video (MP4/WebM) <?= !empty($row['hero_video_path']) ? '(currently set)' : '' ?></label>
+      <input type="file" id="hero_video" name="hero_video" accept="video/mp4,video/webm,video/ogg,video/quicktime">
+      <?php if (!empty($row['hero_video_path'])): ?>
+        <div style="display:flex; align-items:center; gap:14px; margin:10px 0;">
+          <video src="<?= e(uploadUrl($row['hero_video_path'])) ?>" style="width:120px; height:68px; object-fit:cover; border-radius:10px;" muted loop autoplay></video>
+          <label class="checkbox-row" style="margin:0;">
+            <input type="checkbox" id="remove_hero_video" name="remove_hero_video">
+            <label for="remove_hero_video" style="margin:0;">Remove current video</label>
+          </label>
+        </div>
+      <?php endif; ?>
+    </div>
+
+    <div id="hero-youtube-wrap" style="<?= ($row['hero_type'] ?? '') === 'youtube' ? '' : 'display:none;' ?>">
+      <label for="hero_youtube_url">YouTube Video Link</label>
+      <input type="url" id="hero_youtube_url" name="hero_youtube_url" value="<?= e((string) ($row['hero_youtube_url'] ?? '')) ?>" placeholder="https://www.youtube.com/watch?v=... or https://youtu.be/...">
+    </div>
+
     <label for="hero_eyebrow">Eyebrow Text <small>(small label above the headline)</small></label>
     <input type="text" id="hero_eyebrow" name="hero_eyebrow" value="<?= e((string) $row['hero_eyebrow']) ?>" placeholder="Welcome Home">
     <label for="hero_tagline2">Headline (Hero Tagline)</label>
@@ -364,9 +421,24 @@ require __DIR__ . '/partials/layout-open.php';
 (function () {
   const source = document.getElementById('bible_source');
   const keyWrap = document.getElementById('bible-api-key-wrap');
-  if (!source || !keyWrap) return;
-  const toggle = () => { keyWrap.style.display = source.value === 'api_bible' ? '' : 'none'; };
-  source.addEventListener('change', toggle);
+  if (source && keyWrap) {
+    const toggle = () => { keyWrap.style.display = source.value === 'api_bible' ? '' : 'none'; };
+    source.addEventListener('change', toggle);
+  }
+
+  const heroType = document.getElementById('hero_type');
+  const imgWrap = document.getElementById('hero-image-wrap');
+  const vidWrap = document.getElementById('hero-video-wrap');
+  const ytWrap = document.getElementById('hero-youtube-wrap');
+  if (heroType) {
+    const toggleHero = () => {
+      const val = heroType.value;
+      if (imgWrap) imgWrap.style.display = (val === 'image' || val === 'gradient') ? '' : 'none';
+      if (vidWrap) vidWrap.style.display = val === 'video_upload' ? '' : 'none';
+      if (ytWrap) ytWrap.style.display = val === 'youtube' ? '' : 'none';
+    };
+    heroType.addEventListener('change', toggleHero);
+  }
 })();
 </script>
 

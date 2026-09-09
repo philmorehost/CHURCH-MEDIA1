@@ -236,10 +236,13 @@ class Database
                 $pdo->exec("ALTER TABLE `form_fields` MODIFY COLUMN `field_type` ENUM('text','textarea','email','phone','number','date','url','select','radio','checkbox','image') NOT NULL DEFAULT 'text'");
             },
             '2026_08_pages' => function (PDO $pdo): void {
-                // Homepage hero: editable eyebrow text, background image, and CTA labels/links.
+                // Homepage hero: editable eyebrow text, background image, video/youtube background, and CTA labels/links.
                 self::addColumnIfMissing($pdo, 'settings', 'hero_eyebrow', "VARCHAR(120) NULL", 'hero_scripture');
                 self::addColumnIfMissing($pdo, 'settings', 'hero_image_path', "VARCHAR(255) NULL", 'hero_eyebrow');
-                self::addColumnIfMissing($pdo, 'settings', 'hero_cta_primary_label', "VARCHAR(60) NULL", 'hero_image_path');
+                self::addColumnIfMissing($pdo, 'settings', 'hero_type', "VARCHAR(20) NOT NULL DEFAULT 'gradient'", 'hero_image_path');
+                self::addColumnIfMissing($pdo, 'settings', 'hero_video_path', "VARCHAR(255) NULL", 'hero_type');
+                self::addColumnIfMissing($pdo, 'settings', 'hero_youtube_url', "VARCHAR(500) NULL", 'hero_video_path');
+                self::addColumnIfMissing($pdo, 'settings', 'hero_cta_primary_label', "VARCHAR(60) NULL", 'hero_youtube_url');
                 self::addColumnIfMissing($pdo, 'settings', 'hero_cta_primary_url', "VARCHAR(500) NULL", 'hero_cta_primary_label');
                 self::addColumnIfMissing($pdo, 'settings', 'hero_cta_secondary_label', "VARCHAR(60) NULL", 'hero_cta_primary_url');
                 self::addColumnIfMissing($pdo, 'settings', 'hero_cta_secondary_url', "VARCHAR(500) NULL", 'hero_cta_secondary_label');
