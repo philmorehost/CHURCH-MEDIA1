@@ -336,12 +336,12 @@ function embedUrl(?string $url, bool $autoplay = true): ?string
     // YouTube: watch, shorts, live, embed, youtu.be
     $ytId = youtubeVideoId($url);
     if ($ytId) {
-        return 'https://www.youtube.com/embed/' . $ytId . ($autoplay ? '?autoplay=1&mute=0' : '');
+        return 'https://www.youtube-nocookie.com/embed/' . $ytId . ($autoplay ? '?autoplay=1&mute=1&enablejsapi=1' : '');
     }
 
     // Facebook video / reel / watch / fb.watch / fb.com
     if (str_contains($url, 'facebook.com') || str_contains($url, 'fb.watch') || str_contains($url, 'fb.com')) {
-        return 'https://www.facebook.com/plugins/video.php?href=' . rawurlencode($url) . ($autoplay ? '&autoplay=true' : '');
+        return 'https://www.facebook.com/plugins/video.php?href=' . rawurlencode($url) . ($autoplay ? '&autoplay=1&mute=1' : '');
     }
 
     // Vimeo
