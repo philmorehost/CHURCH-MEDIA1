@@ -26,7 +26,7 @@ $metaDescription = $sermon['description'] ? mb_strimwidth($sermon['description']
 
     <?php if ($sermon['video_embed_url']): ?>
       <div class="glass-card" style="aspect-ratio:16/9; margin-bottom:28px;">
-        <iframe src="<?= e(embedUrl($sermon['video_embed_url'])) ?>" style="width:100%; height:100%; border:0;" allowfullscreen loading="lazy"></iframe>
+        <iframe src="<?= e(embedUrl($sermon['video_embed_url'], true)) ?>" style="width:100%; height:100%; border:0;" allowfullscreen allow="autoplay; encrypted-media; picture-in-picture" loading="eager"></iframe>
       </div>
     <?php elseif ($sermon['cover_image']): ?>
       <div class="glass-card" style="aspect-ratio:16/8; margin-bottom:28px;">

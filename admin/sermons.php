@@ -69,6 +69,8 @@ if (in_array($action, ['create', 'edit'], true) && $_SERVER['REQUEST_METHOD'] ==
         if (!empty($_FILES['cover_image']['tmp_name']) && is_uploaded_file($_FILES['cover_image']['tmp_name'])) {
             $filename = MediaProcessor::processImage($_FILES['cover_image']['tmp_name'], UPLOADS_WEBP_PATH);
             $coverPath = $filename ? 'webp/' . $filename : null;
+        } elseif ($videoUrl) {
+            $coverPath = MediaProcessor::fetchVideoUrlThumbnail($videoUrl);
         }
         $audioPath = null;
         if (!empty($_FILES['audio']['tmp_name']) && is_uploaded_file($_FILES['audio']['tmp_name'])) {

@@ -322,15 +322,54 @@ function timeAgo(string $datetime): string
     return 'just now';
 }
 
-/** Converts a YouTube watch/share URL to an embeddable one; passes through anything else (Vimeo, already-embed links). */
-function embedUrl(?string $url): ?string
+/**
+ * Converts YouTube, Facebook, Vimeo, Instagram, TikTok, or Rumble video/reel
+ * links to cross-origin, autoplay-enabled embed URLs.
+ */
+function embedUrl(?string $url, bool $autoplay = true): ?string
 {
     if (!$url) {
         return null;
     }
-    if (preg_match('#youtu\.be/([a-zA-Z0-9_-]+)#', $url, $m) || preg_match('#youtube\.com/watch\?v=([a-zA-Z0-9_-]+)#', $url, $m)) {
-        return 'https://www.youtube.com/embed/' . $m[1];
+    $url = trim($url);
+
+    // YouTube: watch, shorts, live, embed, youtu.be
+    $ytId = youtubeVideoId($url);
+    if ($ytId) {
+        return 'https://www.youtube.com/embed/' . $ytId . ($autoplay ? '?autoplay=1&mute=0' : '');
     }
+
+    // Facebook video / reel / watch / fb.watch / fb.com
+    if (str_contains($url, 'facebook.com') || str_contains($url, 'fb.watch') || str_contains($url, 'fb.com')) {
+        return 'https://www.facebook.com/plugins/video.php?href=' . rawurlencode($url) . ($autoplay ? '&autoplay=true' : '');
+    }
+
+    // Vimeo
+    if (preg_match('#vimeo\.com/(?:video/)?([0-9]+)#', $url, $m)) {
+        return 'https://player.vimeo.com/video/' . $m[1] . ($autoplay ? '?autoplay=1' : '');
+    }
+
+    // Instagram post/reel
+    if (str_contains($url, 'instagram.com')) {
+        $clean = rtrim(explode('?', $url)[0], '/');
+        return $clean . '/embed/';
+    }
+
+    // TikTok
+    if (preg_match('#tiktok\.com/@[^/]+/video/([0-9]+)#', $url, $m)) {
+        return 'https://www.tiktok.com/embed/v2/' . $m[1];
+    }
+
+    // Rumble
+    if (str_contains($url, 'rumble.com')) {
+        if (preg_match('#rumble\.com/embed/([a-zA-Z0-9_-]+)#', $url, $m)) {
+            return 'https://rumble.com/embed/' . $m[1] . '/' . ($autoplay ? '?autoplay=2' : '');
+        }
+        if (preg_match('#rumble\.com/(v[a-zA-Z0-9_-]+)#', $url, $m)) {
+            return 'https://rumble.com/embed/' . $m[1] . '/' . ($autoplay ? '?autoplay=2' : '');
+        }
+    }
+
     return $url;
 }
 
