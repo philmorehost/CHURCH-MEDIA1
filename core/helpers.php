@@ -721,6 +721,44 @@ function renderPageSections(array $sections): void
                 }
                 echo '</div></section>';
                 break;
+
+            case 'team':
+                try {
+                    $pdo = Database::getInstance()->getConnection();
+                    $heading = !empty($section['heading']) ? $section['heading'] : 'Leadership & Ministry Team';
+                    $eyebrow = !empty($section['eyebrow']) ? $section['eyebrow'] : 'Our People';
+                    $members = $pdo->query('SELECT * FROM team_members WHERE is_published = 1 ORDER BY sort_order ASC, name ASC')->fetchAll();
+                    if ($members) {
+                        echo '<section class="section page-team"><div class="container">';
+                        echo '<div class="section-head"><span class="eyebrow">' . e((string) $eyebrow) . '</span><h2>' . e((string) $heading) . '</h2></div>';
+                        $colCount = min(4, max(1, count($members)));
+                        echo '<div class="grid grid-' . $colCount . '">';
+                        foreach ($members as $m) {
+                            echo '<div class="glass-card team-card" style="padding:28px 22px; text-align:center; display:flex; flex-direction:column; align-items:center;">';
+                            if (!empty($m['photo'])) {
+                                echo '<div style="width:110px; height:110px; margin:0 auto 16px; border-radius:50%; overflow:hidden; border:2px solid var(--gold); box-shadow:0 6px 20px rgba(0,0,0,0.3); flex-shrink:0;">';
+                                echo '<img src="' . e(uploadUrl((string) $m['photo'])) . '" alt="' . e((string) $m['name']) . '" style="width:100%; height:100%; object-fit:cover;">';
+                                echo '</div>';
+                            } else {
+                                echo '<div style="width:110px; height:110px; margin:0 auto 16px; border-radius:50%; background:var(--bg-2); display:flex; align-items:center; justify-content:center; border:2px solid var(--gold); font-size:36px; font-weight:700; color:var(--gold); flex-shrink:0;">';
+                                echo e(strtoupper(substr(trim((string) $m['name']), 0, 1)));
+                                echo '</div>';
+                            }
+                            echo '<h3 style="margin:0 0 4px; font-size:20px; line-height:1.2;">' . e((string) $m['name']) . '</h3>';
+                            if (!empty($m['role_title'])) {
+                                echo '<p style="color:var(--gold-soft); font-size:13.5px; font-weight:600; margin:0 0 12px; letter-spacing:0.02em;">' . e((string) $m['role_title']) . '</p>';
+                            }
+                            if (!empty($m['bio'])) {
+                                echo '<p style="color:var(--ink-dim); font-size:14px; margin:0; line-height:1.6;">' . nl2br(e((string) $m['bio'])) . '</p>';
+                            }
+                            echo '</div>';
+                        }
+                        echo '</div></div></section>';
+                    }
+                } catch (Throwable $e) {
+                    error_log('Error rendering team section: ' . $e->getMessage());
+                }
+                break;
         }
     }
 }
