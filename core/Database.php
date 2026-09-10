@@ -660,6 +660,12 @@ class Database
             '2026_08_social_twitter' => function (PDO $pdo): void {
                 self::addColumnIfMissing($pdo, 'settings', 'twitter_url', 'VARCHAR(255) NULL', 'tiktok_url');
             },
+            '2026_08_go_declaration' => function (PDO $pdo): void {
+                self::addColumnIfMissing($pdo, 'settings', 'go_declaration_enabled', 'TINYINT(1) NOT NULL DEFAULT 0', 'twitter_url');
+                self::addColumnIfMissing($pdo, 'settings', 'go_declaration_title', "VARCHAR(150) NULL DEFAULT 'G.O. Declaration'", 'go_declaration_enabled');
+                self::addColumnIfMissing($pdo, 'settings', 'go_declaration_text', 'TEXT NULL', 'go_declaration_title');
+                self::addColumnIfMissing($pdo, 'settings', 'go_declaration_mode', "VARCHAR(20) NOT NULL DEFAULT 'marquee'", 'go_declaration_text');
+            },
             '2026_08_cpanel_email' => function (PDO $pdo): void {
                 // Automatic corporate email creation for approved church admins.
                 self::addColumnIfMissing($pdo, 'settings', 'email_cpanel_enabled', 'TINYINT(1) NOT NULL DEFAULT 0', 'smtp_from');

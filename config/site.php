@@ -31,6 +31,10 @@ return [
     'youtube_url'          => null,
     'tiktok_url'           => null,
     'twitter_url'          => null,
+    'go_declaration_enabled' => 0,
+    'go_declaration_title'   => 'G.O. Declaration',
+    'go_declaration_text'    => null,
+    'go_declaration_mode'    => 'marquee', // marquee | static
     'livestream_embed_url' => null,
     'livestream_is_live'   => 0,
     'giving_url'           => null,

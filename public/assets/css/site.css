@@ -40,6 +40,91 @@ p{margin:0 0 1em;}
 .btn-block{width:100%;}
 .btn-sm{padding:9px 18px; font-size:13px;}
 
+/* General Overseer Declaration Top Banner */
+.go-declaration-bar {
+  background: linear-gradient(135deg, #241638 0%, #16122b 50%, #301f24 100%);
+  border-bottom: 1px solid rgba(232, 185, 95, 0.3);
+  color: var(--gold-soft);
+  font-size: 13.5px;
+  line-height: 1.4;
+  position: relative;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  padding: 8px 16px;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+}
+.go-declaration-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(232, 185, 95, 0.15);
+  border: 1px solid rgba(232, 185, 95, 0.4);
+  color: var(--gold);
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-right: 12px;
+}
+.go-declaration-bar .go-icon {
+  font-size: 13px;
+}
+.go-declaration-marquee {
+  justify-content: flex-start;
+}
+.go-marquee-track {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  display: flex;
+}
+.go-marquee-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 24px;
+  white-space: nowrap;
+  animation: go-marquee-scroll 35s linear infinite;
+  padding-left: 100%;
+}
+.go-declaration-bar:hover .go-marquee-content {
+  animation-play-state: paused;
+}
+@keyframes go-marquee-scroll {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-100%); }
+}
+.go-sep {
+  color: var(--gold);
+  font-size: 10px;
+  opacity: 0.6;
+}
+.go-declaration-static {
+  justify-content: center;
+  text-align: center;
+}
+.go-static-content {
+  color: var(--ink);
+  font-weight: 500;
+}
+@media (max-width: 640px) {
+  .go-declaration-bar {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 8px 12px;
+    gap: 4px;
+  }
+  .go-declaration-badge {
+    margin-right: 0;
+  }
+  .go-declaration-static {
+    align-items: center;
+  }
+}
+
 /* Top nav */
 .site-header{
   position:sticky; top:0; z-index:50; backdrop-filter:blur(16px);

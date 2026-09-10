@@ -67,6 +67,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'youtube_url' => trim($_POST['youtube_url'] ?? ''),
         'tiktok_url' => trim($_POST['tiktok_url'] ?? ''),
         'twitter_url' => trim($_POST['twitter_url'] ?? ''),
+        'go_declaration_enabled' => isset($_POST['go_declaration_enabled']) ? 1 : 0,
+        'go_declaration_title' => trim($_POST['go_declaration_title'] ?? "G.O. Declaration"),
+        'go_declaration_text' => trim($_POST['go_declaration_text'] ?? ''),
+        'go_declaration_mode' => in_array($_POST['go_declaration_mode'] ?? 'marquee', ['marquee', 'static'], true) ? $_POST['go_declaration_mode'] : 'marquee',
         'livestream_embed_url' => trim($_POST['livestream_embed_url'] ?? ''),
         'livestream_is_live' => isset($_POST['livestream_is_live']) ? 1 : 0,
         'giving_url' => trim($_POST['giving_url'] ?? ''),
@@ -214,6 +218,30 @@ require __DIR__ . '/partials/layout-open.php';
         <?php if ($row['favicon_path']): ?><img src="<?= e(uploadUrl($row['favicon_path'])) ?>" class="thumb" alt=""><?php endif; ?>
       </div>
     </div>
+  </div>
+
+  <div class="card">
+    <h2>General Overseer (G.O.) Declaration</h2>
+    <p class="sub">Set a prophetic word or annual theme declaration from the General Overseer. Choose between an animated marquee banner or a bold static announcement at the top of the website.</p>
+    <div class="checkbox-row">
+      <input type="checkbox" id="go_declaration_enabled" name="go_declaration_enabled" <?= !empty($row['go_declaration_enabled']) ? 'checked' : '' ?>>
+      <label for="go_declaration_enabled" style="margin:0;">Show G.O. Declaration Banner on website</label>
+    </div>
+    <div class="row two">
+      <div>
+        <label for="go_declaration_title">Banner Title</label>
+        <input type="text" id="go_declaration_title" name="go_declaration_title" value="<?= e((string) ($row['go_declaration_title'] ?? "G.O. Declaration")) ?>" placeholder="e.g. G.O. Prophetic Word for 2026">
+      </div>
+      <div>
+        <label for="go_declaration_mode">Display Style</label>
+        <select id="go_declaration_mode" name="go_declaration_mode">
+          <option value="marquee" <?= ($row['go_declaration_mode'] ?? 'marquee') === 'marquee' ? 'selected' : '' ?>>Scrolling Marquee (Animated)</option>
+          <option value="static" <?= ($row['go_declaration_mode'] ?? '') === 'static' ? 'selected' : '' ?>>Static Announcement Banner (Fixed Top)</option>
+        </select>
+      </div>
+    </div>
+    <label for="go_declaration_text">Declaration Message / Text</label>
+    <textarea id="go_declaration_text" name="go_declaration_text" rows="3" placeholder="Enter the General Overseer's declaration or theme message here..."><?= e((string) ($row['go_declaration_text'] ?? '')) ?></textarea>
   </div>
 
   <div class="card">
