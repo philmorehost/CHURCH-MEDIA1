@@ -30,6 +30,7 @@ return [
     'instagram_url'        => null,
     'youtube_url'          => null,
     'tiktok_url'           => null,
+    'twitter_url'          => null,
     'livestream_embed_url' => null,
     'livestream_is_live'   => 0,
     'giving_url'           => null,

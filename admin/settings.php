@@ -66,6 +66,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'instagram_url' => trim($_POST['instagram_url'] ?? ''),
         'youtube_url' => trim($_POST['youtube_url'] ?? ''),
         'tiktok_url' => trim($_POST['tiktok_url'] ?? ''),
+        'twitter_url' => trim($_POST['twitter_url'] ?? ''),
         'livestream_embed_url' => trim($_POST['livestream_embed_url'] ?? ''),
         'livestream_is_live' => isset($_POST['livestream_is_live']) ? 1 : 0,
         'giving_url' => trim($_POST['giving_url'] ?? ''),
@@ -314,6 +315,10 @@ require __DIR__ . '/partials/layout-open.php';
     <div class="row two">
       <div><label for="youtube_url">YouTube URL</label><input type="url" id="youtube_url" name="youtube_url" value="<?= e((string) $row['youtube_url']) ?>"></div>
       <div><label for="tiktok_url">TikTok URL</label><input type="url" id="tiktok_url" name="tiktok_url" value="<?= e((string) $row['tiktok_url']) ?>"></div>
+    </div>
+    <div class="row two">
+      <div><label for="twitter_url">X / Twitter URL</label><input type="url" id="twitter_url" name="twitter_url" value="<?= e((string) ($row['twitter_url'] ?? '')) ?>" placeholder="https://x.com/yourchurch or https://twitter.com/yourchurch"></div>
+      <div></div>
     </div>
     <label for="livestream_embed_url">Livestream YouTube Link (paste your channel's live video URL)</label>
     <input type="url" id="livestream_embed_url" name="livestream_embed_url" value="<?= e((string) $row['livestream_embed_url']) ?>" placeholder="https://www.youtube.com/watch?v=... or https://www.youtube.com/live/...">

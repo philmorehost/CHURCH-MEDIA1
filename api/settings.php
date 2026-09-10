@@ -21,6 +21,7 @@ jsonResponse(['status' => 'success', 'data' => [
         'instagram' => $s['instagram_url'] ?? null,
         'youtube' => $s['youtube_url'] ?? null,
         'tiktok' => $s['tiktok_url'] ?? null,
+        'twitter' => $s['twitter_url'] ?? null,
     ],
     'livestream' => [
         'embed_url' => $s['livestream_embed_url'] ?? null,

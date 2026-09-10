@@ -7,6 +7,7 @@ $socials = [
     'Instagram' => $s['instagram_url'] ?? null,
     'YouTube' => $s['youtube_url'] ?? null,
     'TikTok' => $s['tiktok_url'] ?? null,
+    'X (Twitter)' => $s['twitter_url'] ?? null,
 ];
 ?>
 </main>

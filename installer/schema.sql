@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS `settings` (
   `instagram_url` VARCHAR(255) NULL,
   `youtube_url` VARCHAR(255) NULL,
   `tiktok_url` VARCHAR(255) NULL,
+  `twitter_url` VARCHAR(255) NULL,
   `livestream_embed_url` VARCHAR(500) NULL,
   `livestream_is_live` TINYINT(1) NOT NULL DEFAULT 0,
   `giving_url` VARCHAR(500) NULL,

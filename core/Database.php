@@ -657,6 +657,9 @@ class Database
                 // All church names are stored in CAPS.
                 $pdo->exec('UPDATE org_units SET name = UPPER(name)');
             },
+            '2026_08_social_twitter' => function (PDO $pdo): void {
+                self::addColumnIfMissing($pdo, 'settings', 'twitter_url', 'VARCHAR(255) NULL', 'tiktok_url');
+            },
             '2026_08_cpanel_email' => function (PDO $pdo): void {
                 // Automatic corporate email creation for approved church admins.
                 self::addColumnIfMissing($pdo, 'settings', 'email_cpanel_enabled', 'TINYINT(1) NOT NULL DEFAULT 0', 'smtp_from');
