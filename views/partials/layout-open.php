@@ -61,9 +61,9 @@ try {
 <body>
 
 <?php
-$goEnabled = !empty($s['go_declaration_enabled']) && !empty(trim((string) ($s['go_declaration_text'] ?? '')));
-$goTitle = trim((string) ($s['go_declaration_title'] ?? "G.O. Declaration"));
 $goText = trim((string) ($s['go_declaration_text'] ?? ''));
+$goEnabled = !empty($s['go_declaration_enabled']) && $goText !== '';
+$goTitle = trim((string) ($s['go_declaration_title'] ?? "G.O. Declaration"));
 $goMode = ($s['go_declaration_mode'] ?? 'marquee') === 'static' ? 'static' : 'marquee';
 ?>
 <?php if ($goEnabled): ?>
@@ -75,6 +75,8 @@ $goMode = ($s['go_declaration_mode'] ?? 'marquee') === 'static' ? 'static' : 'ma
     <?php if ($goMode === 'marquee'): ?>
       <div class="go-marquee-track">
         <div class="go-marquee-content">
+          <span><?= e($goText) ?></span>
+          <span class="go-sep">✦</span>
           <span><?= e($goText) ?></span>
           <span class="go-sep">✦</span>
           <span><?= e($goText) ?></span>
