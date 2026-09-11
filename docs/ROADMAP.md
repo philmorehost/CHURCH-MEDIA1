@@ -1,0 +1,441 @@
+# CHURCH-MEDIA1 — Feature Roadmap & Implementation Plan
+
+> Scope: website (PHP 8.2, flat-file CMS) + Flutter app, across two churches.
+> This document is the working plan. Tick items off as they ship.
+
+---
+
+## 0. How to read this plan
+
+- Work is split into **phases**. Each phase is independently shippable and verifiable —
+  no phase leaves the site in a half-finished state.
+- **Effort** is measured in *build sessions* (one session = implement + verify + commit).
+- **Cost** flags anything needing a paid account or per-use spend.
+- Every phase ends with: `php -l` on touched files, a scratch-database test where the
+  change is data-driven, `flutter analyze` clean if the app changed, and a commit + push.
+
+---
+
+## 1. Ground rules (apply to every phase)
+
+### Conventions to follow
+- New DB changes go into the `migrations()` array in `core/Database.php` keyed
+  `YYYY_NN_description`, **and** into `installer/schema.sql` so fresh installs match.
+- Admin pages need **no route entry** — `/admin/foo` auto-loads `admin/foo.php`
+  (segment must match `/^[a-z0-9_-]+$/`).
+- Public views are rendered through `render()`; they must **never** require
+  `views/partials/layout-open.php` / `layout-close.php` themselves.
+- Admin pages set `$pageTitle` + `$activeNav` and require the admin layout partials.
+  Add a nav entry to `admin/partials/layout-open.php` (`$navItems` or `$navItemsSystem`).
+- Scope every list/action to the user's unit using the existing
+  `Unit::scopeClause()` / `Unit::inScope()` / `Unit::inAssignableScope()` helpers, and
+  label levels with `Unit::labelFor()` / `pluralFor()` — never hard-code "Parish".
+- New service classes mirror `core/CpanelApi.php` (`configured()`, `ok/error` array
+  returns, no exceptions escaping).
+- New background work goes in `cli/` alongside `cli/media_worker.php`, driven by cron.
+- Long-running/scheduled sends must be **resumable and idempotent** — assume the worker
+  dies mid-batch.
+
+### Security & privacy rules
+- Secrets (SMS token, WhatsApp token, payment keys) are stored with
+  `encryptSecret()` / read with `decryptSecret()`, are **masked** in every UI, and are
+  never written to logs or exported.
+- Every outbound message send is **audit-logged**: who, when, channel, target segment,
+  recipient count, cost, and result.
+- All send endpoints are CSRF-protected (`Csrf::valid()` / `Csrf::field()`) and
+  rate-limited (`RateLimiter`).
+- PII (phone numbers, emails) is treated as personal data: exports are logged, and the
+  privacy policy text in `installer/schema.sql` is updated whenever a new data category
+  is collected.
+- Contacts carry an **opt-out flag that is honoured on every send path**.
+
+---
+
+## 2. Phase overview
+
+| Phase | Theme | Ships | Effort | Cost |
+|---|---|---|---|---|
+| **1** | Quick wins, no new vendors | Comments moderation, analytics dashboard, real RSVP + `.ics`, share cards, prayer wall depth, level-aware push targeting, backups & data export | 6–8 sessions | None |
+| **2** | **Messaging Hub — SMS** (explicit request) | Contacts address book, groups/segments, sender-ID management, compose + scheduling, templates, campaigns/history, wallet, worker, full guide | 8–10 sessions | Per-SMS (wallet) |
+| **3** | Sermons: series + podcast | Sermon series, series pages, podcast RSS feed + Spotify/Apple submission | 3–4 sessions | None |
+| **4** | WhatsApp channel | Official Cloud API integration (templates, 24-h window, webhooks); optional quarantined unofficial bridge behind a flag | 5–7 sessions | Per-conversation |
+| **5** | Members & daily engagement | Member accounts, daily devotional, Bible reading plans + streaks, offline sermon downloads | 10–12 sessions | None |
+| **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None |
+| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None |
+
+**Decide early:** whether **Phase 7 multi-tenant** is a real goal. If you plan to onboard
+more churches, the tenant/branding concept should be designed *before* Phases 2–6 add
+settings, templates and content, or it becomes a painful retrofit. It does not have to be
+built first — but its shape should be agreed.
+
+---
+
+## 3. Phase 1 — Quick wins, no new vendors
+
+### 1.1 Comments moderation queue
+- **DB**: `post_comments` gains `status` ENUM('pending','approved','rejected','spam')
+  DEFAULT `approved` (so existing comments are unaffected), `moderated_by`, `moderated_at`,
+  `report_count`, `is_flagged`. New `comment_reports` table (comment_id, ip, reason, created_at).
+- **New**: `admin/comments.php` — queue with filters (pending / flagged / spam / all),
+  bulk approve/reject/delete, reason field, per-church scoping.
+- **Modify**: `api/comments.php` (only return `approved`; expose a report endpoint),
+  `public/assets/js/feed.js` (report button), `views/feed.php`.
+- **Extras**: blocked-word list in settings, auto-flag on link-spam patterns, "first
+  comment held for review" rule.
+- **Verify**: scratch DB — post/approve/reject cycle, public API hides non-approved,
+  scope isolation between two churches.
+
+### 1.2 Analytics dashboard
+- **DB**: `analytics_events` (`id`, `occurred_at`, `event` VARCHAR(60), `path`, `org_unit_id`,
+  `post_id`, `sermon_id`, `event_id`, `device` ENUM('web','app'), `session_hash`,
+  `referrer_host`, `country`, `meta` JSON) + indexes on `(occurred_at)`, `(event)`,
+  `(org_unit_id)`. `analytics_daily` roll-up table (filled by the worker) so dashboards
+  stay fast as data grows.
+- **New**: `core/Analytics.php` (buffered, fire-and-forget `record()`; never blocks a request),
+  `api/analytics.php` (POST beacon, rate-limited, no PII), `cli/analytics_rollup.php`
+  (nightly aggregation + retention pruning), `admin/analytics.php`.
+- **Modify**: `views/partials/layout-open.php` (beacon script), `api/post.php`
+  (count views there instead of ad-hoc `post_views`), app screens to send `device=app`.
+- **Dashboard shows**: traffic + trends, top sermons/reels/testimonies, web vs app split,
+  search terms, giving trend, newcomers trend, per-church comparison, date-range picker.
+- **Verify**: scratch DB with synthetic events; assert roll-up maths and that the beacon
+  adds < 5 ms.
+
+### 1.3 Real RSVP + calendar
+- **DB**: `event_rsvps` (`event_id`, `name`, `email`, `phone`, `guests`, `status`
+  ENUM('going','maybe','declined','waitlist'), `token`, `created_at`) + `events.max_capacity`,
+  `events.rsvp_mode` ENUM('off','external','internal'). Keep `rsvp_url` for `external`.
+- **New**: `api/rsvp.php`, `views/event-detail.php` RSVP form, `.ics` download endpoint,
+  "Add to Google Calendar" link, "Add to Calendar" in the app.
+- **Modify**: `admin/events.php` (capacity, mode, attendee list, CSV export, check-in),
+  `api/events.php` (return counts + `spots_left`), app `event_detail_screen.dart`.
+- **Verify**: capacity edge cases (exactly full, over-booked, waitlist promotion),
+  `.ics` validates, no double-RSVP from the same email.
+
+### 1.4 Auto share cards
+- **New**: `api/og.php?type=sermon|reel|testimony|event&id=` generating a 1200×630 PNG
+  (GD `imagettftext`), cached in `storage/cache/og/`, with church branding.
+- **Modify**: `views/partials/layout-open.php` (`og:image` from the generator),
+  `views/sermon-detail.php`, `views/event-detail.php`, `views/testimonies.php`.
+- **App**: a Share action that emits the same card URL.
+- **Verify**: each type renders, cache hit/miss, fallback when GD fonts are missing.
+
+### 1.5 Prayer wall depth
+- **DB**: `prayer_requests` gains `increment_count`, `is_anonymous`, `answered_at`,
+  `answer_note`, `is_featured`. New `prayer_participants` (request_id, session_hash, created_at)
+  so one person counts once.
+- **Modify**: `api/prayer.php` (prayer counter, anonymous mode, answered flag),
+  `views/prayer.php` (counter button, "Answered Prayers" wall, anonymous toggle),
+  `admin/prayer.php` (mark answered, feature, moderate).
+- **Verify**: counter de-dupes by session, anonymous requests hide the name publicly but
+  not in admin, answered wall only shows approved entries.
+
+### 1.6 Level-aware push targeting
+- **DB**: `notifications` gains `target_level` VARCHAR(40) NULL, `target_unit_id` INT NULL.
+- **Modify**: `admin/notifications.php` (pick **any** level from `Unit::levels()` — "everyone
+  under Zone X"), `core/Pusher.php` (resolve audience via `Unit::subtreeIds()`).
+- **Verify**: a notification aimed at a mid-level reaches every church beneath it, and a
+  church admin cannot target outside their own subtree.
+
+### 1.7 Backups & data export
+- **New**: `cli/backup.php` — `mysqldump` (or PHP-based dump fallback) + media manifest,
+  written to `storage/backups/`, rotated (keep N days/weeks/months), optional off-site copy.
+  `admin/backup.php` — list backups, download, run-now, restore instructions.
+- **Modify**: `admin/settings.php` (schedule + retention settings), `admin/guide.php`.
+- **Verify**: run a backup against the scratch DB, confirm the dump restores into an empty
+  database and row counts match.
+
+---
+
+## 4. Phase 2 — Messaging Hub: Bulk SMS (explicit request)
+
+Gateway: **PhilmoreSMS** — `https://app.philmoresms.com/api/`
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `balance.php` | POST `token` | Wallet balance |
+| `sms.php` | POST `token`, `senderID`, `recipients`, `message` | Send bulk SMS |
+| `senderID.php` | POST `token`, `senderID`, `message` | Register a sender ID |
+| `check_senderID.php` | GET/POST | Sender ID status (`pending`/`approved`/`rejected`) |
+
+Response contract: JSON with `error_code` — `000` success, `400` bad params,
+`401` auth failure, `405` wrong method, `107` insufficient wallet balance,
+`110` restricted words in the message.
+
+Billing: 1 unit per 160 chars for the first segment, 1 unit per 153 chars after that
+(recalculate for UCS-2 / non-GSM characters — 70 then 67 — so `₦` and emoji are estimated
+correctly).
+
+Recipient format: `2348012345678` — country code, **no** leading `0`, **no** `+`.
+
+### 2.1 Core service — `core/Sms.php`
+```
+configured(): bool
+balance(): array                       // ['ok','balance','raw','error']
+send(array $msisdns, string $message, ?string $senderId = null): array
+registerSenderId(string $id, string $sample): array
+senderIdStatus(string $id): array
+normaliseMsisdn(string $raw, string $country = '234'): ?string
+segmentsFor(string $message): int       // GSM-7 vs UCS-2 aware
+estimateUnits(array $msisdns, string $message): int
+errorMessage(string $code): string      // friendly text for 000/400/401/405/107/110
+```
+- Normalises and de-dupes numbers, chunks large lists (configurable, default 100 per call),
+  retries transient failures with backoff, and writes every attempt to the log.
+- Never throws — returns `['ok' => bool, 'error' => string]` like `CpanelApi`.
+
+### 2.2 Schema
+- `sms_senders` — `id`, `sender_id` VARCHAR(11) UNIQUE, `status` ENUM('pending','approved','rejected'),
+  `sample_message`, `is_default`, `org_unit_id`, `checked_at`, `created_at`.
+- `sms_contacts` — `id`, `name`, `msisdn` VARCHAR(20) UNIQUE (normalised), `email`,
+  `org_unit_id`, `source` ENUM('manual','newcomer','subscriber','team','testimony','registration','form','app','import'),
+  `source_ref_id`, `tags` VARCHAR(255), `is_opted_out` TINYINT, `opt_out_at`, `notes`,
+  `created_at`, `updated_at`.
+- `sms_groups` — `id`, `name`, `slug`, `kind` ENUM('static','dynamic'), `rule` JSON NULL,
+  `org_unit_id`, `created_by`, `created_at`.
+- `sms_group_members` — `group_id`, `contact_id`, `added_at` (PK on the pair).
+- `sms_templates` — `id`, `name`, `body`, `org_unit_id`, `created_at`.
+- `sms_campaigns` — `id`, `title`, `message`, `sender_id`, `group_id` NULL, `status`
+  ENUM('draft','scheduled','queued','sending','sent','partial','failed','cancelled'),
+  `scheduled_at`, `started_at`, `finished_at`, `total_recipients`, `sent_count`,
+  `failed_count`, `units_charged`, `created_by`, `org_unit_id`, `created_at`.
+- `sms_campaign_recipients` — `campaign_id`, `contact_id`, `msisdn`, `status`
+  ENUM('pending','sent','failed','skipped'), `error_code`, `error_note`, `sent_at`
+  (unique on `campaign_id`+`msisdn` → idempotent retries).
+- `sms_messages_log` — every raw gateway call: request summary (**no token**), response
+  code, HTTP status, duration, `created_at`. Used by the diagnostics view.
+- `sms_wallet_log` — periodic balance snapshots so you can see spend over time.
+
+### 2.3 Contact sources (wired to what already exists)
+
+| Source | Table / field | Status |
+|---|---|---|
+| Newcomers | `newcomers.whatsapp_phone` | ✅ exists |
+| Church team / admins | `users` — **needs `phone`** | ➕ add column |
+| Newsletter subscribers | `newsletter_subscribers` — **needs `phone`** | ➕ add column |
+| Testimonies | `testimonies.phone` | ✅ exists |
+| Registrations | `pending_registrations.phone` | ✅ exists |
+| Form submissions | phone-type fields in `form_submissions` payload | ✅ exists |
+| App users | `device_tokens` — **needs `phone`** if we want SMS reach | ➕ add column |
+| Manual / CSV | `sms_contacts` | ➕ new |
+| Members (Phase 5) | `members` | 🔜 later |
+
+Also add a **phone field to the user profile** (`admin/account.php` + `admin/users.php`)
+so "send to church team" works, and make phone capture explicit + consented on the
+newcomer and newsletter forms (opt-in checkbox wording added to the privacy policy).
+
+### 2.4 Admin screens — `admin/sms.php` (tabbed, super-admin + scoped admins)
+
+1. **Dashboard** — live wallet balance (`balance.php`), units used this month, delivery
+   success rate, cost estimate for the next campaign, recent campaigns, low-balance warning,
+   gateway diagnostics (last error).
+2. **Compose** — sender-ID picker (approved only), recipient picker
+   (group / dynamic segment / unit subtree / manual paste / CSV upload), personalisation
+   placeholders (`{name}`, `{church}`), **live segment + unit + cost counter**, opt-out
+   footer preview, blocked-word pre-check, "send test to myself", schedule for later,
+   and a final confirmation summary showing exactly how many contacts and units will be used.
+3. **Contacts** — searchable address book: filter by source / unit / tag / opt-out status,
+   add & edit single contact, bulk tag, bulk opt-out, CSV import (column mapping + dry-run
+   preview + de-dupe report) and CSV export, and a one-click **Sync from church data**
+   (newcomers, users, subscribers, testimonies, registrations).
+4. **Groups & Segments** — static groups (hand-picked or pasted) and dynamic segments built
+   with simple rule rows, e.g. *Newcomers not yet followed up*, *All team in Zone X*,
+   *Subscribers who opted in*, *No attendance for 3 weeks*, *Birthday this month*.
+5. **Sender IDs** — register a new sender ID (with its sample message), status badge
+   (`pending`/`approved`/`rejected`), "check status" button, set default, per-church mapping.
+6. **Templates** — reusable bodies with placeholders; insert into Compose in one click.
+7. **Campaigns** — history with status, recipient/sent/failed counts, units charged, cost;
+   drill-down to per-recipient status; **resend to failures only**; export; cancel a
+   scheduled campaign.
+8. **Settings** — token (encrypted, masked, "test connection" button), default sender ID,
+   sender display name, country code, quiet hours (no sends outside e.g. 07:00–20:00),
+   daily unit cap, per-church sending permission, opt-out footer text, retention for logs.
+9. **Guide** — an on-page usage guide (numbered walkthrough: register sender ID → import
+   contacts → build a group → compose → test → schedule → review results), plus a new
+   section in `admin/guide.php` and a "what does this cost" worked example.
+
+### 2.5 Worker — `cli/sms_worker.php`
+- Called by cron every minute. Claims a batch of `pending` recipients from `queued`
+  campaigns, sends via `Sms::send()`, records per-recipient results, updates counters,
+  and finishes the campaign when no rows remain.
+- Checks the wallet first and **pauses** (status `partial`) with a clear admin alert when
+  the balance is short — never half-charges silently.
+- Respects quiet hours and the daily cap; resumable and idempotent.
+
+### 2.6 Verification for Phase 2
+- Unit-test `normaliseMsisdn()` (`0803…`, `+234803…`, `234803…`, `803…`), `segmentsFor()`
+  for ASCII and `₦`/emoji, and `errorMessage()` for all six codes.
+- Scratch-DB test: import → de-dupe → group → campaign → worker sends → counters correct →
+  resend-failures-only produces no duplicate sends.
+- `balance.php` and `check_senderID.php` against the live gateway with the **new** token.
+- Confirm the token is unreadable in the DB, never rendered in full, and absent from logs.
+
+---
+
+## 5. Phase 3 — Sermon series & podcast
+
+- **DB**: `sermon_series` (`id`, `title`, `slug`, `description`, `cover_image`, `org_unit_id`,
+  `is_published`, `created_at`), `sermons.series_id` + `sermons.series_position`, and podcast
+  fields on `sermons`: `audio_url`, `duration_seconds`, `episode_guid`, `is_explicit`.
+- **New**: `admin/series.php`, `views/series.php`, `views/series-detail.php`,
+  `api/series.php`, and `views/podcast.php` emitting a valid **RSS 2.0 + iTunes** feed with
+  `<enclosure>` audio, `itunes:*` tags, cover art and GUIDs.
+- **Modify**: `admin/sermons.php` (assign series + position, audio upload), `views/sermons.php`
+  (series grouping + filter), `api/sermons.php`, app `sermons_screen.dart` +
+  `sermon_detail_screen.dart` (series list, episode numbers, download).
+- **Verify**: feed validates against the W3C RSS validator and Apple's podcast requirements;
+  audio enclosure URL plays in a browser; series ordering is stable.
+
+## 6. Phase 4 — WhatsApp channel
+
+### Options
+
+| Approach | Capability | Risk | Verdict |
+|---|---|---|---|
+| **Official — WhatsApp Cloud API** (Meta Graph) | Template messages approved in advance, free-form replies inside the 24-h customer service window, buttons/media/lists, delivery + read receipts via webhook | None contractual; needs Meta Business verification, a dedicated number, and per-conversation pricing | ✅ **Recommended backbone** |
+| **WhatsApp Business app** (manual) | Broadcast lists (up to 256), quick replies, catalogue — human-driven | None; no automation | ✅ Fine as a stopgap, zero build |
+| **Unofficial bridge** (whatsapp-web.js / Baileys / WPPConnect) | Free-form messages, no template approval, no per-message cost, group posting | **Violates WhatsApp's Terms of Service**; the number can be banned permanently at any time with no appeal; breaks whenever WhatsApp changes internals; you must keep a Node process + session store alive | ⚠️ Only ever on a **spare, disposable** number, never the ministry's main line, and never on a critical path |
+
+### Can you use both at once?
+Technically yes, and the sane arrangement is:
+- **Official Cloud API** = all *member-facing* and *business-critical* messaging: welcome
+  messages, event reminders, giving receipts, follow-ups. Compliant, auditable, deliverable.
+- **Unofficial bridge** = optional, low-volume *internal* convenience only (e.g. posting the
+  weekly roster into a staff group), running on a **separate sacrificial SIM**, isolated
+  behind a feature flag with a documented kill-switch.
+- **Never** mix them on the same number, and never let an unofficial path send to the
+  congregation. If the bridge's number is banned, the church must lose nothing.
+
+### Build outline (official first)
+- **DB**: `wa_templates` (name, language, category, components JSON, status),
+  `wa_conversations` (contact, last inbound/outbound, window expiry),
+  `wa_messages` (direction, type, template, payload, `wa_message_id`, status, error),
+  `wa_opt_ins`.
+- **New**: `core/WhatsApp.php` (send template / send text / media, webhook verify +
+  signature check), `api/wa-webhook.php` (inbound messages, delivery status, opt-in/out),
+  `admin/whatsapp.php` (template manager, conversation inbox with the 24-h window indicator,
+  broadcast composer reusing the Phase-2 contacts/groups, per-church number mapping),
+  `cli/wa_worker.php`.
+- **Reuse**: the whole contacts/groups/segments layer from Phase 2 — one audience, two channels.
+- **Optional bridge (separate service)**: a small Node sidecar using a maintained unofficial
+  library, bound to `127.0.0.1`, with its own token, session store, and a health check;
+  PHP talks to it over HTTP. Behind `wa_unofficial_enabled` (default off).
+- **Verify**: webhook signature rejection test; template send in sandbox; inbound reply
+  within the window does not require a template; 24-h expiry forces a template; bridge off
+  by default.
+
+## 7. Phase 5 — Members & daily engagement
+
+- **Member accounts**: `members` table (name, email, phone, password_hash, `org_unit_id`,
+  `is_verified`, `notification_prefs` JSON, `last_seen_at`); separate auth guard
+  (`core/MemberAuth.php`) so member sessions never touch admin sessions; register/login/
+  verify/reset flows; profile + notification preferences; giving history and receipts;
+  saved posts and downloaded sermons; "my home cell"; then `members` becomes another
+  `sms_contacts` / WhatsApp source.
+- **Daily devotional**: `devotionals` (date, title, scripture reference, body, audio_url,
+  `org_unit_id`), admin editor with a month view and "generate from a sermon" helper,
+  public `/devotional` page, app home card, and a scheduled push at a set time.
+- **Bible reading plans**: `reading_plans` + `reading_plan_days` + `member_plan_progress`
+  (streak, last completed day), plan catalogue, day-by-day reader on top of the bundled
+  offline KJV in `mobile/assets/bible/kjv.json`, streak counter and reminder notification.
+- **Offline sermon downloads**: cache audio in app storage with a managed download list and
+  size/wipe controls.
+- **Verify**: reading progress survives app restart and works offline; devotional push
+  respects quiet hours and preferences; member sessions cannot reach `/admin/*`.
+
+## 8. Phase 6 — Operations
+
+- **Home cell finder**: leaf-level units gain `meeting_day`, `meeting_time`, `address`,
+  `leader_name`, `leader_phone`, `capacity`; public "Find a cell near me" with a
+  geolocation/dropdown fallback; app listing screen.
+- **Duty roster / service planning**: `service_plans` + `service_roles` + `service_assignments`,
+  per-service role slots (ushering, choir, media, children), invite + accept/decline,
+  automatic SMS/WhatsApp reminder 24 h before (uses Phase 2/4), and a "who is serving
+  this Sunday" view.
+- **Newcomer follow-up automation**: `follow_up_sequences` + `follow_up_steps` (day offset,
+  channel, template) and per-newcomer enrolment, driven by `cli/followup_worker.php`;
+  pipeline dashboard with conversion (first visit → second visit → member) and stall alerts.
+- **Giving campaigns**: `giving_campaigns` (goal, deadline, description, image) and
+  `donations.campaign_id`; public progress bars on `/give`, per-campaign reporting and
+  pledge tracking on top of the existing Payhub flow.
+- **Verify**: each automation is idempotent; a member who opts out mid-sequence is removed
+  immediately; campaign totals reconcile with `donations`.
+
+## 9. Phase 7 — Reach & platform
+
+- **Multi-tenant**: `tenants` table + `tenant_id` on the content tables that differ per
+  church (settings, pages, sermons, events, units root, branding, domains), host-based
+  resolution in `bootstrap.php`, per-tenant settings/media/storage prefixes, and a
+  super-admin tenant switcher. **Agree the shape before Phase 2–6 add settings.**
+  This is what makes onboarding a third church cheap — and it is the foundation for the
+  second church's app.
+- **Localisation**: `lang/` message catalogues + a `t()` helper for PHP, `intl`/ARB files
+  for Flutter; ship English first, then Yoruba / Igbo / Hausa; Bible translation selector.
+- **PWA**: web app manifest, service worker with cache-first shell + stale-while-revalidate
+  for API reads, offline fallback page, install prompt.
+- **App widgets & shortcuts**: verse of the day and next-service widgets, plus deep links
+  from shared sermon/reel URLs straight into the app.
+
+---
+
+## 10. Cross-cutting concerns (build these once, early)
+
+| Concern | Where |
+|---|---|
+| Outbound message audit log | One `outbound_messages_log` writer used by SMS + WhatsApp + email + push |
+| Audience resolver | One service that turns a group/segment/unit-subtree into a recipient list — reused by every channel |
+| Placeholder renderer | `{name}`, `{church}`, `{first_name}` — one implementation, shared |
+| Quiet hours + daily caps | Enforced centrally in the workers, not per screen |
+| Opt-out registry | One `is_opted_out` concept honoured by every channel |
+| Masked-secret UI component | One helper so no screen can accidentally render a full token |
+| Retry/backoff + idempotency | Shared worker base class so every `cli/*` job is safe to re-run |
+
+---
+
+## 11. Decisions needed from you
+
+1. **WhatsApp**: official Cloud API only, or official + a quarantined unofficial bridge on a
+   spare number? (I recommend official-only for anything member-facing.)
+2. **Multi-tenant in Phase 7**: is onboarding more churches a real goal? If yes, I'll design
+   the tenant shape before Phase 2 settings are written.
+3. **SMS sender ID**: what should we register (max 11 alphanumeric characters, e.g.
+   `YAYA` / `LP63YAYA` / `RCCGLP63`)? Sender IDs need approval — we can register one now so
+   it is approved by the time the module ships.
+4. **SMS defaults**: default country code (`234`), quiet hours, and the monthly unit cap you
+   are comfortable with.
+5. **Ordering**: happy with 1 → 2 → 3 → 4 → 5 → 6 → 7, or would you rather pull WhatsApp
+   (Phase 4) or Members (Phase 5) forward?
+
+---
+
+## 12. Recommended immediate next step
+
+**Phase 1** is pure upside: no vendors, no recurring cost, and it makes the site feel
+finished. I suggest starting with **1.1 comments moderation** and **1.2 analytics**, because
+analytics immediately starts collecting data that makes every later decision
+(what to promote, who to text, which sermon to repeat) measurable.
+
+Then **Phase 2 (SMS)** in full, since it is the explicit request and unlocks reminder,
+follow-up and roster automation in Phase 6 for free.
+
+---
+
+## Appendix A — PhilmoreSMS error codes
+
+| Code | Meaning | What the UI should say |
+|---|---|---|
+| `000` | Success — billed action completed | Sent |
+| `400` | Bad parameters / invalid structure (e.g. empty phone list) | "Check the recipient list and message body." |
+| `401` | Authentication failed — invalid developer token | "SMS token rejected — update it in Settings → SMS." |
+| `405` | Wrong HTTP method (endpoint requires POST) | "Gateway request error — please retry." |
+| `107` | Insufficient wallet balance | "Wallet balance is too low — top up PhilmoreSMS, then resume." |
+| `110` | Message contains restricted/blocklisted words | "Message blocked for restricted words — please rephrase." |
+
+## Appendix B — Cost maths helper
+
+Units per message = `ceil(len / segment_size)` where `segment_size` is **160** for the
+first segment and **153** for subsequent segments in GSM-7; for messages containing
+non-GSM characters (e.g. `₦`, curly quotes, emoji) the whole message is UCS-2, so the sizes
+become **70 / 67**. The Compose screen must show the live segment count and projected units
+before the user presses send, and the worker must re-check the wallet balance before each
+batch.
