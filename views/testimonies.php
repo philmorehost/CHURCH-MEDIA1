@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 $s = settings();
 
-$metaTitle = 'Testimonies & Praise Reports — ' . ($s['site_title'] ?? 'Church');
+$metaTitle = 'Testimonies & Praise Reports';
 $metaDescription = 'Read inspiring testimonies of God\'s goodness and share your own praise report with our church community.';
 $path = '/testimonies';
 
@@ -91,7 +91,12 @@ $renderTestimony = static function (array $t, bool $featured = false): void {
     <?php
 };
 
-require __DIR__ . '/partials/layout-open.php';
+/*
+ * Do NOT require partials/layout-open.php or layout-close.php here.
+ * render() (core/helpers.php) already buffers this view and wraps it in the
+ * site layout, so including them in the view printed the header and the footer
+ * a second time inside the page body.
+ */
 ?>
 
 <style>
@@ -459,4 +464,3 @@ require __DIR__ . '/partials/layout-open.php';
   })();
 </script>
 
-<?php require __DIR__ . '/partials/layout-close.php'; ?>
