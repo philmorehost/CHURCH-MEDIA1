@@ -650,6 +650,52 @@ $router->get('/contact', function () {
     render('contact');
 });
 
+$router->get('/testimonies', function () {
+    render('testimonies');
+});
+
+$router->post('/testimonies', function () {
+    Csrf::requireValid();
+    RateLimiter::require('testimonies', 5, 300);
+
+    $pdo = Database::getInstance()->getConnection();
+
+    $name = trim((string) ($_POST['name'] ?? ''));
+    $email = trim((string) ($_POST['email'] ?? ''));
+    $phone = trim((string) ($_POST['phone'] ?? ''));
+    $unitId = (int) ($_POST['unit_id'] ?? 0);
+    $unitId = $unitId > 0 ? $unitId : null;
+    $title = trim((string) ($_POST['title'] ?? ''));
+    $content = trim((string) ($_POST['content'] ?? ''));
+
+    if ($name === '') {
+        flash('testimony_error', 'Your full name is required.');
+        redirect('/testimonies#submit-testimony');
+    }
+    if ($title === '') {
+        flash('testimony_error', 'Please provide a title for your testimony.');
+        redirect('/testimonies#submit-testimony');
+    }
+    if ($content === '') {
+        flash('testimony_error', 'Please write your testimony details.');
+        redirect('/testimonies#submit-testimony');
+    }
+
+    $mediaUrl = null;
+    if (!empty($_FILES['media']['tmp_name']) && is_uploaded_file($_FILES['media']['tmp_name'])) {
+        $filename = MediaProcessor::processImage($_FILES['media']['tmp_name'], UPLOADS_WEBP_PATH);
+        if ($filename) {
+            $mediaUrl = 'webp/' . $filename;
+        }
+    }
+
+    $stmt = $pdo->prepare('INSERT INTO testimonies (unit_id, name, email, phone, title, content, media_url, status) VALUES (?, ?, ?, ?, ?, ?, ?, "pending")');
+    $stmt->execute([$unitId, $name, $email ?: null, $phone ?: null, $title, $content, $mediaUrl]);
+
+    flash('testimony_success', 'Thank you for sharing your praise report! Our ministry team will review it and publish it to the website shortly.');
+    redirect('/testimonies');
+});
+
 $router->get('/give', function () {
     render('give');
 });

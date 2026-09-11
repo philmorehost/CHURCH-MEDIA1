@@ -9,26 +9,61 @@ $metaTitle ??= $s['site_title'];
 $metaDescription ??= $s['meta_description'] ?? $s['site_tagline'] ?? '';
 $isLive = !empty($s['livestream_is_live']);
 
-$navLinks = [
-    '/' => 'Home',
-    '/feed' => 'Feed',
-    '/media' => 'Media',
-    '/events' => 'Events',
-    '/sermons' => 'Sermons',
-    '/units' => 'Parishes',
-    '/bible' => 'Bible',
-    '/live' => 'Live',
-    '/about' => 'About',
-    '/contact' => 'Contact',
-    '/advertise' => 'Advertise',
-    '/register' => 'Register',
+$navTree = [
+    ['href' => '/', 'label' => 'Home', 'children' => []],
+    ['href' => '/feed', 'label' => 'Feed', 'children' => []],
+    ['href' => '/media', 'label' => 'Media', 'children' => []],
+    ['href' => '/events', 'label' => 'Events', 'children' => []],
+    ['href' => '/sermons', 'label' => 'Sermons', 'children' => []],
+    ['href' => '/units', 'label' => 'Parishes', 'children' => []],
+    ['href' => '/bible', 'label' => 'Bible', 'children' => []],
+    ['href' => '/live', 'label' => 'Live', 'children' => []],
+    ['href' => '/testimonies', 'label' => 'Testimonies', 'children' => []],
+    ['href' => '/about', 'label' => 'About', 'children' => []],
+    ['href' => '/contact', 'label' => 'Contact', 'children' => []],
+    ['href' => '/advertise', 'label' => 'Advertise', 'children' => []],
+    ['href' => '/register', 'label' => 'Register', 'children' => []],
 ];
 try {
     $navPages = Database::getInstance()->getConnection()
-        ->query('SELECT slug, nav_label, title FROM pages WHERE is_published = 1 AND in_nav = 1 ORDER BY sort_order ASC, id ASC');
-    foreach ($navPages->fetchAll() as $pg) {
+        ->query('SELECT id, parent_id, slug, nav_label, title FROM pages WHERE is_published = 1 AND in_nav = 1 ORDER BY sort_order ASC, id ASC')
+        ->fetchAll();
+
+    $pageItems = [];
+    $subPages = [];
+
+    foreach ($navPages as $pg) {
         $href = $pg['slug'] === 'about' ? '/about' : '/page/' . rawurlencode((string) $pg['slug']);
-        $navLinks[$href] = $pg['nav_label'] ?: $pg['title'];
+        $label = $pg['nav_label'] ?: $pg['title'];
+        $item = ['id' => (int) $pg['id'], 'href' => $href, 'label' => $label, 'children' => []];
+
+        if (!empty($pg['parent_id'])) {
+            $subPages[] = ['parent_id' => (int) $pg['parent_id'], 'item' => $item];
+        } else {
+            $pageItems[(int) $pg['id']] = $item;
+        }
+    }
+
+    foreach ($subPages as $sp) {
+        $pId = $sp['parent_id'];
+        if (isset($pageItems[$pId])) {
+            $pageItems[$pId]['children'][] = $sp['item'];
+        }
+    }
+
+    foreach ($pageItems as $pId => $pItem) {
+        $foundIndex = null;
+        foreach ($navTree as $idx => $tItem) {
+            if ($tItem['href'] === $pItem['href']) {
+                $foundIndex = $idx;
+                break;
+            }
+        }
+        if ($foundIndex !== null) {
+            $navTree[$foundIndex]['children'] = array_merge($navTree[$foundIndex]['children'] ?? [], $pItem['children']);
+        } else {
+            $navTree[] = $pItem;
+        }
     }
 } catch (Throwable $e) {
     error_log('CMS nav skipped: ' . $e->getMessage());
@@ -98,10 +133,36 @@ $goMode = ($s['go_declaration_mode'] ?? 'marquee') === 'static' ? 'static' : 'ma
       <?= e($s['site_title']) ?>
     </a>
     <nav data-nav-links class="nav-links">
-      <?php foreach ($navLinks as $href => $label): ?>
-        <a href="<?= e($href) ?>" class="<?= $path === $href ? 'active' : '' ?>">
-          <?= e($label) ?><?php if ($href === '/live' && $isLive): ?> <span class="nav-live"><span class="dot"></span>LIVE</span><?php endif; ?>
-        </a>
+      <?php foreach ($navTree as $item): ?>
+        <?php
+          $href = $item['href'];
+          $label = $item['label'];
+          $children = $item['children'] ?? [];
+          $isActive = ($path === $href);
+          if (!$isActive && $children) {
+              foreach ($children as $c) {
+                  if ($path === $c['href']) { $isActive = true; break; }
+              }
+          }
+        ?>
+        <?php if ($children): ?>
+          <div class="nav-dropdown-wrap">
+            <a href="<?= e($href) ?>" class="nav-item-link <?= $isActive ? 'active' : '' ?>">
+              <?= e($label) ?> <span class="nav-caret">▾</span>
+            </a>
+            <div class="nav-dropdown-menu">
+              <?php foreach ($children as $child): ?>
+                <a href="<?= e($child['href']) ?>" class="<?= $path === $child['href'] ? 'active' : '' ?>">
+                  <?= e($child['label']) ?>
+                </a>
+              <?php endforeach; ?>
+            </div>
+          </div>
+        <?php else: ?>
+          <a href="<?= e($href) ?>" class="<?= $isActive ? 'active' : '' ?>">
+            <?= e($label) ?><?php if ($href === '/live' && $isLive): ?> <span class="nav-live"><span class="dot"></span>LIVE</span><?php endif; ?>
+          </a>
+        <?php endif; ?>
       <?php endforeach; ?>
     </nav>
     <button class="nav-toggle" data-nav-toggle aria-label="Menu">☰</button>

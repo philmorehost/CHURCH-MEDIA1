@@ -47,6 +47,8 @@ if ($action === 'save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $eyebrow = trim($_POST['eyebrow'] ?? '');
     $metaDescription = trim($_POST['meta_description'] ?? '');
     $navLabel = trim($_POST['nav_label'] ?? '');
+    $parentIdRaw = (int) ($_POST['parent_id'] ?? 0);
+    $parentId = $parentIdRaw > 0 ? $parentIdRaw : null;
     $isPublished = isset($_POST['is_published']) ? 1 : 0;
     $inNav = isset($_POST['in_nav']) ? 1 : 0;
     $sortOrder = max(0, (int) ($_POST['sort_order'] ?? 0));
@@ -71,12 +73,12 @@ if ($action === 'save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!$errors) {
         $contentJson = json_encode($content, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         if ($id > 0) {
-            $pdo->prepare('UPDATE pages SET title = ?, slug = ?, eyebrow = ?, content = ?, meta_description = ?, in_nav = ?, nav_label = ?, is_published = ?, sort_order = ? WHERE id = ?')
-                ->execute([$title, $slug, $eyebrow, $contentJson, $metaDescription, $inNav, $navLabel, $isPublished, $sortOrder, $id]);
+            $pdo->prepare('UPDATE pages SET parent_id = ?, title = ?, slug = ?, eyebrow = ?, content = ?, meta_description = ?, in_nav = ?, nav_label = ?, is_published = ?, sort_order = ? WHERE id = ?')
+                ->execute([$parentId, $title, $slug, $eyebrow, $contentJson, $metaDescription, $inNav, $navLabel, $isPublished, $sortOrder, $id]);
             flash('success', 'Page saved.');
         } else {
-            $pdo->prepare('INSERT INTO pages (title, slug, eyebrow, content, meta_description, in_nav, nav_label, is_published, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-                ->execute([$title, $slug, $eyebrow, $contentJson, $metaDescription, $inNav, $navLabel, $isPublished, $sortOrder]);
+            $pdo->prepare('INSERT INTO pages (parent_id, title, slug, eyebrow, content, meta_description, in_nav, nav_label, is_published, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+                ->execute([$parentId, $title, $slug, $eyebrow, $contentJson, $metaDescription, $inNav, $navLabel, $isPublished, $sortOrder]);
             flash('success', 'Page created.');
         }
         redirect('/admin/pages');
@@ -120,7 +122,7 @@ if ($action === 'edit') {
     $editPage = $editPage->fetch() ?: null;
 }
 
-$pages = $action === 'list' ? $pdo->query('SELECT * FROM pages ORDER BY sort_order ASC, id ASC')->fetchAll() : [];
+$pages = $action === 'list' ? $pdo->query('SELECT p.*, parent.title AS parent_title FROM pages p LEFT JOIN pages parent ON parent.id = p.parent_id ORDER BY COALESCE(p.parent_id, p.id) ASC, p.parent_id IS NOT NULL ASC, p.sort_order ASC, p.id ASC')->fetchAll() : [];
 
 $pageTitle = $action === 'edit' ? 'Edit Page' : ($action === 'create' ? 'New Page' : 'Pages');
 $activeNav = 'pages';
@@ -170,9 +172,29 @@ require __DIR__ . '/partials/layout-open.php';
           <input type="text" id="page_nav_label" name="nav_label" value="<?= e($pg['nav_label'] ?? '') ?>" placeholder="About">
         </div>
         <div>
+          <label for="parent_id">Parent Page (Menu Dropdown)</label>
+          <?php
+            $currentId = (int) ($pg['id'] ?? 0);
+            $parentStmt = $pdo->prepare('SELECT id, title, nav_label FROM pages WHERE (parent_id IS NULL OR parent_id = 0) AND id <> ? ORDER BY sort_order ASC, title ASC');
+            $parentStmt->execute([$currentId]);
+            $parentOptions = $parentStmt->fetchAll();
+          ?>
+          <select id="parent_id" name="parent_id">
+            <option value="0">— Top-Level Main Menu Item —</option>
+            <?php foreach ($parentOptions as $parentOpt): ?>
+              <option value="<?= (int) $parentOpt['id'] ?>" <?= (int) ($pg['parent_id'] ?? 0) === (int) $parentOpt['id'] ? 'selected' : '' ?>>
+                Sub-page of: <?= e($parentOpt['nav_label'] ?: $parentOpt['title']) ?>
+              </option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+      </div>
+      <div class="row two">
+        <div>
           <label for="page_sort">Sort Order <small>(lowest first)</small></label>
           <input type="number" id="page_sort" name="sort_order" value="<?= e((string) ($pg['sort_order'] ?? 0)) ?>" min="0" style="max-width:120px;">
         </div>
+        <div></div>
       </div>
     </div>
 
@@ -219,7 +241,14 @@ require __DIR__ . '/partials/layout-open.php';
         <tr><th>Title</th><th>Slug</th><th>Status</th><th>In Nav</th><th>Order</th><th>Updated</th><th></th></tr>
         <?php foreach ($pages as $pg): ?>
         <tr>
-          <td><strong><?= e($pg['title']) ?></strong></td>
+          <td>
+            <?php if (!empty($pg['parent_id'])): ?>
+              <span style="color:var(--gold-soft); margin-right:6px;">↳</span><strong><?= e($pg['title']) ?></strong>
+              <div style="font-size:11px; color:var(--ink-dim); margin-top:2px;">Sub-page of <em><?= e($pg['parent_title'] ?? 'Parent') ?></em></div>
+            <?php else: ?>
+              <strong><?= e($pg['title']) ?></strong>
+            <?php endif; ?>
+          </td>
           <td><code style="color:var(--ink-dim);"><?= e($pg['slug']) ?></code></td>
           <td>
             <form method="post" action="/admin/pages?action=toggle" style="display:inline;">

@@ -664,15 +664,20 @@ function renderPageSections(array $sections): void
                 if (!empty($section['heading'])) {
                     echo '<div class="section-head"><span class="eyebrow">' . e((string) ($section['eyebrow'] ?? '')) . '</span><h2>' . e((string) $section['heading']) . '</h2></div>';
                 }
-                $n = min(4, max(1, count($cols)));
+                $layoutCols = !empty($section['layout_columns']) ? (int) $section['layout_columns'] : count($cols);
+                $n = min(4, max(1, $layoutCols));
                 echo '<div class="grid grid-' . $n . '">';
                 foreach ($cols as $col) {
-                    echo '<div class="glass-card" style="padding:26px;">';
+                    echo '<div class="glass-card" style="padding:26px; display:flex; flex-direction:column; justify-content:space-between;"><div>';
                     if (!empty($col['heading'])) {
-                        echo '<h3 style="margin:0 0 10px;">' . e((string) $col['heading']) . '</h3>';
+                        echo '<h3 style="margin:0 0 10px; font-size:18px; font-weight:700;">' . e((string) $col['heading']) . '</h3>';
                     }
                     if (!empty($col['body'])) {
-                        echo '<p style="color:var(--ink-dim); margin:0;">' . nl2br(e((string) $col['body'])) . '</p>';
+                        echo '<p style="color:var(--ink-dim); margin:0 0 14px; line-height:1.6;">' . nl2br(e((string) $col['body'])) . '</p>';
+                    }
+                    echo '</div>';
+                    if (!empty($col['link'])) {
+                        echo '<div><a href="' . e((string) $col['link']) . '" class="btn sm secondary" style="margin-top:12px;">Learn More →</a></div>';
                     }
                     echo '</div>';
                 }
