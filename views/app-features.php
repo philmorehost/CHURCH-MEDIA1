@@ -173,12 +173,22 @@ $mark = e(mb_substr((string) $s['site_title'], 0, 1));
       </div>
 
       <div class="appf-card">
+        <div class="ic">✨</div>
+        <h3>G.O. Declaration &amp; Prophetic Words</h3>
+        <ul>
+          <li>Top marquee &amp; announcement banner for the G.O. Declaration</li>
+          <li>Yearly theme and prophetic declarations accessible at a glance</li>
+          <li>Stay connected with global leadership direction</li>
+        </ul>
+      </div>
+
+      <div class="appf-card">
         <div class="ic">📍</div>
-        <h3>Parishes &amp; More</h3>
+        <h3>Parishes &amp; Online Giving</h3>
         <ul>
           <li>Browse the Province → Zone → Area → Parish network</li>
-          <li>Live streaming, contact, giving, and search</li>
-          <li>Automatic app updates so you always have the latest</li>
+          <li>Online Tithes, Offerings &amp; Pledges via Payhub or Bank Transfer</li>
+          <li>Live streaming, contact links, and instant search</li>
         </ul>
       </div>
     </div>

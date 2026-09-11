@@ -225,13 +225,25 @@ require __DIR__ . '/partials/layout-open.php';
   </div>
 
   <div class="card" style="margin-bottom:18px;">
-    <h2 id="security">Security (<code>/admin/security</code>) <span class="pill role">ADMIN</span></h2>
-    <p>Review login attempts and security events, and block suspicious IPs. Helps you keep your church's admin area safe.</p>
+    <h2 id="security">Security &amp; Account Unblocking (<code>/admin/security</code>, <code>/unblock</code>, <code>/forgot-password</code>) <span class="pill role">ADMIN</span></h2>
+    <p>Review login attempts and security events, block suspicious IPs, and maintain account recovery mechanisms.</p>
+    <ul>
+      <li><strong>Security Unblock PIN:</strong> Every user sets a 4–6 digit PIN during registration or in <em>My Account</em>. If an IP or account is blocked due to failed login attempts, the user can restore access directly via <strong>/unblock</strong> using their credentials + PIN without waiting for manual intervention.</li>
+      <li><strong>Email OTP Password Reset:</strong> Users who forget their password can request a 6-digit OTP sent to their primary and backup emails via <strong>/forgot-password</strong>. If email access is lost, they can fall back to resetting their password using their Security Unblock PIN.</li>
+      <li><strong>Automatic MD5 Re-hashing:</strong> Existing passwords modified directly via phpMyAdmin in MD5 format are automatically detected on login and upgraded to Argon2id cryptographic hashes.</li>
+    </ul>
   </div>
 
   <div class="card" style="margin-bottom:18px;">
     <h2 id="settings">Settings (<code>/admin/settings</code>) <span class="pill super">SUPER</span></h2>
-    <p>Site-wide configuration — name, tagline, hero content, contact details (supports multiple comma/newline-separated phone numbers), social links, live stream link, giving URL, footer &amp; SEO, Bible source, and <strong>Email (SMTP)</strong> settings used for all outgoing mail (newsletters, notifications, security alerts).</p>
+    <p>Site-wide configuration — name, tagline, General Overseer Declaration, hero background media, contact details (supports multiple comma/newline-separated phone numbers), social links (Facebook, Instagram, YouTube, TikTok, X / Twitter), live stream link, giving URL, footer &amp; SEO, Bible source, and <strong>Email (SMTP)</strong> settings used for all outgoing mail (newsletters, notifications, security alerts).</p>
+    <ul>
+      <li><strong>General Overseer (G.O.) Declaration:</strong> Set a prophetic word or annual theme banner at the top of the website. Choose between an animated <strong>scrolling marquee</strong> or a bold <strong>static announcement banner</strong>.</li>
+      <li><strong>Homepage Hero Background:</strong> Choose between an animated gradient, background image, <strong>uploaded MP4/WebM background video</strong>, or a <strong>YouTube video background link</strong>.</li>
+      <li><strong>Multiple Contact Phone Numbers:</strong> Separate multiple phone numbers with commas or newlines; they automatically render as individual clickable <code>tel:</code> links on the contact page.</li>
+      <li><strong>Social Media Links:</strong> Add URLs for Facebook, Instagram, YouTube, TikTok, and X (Twitter) with clean inline SVG icons rendered in the website footer.</li>
+      <li><strong>On-Demand Media Worker:</strong> Trigger background video conversion and daily publisher ad reports immediately with the <strong>▶ Run Media Worker Now</strong> button.</li>
+    </ul>
     <p>It also includes the <strong>Mobile App Download Button</strong> — enable it, paste your Google Play link, and choose whether it shows on <code>all</code> pages or only selected ones (e.g. <code>/, /feed, /events</code>). A floating “Get it on Google Play” button then appears on the left edge of the public site.</p>
     <p><strong>Admin &amp; App Only Mode</strong> (same card): optionally nudge <strong>Android phone</strong> visitors to the app to boost adoption. Choose <em>Off</em> (default), a small <em>dismissible banner</em> (light touch), a <em>“Get the App” landing page</em> (with a “Continue to website” link), or <em>Force</em> (send straight to the Play link). iPhone and desktop visitors always keep the website, and search engines are never redirected — so SEO is unaffected.</p>
     <p>The <strong>Video Conversion (Cron Job)</strong> card explains how to keep the 9:16 video conversion running automatically on your server. Super-admin only.</p>
