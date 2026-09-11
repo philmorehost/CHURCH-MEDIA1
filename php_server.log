@@ -1,0 +1,7 @@
+[Wed Sep  9 21:40:28 2026] PHP 8.3.6 Development Server (http://localhost:8000) started
+[Wed Sep  9 21:41:26 2026] [::1]:49446 Accepted
+[Wed Sep  9 21:41:26 2026] [::1]:49446 [200]: HEAD /
+[Wed Sep  9 21:41:26 2026] [::1]:49446 Closing
+[Wed Sep  9 21:42:43 2026] [::1]:47930 Accepted
+[Wed Sep  9 21:42:43 2026] [::1]:47930 [200]: GET /
+[Wed Sep  9 21:42:43 2026] [::1]:47930 Closing

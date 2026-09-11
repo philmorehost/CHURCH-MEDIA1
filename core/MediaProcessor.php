@@ -387,6 +387,57 @@ class MediaProcessor
         return self::processVideoToReel($sourcePath, $destinationDirectory, $thumbDirectory, null, true);
     }
 
+    /**
+     * Downloads and stores a remote thumbnail image for YouTube, Facebook, Vimeo,
+     * or other video links as a local WebP cover image ('webp/...').
+     */
+    public static function fetchVideoUrlThumbnail(?string $videoUrl): ?string
+    {
+        if (!$videoUrl) {
+            return null;
+        }
+        $videoUrl = trim($videoUrl);
+        $imageUrl = null;
+
+        // 1. YouTube
+        $ytId = youtubeVideoId($videoUrl);
+        if ($ytId) {
+            $imageUrl = 'https://i.ytimg.com/vi/' . $ytId . '/hqdefault.jpg';
+        }
+        // 2. Vimeo
+        elseif (preg_match('#vimeo\.com/(?:video/)?([0-9]+)#', $videoUrl, $m)) {
+            $vimeoApi = 'https://vimeo.com/api/v2/video/' . $m[1] . '.json';
+            $ctx = stream_context_create(['http' => ['timeout' => 5, 'ignore_errors' => true]]);
+            $json = @file_get_contents($vimeoApi, false, $ctx);
+            if ($json) {
+                $data = json_decode($json, true);
+                if (is_array($data) && !empty($data[0]['thumbnail_large'])) {
+                    $imageUrl = $data[0]['thumbnail_large'];
+                }
+            }
+        }
+
+        if (!$imageUrl) {
+            return null;
+        }
+
+        $ctx = stream_context_create(['http' => [
+            'timeout' => 8,
+            'header' => "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\r\n",
+        ]]);
+        $imgData = @file_get_contents($imageUrl, false, $ctx);
+        if ($imgData === false || strlen($imgData) < 100) {
+            return null;
+        }
+
+        $tempPath = sys_get_temp_dir() . '/' . uniqid('vthumb_', true);
+        file_put_contents($tempPath, $imgData);
+        $storedName = self::compressImage($tempPath, UPLOADS_WEBP_PATH, 1280, 80, 'sermon_cover_');
+        @unlink($tempPath);
+
+        return $storedName ? 'webp/' . $storedName : null;
+    }
+
     /** SVG initial-letter favicon, used when no favicon has been uploaded. */
     public static function renderDynamicFavicon(string $initial): never
     {

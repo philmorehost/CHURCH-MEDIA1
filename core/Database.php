@@ -236,10 +236,13 @@ class Database
                 $pdo->exec("ALTER TABLE `form_fields` MODIFY COLUMN `field_type` ENUM('text','textarea','email','phone','number','date','url','select','radio','checkbox','image') NOT NULL DEFAULT 'text'");
             },
             '2026_08_pages' => function (PDO $pdo): void {
-                // Homepage hero: editable eyebrow text, background image, and CTA labels/links.
+                // Homepage hero: editable eyebrow text, background image, video/youtube background, and CTA labels/links.
                 self::addColumnIfMissing($pdo, 'settings', 'hero_eyebrow', "VARCHAR(120) NULL", 'hero_scripture');
                 self::addColumnIfMissing($pdo, 'settings', 'hero_image_path', "VARCHAR(255) NULL", 'hero_eyebrow');
-                self::addColumnIfMissing($pdo, 'settings', 'hero_cta_primary_label', "VARCHAR(60) NULL", 'hero_image_path');
+                self::addColumnIfMissing($pdo, 'settings', 'hero_type', "VARCHAR(20) NOT NULL DEFAULT 'gradient'", 'hero_image_path');
+                self::addColumnIfMissing($pdo, 'settings', 'hero_video_path', "VARCHAR(255) NULL", 'hero_type');
+                self::addColumnIfMissing($pdo, 'settings', 'hero_youtube_url', "VARCHAR(500) NULL", 'hero_video_path');
+                self::addColumnIfMissing($pdo, 'settings', 'hero_cta_primary_label', "VARCHAR(60) NULL", 'hero_youtube_url');
                 self::addColumnIfMissing($pdo, 'settings', 'hero_cta_primary_url', "VARCHAR(500) NULL", 'hero_cta_primary_label');
                 self::addColumnIfMissing($pdo, 'settings', 'hero_cta_secondary_label', "VARCHAR(60) NULL", 'hero_cta_primary_url');
                 self::addColumnIfMissing($pdo, 'settings', 'hero_cta_secondary_url', "VARCHAR(500) NULL", 'hero_cta_secondary_label');
@@ -653,6 +656,15 @@ class Database
 
                 // All church names are stored in CAPS.
                 $pdo->exec('UPDATE org_units SET name = UPPER(name)');
+            },
+            '2026_08_social_twitter' => function (PDO $pdo): void {
+                self::addColumnIfMissing($pdo, 'settings', 'twitter_url', 'VARCHAR(255) NULL', 'tiktok_url');
+            },
+            '2026_08_go_declaration' => function (PDO $pdo): void {
+                self::addColumnIfMissing($pdo, 'settings', 'go_declaration_enabled', 'TINYINT(1) NOT NULL DEFAULT 0', 'twitter_url');
+                self::addColumnIfMissing($pdo, 'settings', 'go_declaration_title', "VARCHAR(150) NULL DEFAULT 'G.O. Declaration'", 'go_declaration_enabled');
+                self::addColumnIfMissing($pdo, 'settings', 'go_declaration_text', 'TEXT NULL', 'go_declaration_title');
+                self::addColumnIfMissing($pdo, 'settings', 'go_declaration_mode', "VARCHAR(20) NOT NULL DEFAULT 'marquee'", 'go_declaration_text');
             },
             '2026_08_cpanel_email' => function (PDO $pdo): void {
                 // Automatic corporate email creation for approved church admins.

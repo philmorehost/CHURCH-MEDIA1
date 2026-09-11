@@ -15,6 +15,9 @@ return [
     'hero_scripture'       => '"For where two or three gather in my name, there am I with them." — Matthew 18:20',
     'hero_eyebrow'         => 'Welcome Home',
     'hero_image_path'      => null,
+    'hero_type'            => 'gradient', // gradient | image | video_upload | youtube
+    'hero_video_path'      => null,
+    'hero_youtube_url'     => null,
     'hero_cta_primary_label'   => 'Plan Your Visit',
     'hero_cta_primary_url'     => '/about',
     'hero_cta_secondary_label' => 'Watch the Feed',
@@ -27,6 +30,11 @@ return [
     'instagram_url'        => null,
     'youtube_url'          => null,
     'tiktok_url'           => null,
+    'twitter_url'          => null,
+    'go_declaration_enabled' => 0,
+    'go_declaration_title'   => 'G.O. Declaration',
+    'go_declaration_text'    => null,
+    'go_declaration_mode'    => 'marquee', // marquee | static
     'livestream_embed_url' => null,
     'livestream_is_live'   => 0,
     'giving_url'           => null,

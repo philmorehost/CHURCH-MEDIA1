@@ -30,6 +30,37 @@ $metaDescription = (string) ($page['meta_description'] ?: $page['eyebrow'] ?: $p
 
 $sections = json_decode((string) $page['content'], true);
 $sections = is_array($sections) ? $sections : [];
+
+if ($slug === 'about') {
+    $hasTeamSection = false;
+    foreach ($sections as $sec) {
+        if (($sec['type'] ?? '') === 'team') {
+            $hasTeamSection = true;
+            break;
+        }
+    }
+    if (!$hasTeamSection) {
+        // Insert team section before the CTA block if present, or append
+        $ctaIndex = null;
+        foreach ($sections as $idx => $sec) {
+            if (($sec['type'] ?? '') === 'cta') {
+                $ctaIndex = $idx;
+                break;
+            }
+        }
+        $teamBlock = [
+            'type' => 'team',
+            'heading' => 'Leadership & Ministry Team',
+            'eyebrow' => 'Our People',
+        ];
+        if ($ctaIndex !== null) {
+            array_splice($sections, $ctaIndex, 0, [$teamBlock]);
+        } else {
+            $sections[] = $teamBlock;
+        }
+    }
+}
+
 $firstType = $sections[0]['type'] ?? null;
 ?>
 

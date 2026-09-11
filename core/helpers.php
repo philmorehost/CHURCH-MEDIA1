@@ -322,15 +322,54 @@ function timeAgo(string $datetime): string
     return 'just now';
 }
 
-/** Converts a YouTube watch/share URL to an embeddable one; passes through anything else (Vimeo, already-embed links). */
-function embedUrl(?string $url): ?string
+/**
+ * Converts YouTube, Facebook, Vimeo, Instagram, TikTok, or Rumble video/reel
+ * links to cross-origin, autoplay-enabled embed URLs.
+ */
+function embedUrl(?string $url, bool $autoplay = true): ?string
 {
     if (!$url) {
         return null;
     }
-    if (preg_match('#youtu\.be/([a-zA-Z0-9_-]+)#', $url, $m) || preg_match('#youtube\.com/watch\?v=([a-zA-Z0-9_-]+)#', $url, $m)) {
-        return 'https://www.youtube.com/embed/' . $m[1];
+    $url = trim($url);
+
+    // YouTube: watch, shorts, live, embed, youtu.be
+    $ytId = youtubeVideoId($url);
+    if ($ytId) {
+        return 'https://www.youtube-nocookie.com/embed/' . $ytId . ($autoplay ? '?autoplay=1&mute=0&enablejsapi=1' : '');
     }
+
+    // Facebook video / reel / watch / fb.watch / fb.com
+    if (str_contains($url, 'facebook.com') || str_contains($url, 'fb.watch') || str_contains($url, 'fb.com')) {
+        return 'https://www.facebook.com/plugins/video.php?href=' . rawurlencode($url) . '&show_text=false' . ($autoplay ? '&autoplay=1&mute=0' : '');
+    }
+
+    // Vimeo
+    if (preg_match('#vimeo\.com/(?:video/)?([0-9]+)#', $url, $m)) {
+        return 'https://player.vimeo.com/video/' . $m[1] . ($autoplay ? '?autoplay=1' : '');
+    }
+
+    // Instagram post/reel
+    if (str_contains($url, 'instagram.com')) {
+        $clean = rtrim(explode('?', $url)[0], '/');
+        return $clean . '/embed/';
+    }
+
+    // TikTok
+    if (preg_match('#tiktok\.com/@[^/]+/video/([0-9]+)#', $url, $m)) {
+        return 'https://www.tiktok.com/embed/v2/' . $m[1];
+    }
+
+    // Rumble
+    if (str_contains($url, 'rumble.com')) {
+        if (preg_match('#rumble\.com/embed/([a-zA-Z0-9_-]+)#', $url, $m)) {
+            return 'https://rumble.com/embed/' . $m[1] . '/' . ($autoplay ? '?autoplay=2' : '');
+        }
+        if (preg_match('#rumble\.com/(v[a-zA-Z0-9_-]+)#', $url, $m)) {
+            return 'https://rumble.com/embed/' . $m[1] . '/' . ($autoplay ? '?autoplay=2' : '');
+        }
+    }
+
     return $url;
 }
 
@@ -681,6 +720,44 @@ function renderPageSections(array $sections): void
                     echo '<div class="hero-actions" style="margin-top:24px;"><a class="btn btn-gold" href="' . e($url) . '">' . e((string) $section['label']) . '</a></div>';
                 }
                 echo '</div></section>';
+                break;
+
+            case 'team':
+                try {
+                    $pdo = Database::getInstance()->getConnection();
+                    $heading = !empty($section['heading']) ? $section['heading'] : 'Leadership & Ministry Team';
+                    $eyebrow = !empty($section['eyebrow']) ? $section['eyebrow'] : 'Our People';
+                    $members = $pdo->query('SELECT * FROM team_members WHERE is_published = 1 ORDER BY sort_order ASC, name ASC')->fetchAll();
+                    if ($members) {
+                        echo '<section class="section page-team"><div class="container">';
+                        echo '<div class="section-head"><span class="eyebrow">' . e((string) $eyebrow) . '</span><h2>' . e((string) $heading) . '</h2></div>';
+                        $colCount = min(4, max(1, count($members)));
+                        echo '<div class="grid grid-' . $colCount . '">';
+                        foreach ($members as $m) {
+                            echo '<div class="glass-card team-card" style="padding:28px 22px; text-align:center; display:flex; flex-direction:column; align-items:center;">';
+                            if (!empty($m['photo'])) {
+                                echo '<div style="width:110px; height:110px; margin:0 auto 16px; border-radius:50%; overflow:hidden; border:2px solid var(--gold); box-shadow:0 6px 20px rgba(0,0,0,0.3); flex-shrink:0;">';
+                                echo '<img src="' . e(uploadUrl((string) $m['photo'])) . '" alt="' . e((string) $m['name']) . '" style="width:100%; height:100%; object-fit:cover;">';
+                                echo '</div>';
+                            } else {
+                                echo '<div style="width:110px; height:110px; margin:0 auto 16px; border-radius:50%; background:var(--bg-2); display:flex; align-items:center; justify-content:center; border:2px solid var(--gold); font-size:36px; font-weight:700; color:var(--gold); flex-shrink:0;">';
+                                echo e(strtoupper(substr(trim((string) $m['name']), 0, 1)));
+                                echo '</div>';
+                            }
+                            echo '<h3 style="margin:0 0 4px; font-size:20px; line-height:1.2;">' . e((string) $m['name']) . '</h3>';
+                            if (!empty($m['role_title'])) {
+                                echo '<p style="color:var(--gold-soft); font-size:13.5px; font-weight:600; margin:0 0 12px; letter-spacing:0.02em;">' . e((string) $m['role_title']) . '</p>';
+                            }
+                            if (!empty($m['bio'])) {
+                                echo '<p style="color:var(--ink-dim); font-size:14px; margin:0; line-height:1.6;">' . nl2br(e((string) $m['bio'])) . '</p>';
+                            }
+                            echo '</div>';
+                        }
+                        echo '</div></div></section>';
+                    }
+                } catch (Throwable $e) {
+                    error_log('Error rendering team section: ' . $e->getMessage());
+                }
                 break;
         }
     }

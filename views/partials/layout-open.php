@@ -60,6 +60,37 @@ try {
 </head>
 <body>
 
+<?php
+$goText = trim((string) ($s['go_declaration_text'] ?? ''));
+$goEnabled = !empty($s['go_declaration_enabled']) && $goText !== '';
+$goTitle = trim((string) ($s['go_declaration_title'] ?? "G.O. Declaration"));
+$goMode = ($s['go_declaration_mode'] ?? 'marquee') === 'static' ? 'static' : 'marquee';
+?>
+<?php if ($goEnabled): ?>
+  <div class="go-declaration-bar go-declaration-<?= $goMode ?>">
+    <div class="go-declaration-badge">
+      <span class="go-icon">✨</span>
+      <strong><?= e($goTitle) ?>:</strong>
+    </div>
+    <?php if ($goMode === 'marquee'): ?>
+      <div class="go-marquee-track">
+        <div class="go-marquee-content">
+          <span><?= e($goText) ?></span>
+          <span class="go-sep">✦</span>
+          <span><?= e($goText) ?></span>
+          <span class="go-sep">✦</span>
+          <span><?= e($goText) ?></span>
+          <span class="go-sep">✦</span>
+        </div>
+      </div>
+    <?php else: ?>
+      <div class="go-static-content">
+        <span><?= e($goText) ?></span>
+      </div>
+    <?php endif; ?>
+  </div>
+<?php endif; ?>
+
 <header class="site-header">
   <div class="nav-row container">
     <a href="/" class="nav-brand">

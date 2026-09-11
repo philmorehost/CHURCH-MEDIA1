@@ -69,6 +69,8 @@ if (in_array($action, ['create', 'edit'], true) && $_SERVER['REQUEST_METHOD'] ==
         if (!empty($_FILES['cover_image']['tmp_name']) && is_uploaded_file($_FILES['cover_image']['tmp_name'])) {
             $filename = MediaProcessor::processImage($_FILES['cover_image']['tmp_name'], UPLOADS_WEBP_PATH);
             $coverPath = $filename ? 'webp/' . $filename : null;
+        } elseif ($videoUrl) {
+            $coverPath = MediaProcessor::fetchVideoUrlThumbnail($videoUrl);
         }
         $audioPath = null;
         if (!empty($_FILES['audio']['tmp_name']) && is_uploaded_file($_FILES['audio']['tmp_name'])) {
@@ -168,8 +170,9 @@ require __DIR__ . '/partials/layout-open.php';
       <input type="text" id="scripture_ref" name="scripture_ref" value="<?= e($editing['scripture_ref'] ?? '') ?>" placeholder="John 3:16">
       <label for="description">Description</label>
       <textarea id="description" name="description"><?= e($editing['description'] ?? '') ?></textarea>
-      <label for="video_embed_url">Video Embed URL (YouTube/Vimeo, optional)</label>
-      <input type="url" id="video_embed_url" name="video_embed_url" value="<?= e($editing['video_embed_url'] ?? '') ?>">
+      <label for="video_embed_url">Video Embed URL (YouTube/Facebook/Vimeo, optional)</label>
+      <input type="url" id="video_embed_url" name="video_embed_url" value="<?= e($editing['video_embed_url'] ?? '') ?>" placeholder="https://www.youtube.com/watch?v=... or https://www.facebook.com/watch/?v=...">
+      <p class="hint" style="margin-top:-6px; margin-bottom:12px; font-size:12px; color:var(--ink-dim);">Note for Facebook videos: Ensure the Facebook video/reel privacy is set to <strong>Public</strong> in Facebook settings so the embedded player can display it.</p>
       <div class="row two">
         <div>
           <label for="cover_image">Cover Image</label>

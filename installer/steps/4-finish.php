@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 /** Stage 4 — generate a fresh fingerprint salt, lock the installer, show a security checklist. */
 
-if (!APP_IS_INSTALLED && empty($_SESSION['install']['finished'])) {
+if ((!defined('APP_IS_INSTALLED') || !APP_IS_INSTALLED) && empty($_SESSION['install']['finished'])) {
     $security = require CONFIG_PATH . '/security.php';
     $security['fingerprint_salt'] = bin2hex(random_bytes(32));
 

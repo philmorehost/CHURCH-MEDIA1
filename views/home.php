@@ -18,8 +18,27 @@ $serviceTimes = $s['service_times'] ? (json_decode((string) $s['service_times'],
 $isLive = !empty($s['livestream_is_live']);
 ?>
 
-<section class="hero<?= $s['hero_image_path'] ? ' has-image' : '' ?>">
-  <?php if ($s['hero_image_path']): ?>
+<?php
+$heroType = $s['hero_type'] ?? 'gradient';
+$hasBgMedia = ($heroType === 'image' && !empty($s['hero_image_path']))
+    || ($heroType === 'video_upload' && !empty($s['hero_video_path']))
+    || ($heroType === 'youtube' && !empty($s['hero_youtube_url']));
+$ytId = ($heroType === 'youtube' && !empty($s['hero_youtube_url'])) ? youtubeVideoId($s['hero_youtube_url']) : null;
+?>
+
+<section class="hero<?= $hasBgMedia ? ' has-media' : '' ?>">
+  <?php if ($heroType === 'image' && !empty($s['hero_image_path'])): ?>
+    <img class="hero-img" src="<?= e(uploadUrl($s['hero_image_path'])) ?>" alt="" fetchpriority="high">
+    <div class="hero-shade"></div>
+  <?php elseif ($heroType === 'video_upload' && !empty($s['hero_video_path'])): ?>
+    <video class="hero-video" src="<?= e(uploadUrl($s['hero_video_path'])) ?>" autoplay loop muted playsinline fetchpriority="high"></video>
+    <div class="hero-shade"></div>
+  <?php elseif ($heroType === 'youtube' && $ytId): ?>
+    <div class="hero-youtube-container">
+      <iframe class="hero-iframe" src="https://www.youtube-nocookie.com/embed/<?= e($ytId) ?>?autoplay=1&mute=1&loop=1&playlist=<?= e($ytId) ?>&controls=0&showinfo=0&rel=0&enablejsapi=1&playsinline=1" allow="autoplay; encrypted-media" frameborder="0"></iframe>
+    </div>
+    <div class="hero-shade"></div>
+  <?php elseif ($s['hero_image_path']): ?>
     <img class="hero-img" src="<?= e(uploadUrl($s['hero_image_path'])) ?>" alt="" fetchpriority="high">
     <div class="hero-shade"></div>
   <?php endif; ?>

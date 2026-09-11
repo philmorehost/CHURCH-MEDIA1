@@ -21,6 +21,13 @@ jsonResponse(['status' => 'success', 'data' => [
         'instagram' => $s['instagram_url'] ?? null,
         'youtube' => $s['youtube_url'] ?? null,
         'tiktok' => $s['tiktok_url'] ?? null,
+        'twitter' => $s['twitter_url'] ?? null,
+    ],
+    'go_declaration' => [
+        'enabled' => (bool) ($s['go_declaration_enabled'] ?? false),
+        'title' => $s['go_declaration_title'] ?? "G.O. Declaration",
+        'text' => $s['go_declaration_text'] ?? null,
+        'mode' => $s['go_declaration_mode'] ?? 'marquee',
     ],
     'livestream' => [
         'embed_url' => $s['livestream_embed_url'] ?? null,
