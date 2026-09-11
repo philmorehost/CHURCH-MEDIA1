@@ -6,12 +6,12 @@ import '../models/models.dart';
 import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 
-/// A parish/area/zone/province media gallery: all images + videos beneath the
-/// unit (roll-up), shown in a mixed grid with a shuffle toggle.
+/// A church/group media gallery: all images + videos beneath the selected node
+/// in the church hierarchy (roll-up), shown in a mixed grid with a shuffle toggle.
 class UnitScreen extends StatefulWidget {
   final String unitSlug;
   final String unitName;
-  final List<String> unitPath; // [province, zone, area, parish] names
+  final List<String> unitPath; // ancestor names, root → the selected unit
   const UnitScreen({super.key, required this.unitSlug, required this.unitName, required this.unitPath});
 
   @override

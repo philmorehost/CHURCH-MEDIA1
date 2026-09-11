@@ -240,7 +240,7 @@ class FeedScreenState extends State<FeedScreen> {
           const SizedBox(width: 8),
           IconButton(
             icon: const Icon(Icons.location_on_outlined, color: Colors.white),
-            tooltip: 'Find your parish',
+            tooltip: 'Find your ${ApiClient.leafLabel.toLowerCase()}',
             onPressed: () {
               Navigator.push(context, MaterialPageRoute(builder: (_) => const UnitsScreen()));
             },

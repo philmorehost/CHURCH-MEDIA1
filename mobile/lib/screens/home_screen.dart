@@ -35,6 +35,23 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _load();
     _loadActivity();
+    _loadUnitLevels();
+  }
+
+  /// The church can rename its hierarchy levels, so fetch the names once for
+  /// the "Find Your …" card below.
+  Future<void> _loadUnitLevels() async {
+    await _api.fetchUnitLevels();
+    if (mounted) setState(() {});
+  }
+
+  /// "Browse media by province, zone, area & parish" — built from whatever
+  /// levels this church has configured.
+  String get _hierarchyBlurb {
+    final names = ApiClient.unitLevels.map((l) => l.label.toLowerCase()).toList();
+    if (names.isEmpty) return 'Browse media from every church';
+    if (names.length == 1) return 'Browse media by ${names.first}';
+    return 'Browse media by ${names.sublist(0, names.length - 1).join(', ')} & ${names.last}';
   }
 
   Future<void> _loadActivity() async {
@@ -236,9 +253,9 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(width: 14),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Find Your Parish', style: Theme.of(context).textTheme.titleLarge?.copyWith(color: Colors.white, fontWeight: FontWeight.bold)),
+              Text('Find Your ${ApiClient.leafLabel}', style: Theme.of(context).textTheme.titleLarge?.copyWith(color: Colors.white, fontWeight: FontWeight.bold)),
               const SizedBox(height: 2),
-              const Text('Browse media by province, zone, area & parish', style: TextStyle(color: Colors.white70, fontSize: 13)),
+              Text(_hierarchyBlurb, style: const TextStyle(color: Colors.white70, fontSize: 13)),
             ]),
           ),
           const Icon(Icons.arrow_forward_ios, color: Colors.white, size: 18),

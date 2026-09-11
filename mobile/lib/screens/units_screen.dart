@@ -4,8 +4,8 @@ import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import 'unit_screen.dart';
 
-/// "Find Your Parish" — browse the Province → Zone → Area → Parish hierarchy
-/// and open any unit's media gallery.
+/// "Find Your …" — browse the church hierarchy (whatever levels the church has
+/// configured on the website) and open any unit's media gallery.
 class UnitsScreen extends StatefulWidget {
   const UnitsScreen({super.key});
 
@@ -26,6 +26,9 @@ class _UnitsScreenState extends State<UnitsScreen> {
   }
 
   Future<void> _load() async {
+    // Level names first, so the screen copy matches the church's own wording
+    // even if the unit list fails to load.
+    await _api.fetchUnitLevels();
     try {
       final units = await _api.fetchUnits();
       if (mounted) {
@@ -38,7 +41,7 @@ class _UnitsScreenState extends State<UnitsScreen> {
       if (mounted) {
         setState(() {
           _loading = false;
-          _error = 'Could not load parishes.';
+          _error = 'Could not load ${ApiClient.leafPlural.toLowerCase()}.';
         });
       }
     }
@@ -70,25 +73,27 @@ class _UnitsScreenState extends State<UnitsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Find Your Parish'), centerTitle: true),
+      appBar: AppBar(title: Text('Find Your ${ApiClient.leafLabel}'), centerTitle: true),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error.isNotEmpty
               ? Center(child: Text(_error))
               : _units.isEmpty
-                  ? const Center(child: Text('No parishes set up yet.'))
+                  ? Center(child: Text(_emptyMessage))
                   : _buildTree(_childrenByParent),
     );
   }
 
+  String get _emptyMessage => 'No ${ApiClient.leafPlural.toLowerCase()} set up yet.';
+
   Widget _buildTree(Map<int, List<UnitInfo>> children) {
     final roots = children[0] ?? [];
     if (roots.isEmpty) {
-      return const Center(child: Text('No parishes set up yet.'));
+      return Center(child: Text(_emptyMessage));
     }
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 8),
-      children: [for (final province in roots) _nodeTile(province, children, 0)],
+      children: [for (final root in roots) _nodeTile(root, children, 0)],
     );
   }
 
@@ -96,12 +101,16 @@ class _UnitsScreenState extends State<UnitsScreen> {
     final kids = children[unit.id] ?? [];
     final isLeaf = kids.isEmpty;
     final pad = EdgeInsets.only(left: 8.0 + depth * 20, top: 2, bottom: 2, right: 8);
-    final icon = switch (unit.type) {
-      'province' => Icons.account_balance,
-      'zone' => Icons.location_city,
-      'area' => Icons.map,
-      _ => Icons.church,
-    };
+    // Icons follow the depth rather than a fixed level key, so custom levels
+    // still get a sensible icon and the deepest nodes are always the churches.
+    final icon = isLeaf
+        ? Icons.church
+        : switch (depth) {
+            0 => Icons.account_balance,
+            1 => Icons.location_city,
+            2 => Icons.map,
+            _ => Icons.hub_outlined,
+          };
 
     if (isLeaf) {
       return ListTile(

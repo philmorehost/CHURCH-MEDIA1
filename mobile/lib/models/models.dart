@@ -1,7 +1,8 @@
 /// Data models mirroring the JSON shapes returned by /api/* (see api/*.php).
 library;
 
-/// One level of the Province → Zone → Area → Parish hierarchy.
+/// One node of the church hierarchy (a province, zone, area, parish, or any
+/// custom level the church has configured).
 class UnitInfo {
   final int id;
   final int? parentId;
@@ -19,6 +20,32 @@ class UnitInfo {
         slug: json['slug'] as String? ?? '',
       );
 }
+
+/// One configured level of the hierarchy, root → leaf. The church can rename,
+/// reorder, add and remove these on the website's Unit Levels screen, so every
+/// label in the app is read from here rather than hard-coded.
+class UnitLevel {
+  final String type;
+  final String label;
+  final String plural;
+
+  const UnitLevel({required this.type, required this.label, required this.plural});
+
+  factory UnitLevel.fromJson(Map<String, dynamic> json) => UnitLevel(
+        type: json['type'] as String? ?? '',
+        label: json['label'] as String? ?? '',
+        plural: json['plural'] as String? ?? '',
+      );
+}
+
+/// The classic RCCG hierarchy — shown until /api/units reports the levels the
+/// church has actually configured.
+const List<UnitLevel> kFallbackUnitLevels = <UnitLevel>[
+  UnitLevel(type: 'province', label: 'Province', plural: 'Provinces'),
+  UnitLevel(type: 'zone', label: 'Zone', plural: 'Zones'),
+  UnitLevel(type: 'area', label: 'Area', plural: 'Areas'),
+  UnitLevel(type: 'parish', label: 'Parish', plural: 'Parishes'),
+];
 
 class MediaItem {
   final String type; // 'image' | 'video'

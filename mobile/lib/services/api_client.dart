@@ -51,9 +51,47 @@ class ApiClient {
     return (posts: posts, hasMore: json['has_more'] as bool? ?? false);
   }
 
-  /// The whole Province → Zone → Area → Parish hierarchy (flat, with labels).
+  /// The levels the church has configured, root → leaf. Kept here so every
+  /// screen can label the hierarchy consistently; refreshed by [fetchUnits] and
+  /// [fetchUnitLevels].
+  static List<UnitLevel> unitLevels = kFallbackUnitLevels;
+
+  /// What this church calls its deepest level — where the churches live.
+  /// Falls back to a neutral word if the levels are empty.
+  static String get leafLabel => unitLevels.isEmpty ? 'Church' : unitLevels.last.label;
+
+  static String get leafPlural => unitLevels.isEmpty ? 'Churches' : unitLevels.last.plural;
+
+  /// The display name for a level key, e.g. labelFor('parish') → 'Parish'.
+  static String labelFor(String type) {
+    for (final level in unitLevels) {
+      if (level.type == type) return level.label;
+    }
+    return type.isEmpty ? 'Unit' : type;
+  }
+
+  /// Just the configured level names — enough to label the hierarchy without
+  /// downloading every unit.
+  Future<List<UnitLevel>> fetchUnitLevels() async {
+    try {
+      final json = await _get('/api/units', {'levels_only': '1'});
+      final levels = (json['levels'] as List<dynamic>? ?? [])
+          .map((e) => UnitLevel.fromJson(e as Map<String, dynamic>))
+          .toList();
+      if (levels.isNotEmpty) unitLevels = levels;
+    } catch (_) {
+      // Keep whatever we already have — the fallback is always usable.
+    }
+    return unitLevels;
+  }
+
+  /// The whole church hierarchy (flat, with labels) plus the configured levels.
   Future<List<UnitInfo>> fetchUnits() async {
     final json = await _get('/api/units');
+    final levels = (json['levels'] as List<dynamic>? ?? [])
+        .map((e) => UnitLevel.fromJson(e as Map<String, dynamic>))
+        .toList();
+    if (levels.isNotEmpty) unitLevels = levels;
     return (json['data'] as List<dynamic>? ?? []).map((e) => UnitInfo.fromJson(e as Map<String, dynamic>)).toList();
   }
 
