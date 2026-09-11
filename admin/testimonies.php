@@ -126,7 +126,7 @@ require __DIR__ . '/partials/layout-open.php';
         <tr>
           <th>Author & Contact</th>
           <th>Title & Content</th>
-          <th>Parish / Unit</th>
+          <th><?= e(Unit::labelFor(Unit::leafType())) ?> / Unit</th>
           <th>Status</th>
           <th>Submitted</th>
           <th style="text-align:right;">Actions</th>

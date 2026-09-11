@@ -10,7 +10,7 @@ $path = '/testimonies';
 $pdo = Database::getInstance()->getConnection();
 
 /*
- * Church units for the parish dropdown.
+ * Church units for the church dropdown.
  * IMPORTANT: `org_units` has no `is_active` column (see the 2026_08_org_units
  * migration in core/Database.php) — filtering on it raises
  * "Unknown column 'is_active'" and crashed /admin/testimonies.
@@ -218,7 +218,7 @@ $renderTestimony = static function (array $t, bool $featured = false): void {
   </div>
   <div class="tst-stats">
     <div class="tst-stat"><b><?= number_format($totalCount) ?></b><span>Praise Reports</span></div>
-    <div class="tst-stat"><b><?= number_format($parishCount) ?></b><span>Parishes &amp; Units</span></div>
+    <div class="tst-stat"><b><?= number_format($parishCount) ?></b><span><?= e(Unit::pluralFor(Unit::leafType())) ?> &amp; Units</span></div>
   </div>
   <p class="tst-trust">✓ Every submission is reviewed by our ministry team before it is published</p>
 </section>
@@ -252,7 +252,7 @@ $renderTestimony = static function (array $t, bool $featured = false): void {
         <div class="tst-toolbar">
           <div class="tst-search">
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-            <input type="search" id="tstSearch" placeholder="Search a testimony, a name or a parish…" aria-label="Search testimonies">
+            <input type="search" id="tstSearch" placeholder="Search a testimony, a name or a church…" aria-label="Search testimonies">
           </div>
           <?php if ($parishCount > 1): ?>
             <div class="tst-chips" id="tstChips">
@@ -333,9 +333,9 @@ $renderTestimony = static function (array $t, bool $featured = false): void {
             <input type="text" id="phone" name="phone" placeholder="+234 800 000 0000">
           </div>
           <div class="form-field">
-            <label for="unit_id">Parish / church unit <small>(optional)</small></label>
+            <label for="unit_id"><?= e(Unit::labelFor(Unit::leafType())) ?> / church unit <small>(optional)</small></label>
             <select id="unit_id" name="unit_id">
-              <option value="">— Select parish/unit —</option>
+              <option value="">— Select <?= e(mb_strtolower(Unit::labelFor(Unit::leafType()))) ?>/unit —</option>
               <?php foreach ($units as $u): ?>
                 <option value="<?= (int) $u['id'] ?>"><?= e($u['name']) ?></option>
               <?php endforeach; ?>

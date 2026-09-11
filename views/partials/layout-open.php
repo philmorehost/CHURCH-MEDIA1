@@ -45,7 +45,7 @@ $navTree = [
         'label' => 'Community',
         'children' => [
             ['href' => '/events', 'label' => 'Events'],
-            ['href' => '/units', 'label' => 'Parishes'],
+            ['href' => '/units', 'label' => Unit::pluralFor(Unit::leafType())],
             ['href' => '/testimonies', 'label' => 'Testimonies'],
             ['href' => '/prayer', 'label' => 'Prayer Wall'],
         ],
@@ -141,7 +141,11 @@ $goMode = ($s['go_declaration_mode'] ?? 'marquee') === 'static' ? 'static' : 'ma
 <?php if ($goEnabled): ?>
   <div class="go-declaration-bar go-declaration-<?= $goMode ?>">
     <div class="go-declaration-badge">
-      <span class="go-icon">✨</span>
+      <svg class="go-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+        <path d="M11 5 6 9H3v6h3l5 4V5z"/>
+        <path d="M15.5 8.5a5 5 0 0 1 0 7"/>
+        <path d="M18.5 5.5a9 9 0 0 1 0 13"/>
+      </svg>
       <strong><?= e($goTitle) ?>:</strong>
     </div>
     <?php if ($goMode === 'marquee'): ?>

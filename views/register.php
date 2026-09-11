@@ -12,12 +12,17 @@ $metaRobots = 'noindex, nofollow';
 $old = $_SESSION['_form_old'] ?? [];
 $unitsJson = json_encode(Unit::treeLight(), JSON_UNESCAPED_SLASHES | JSON_HEX_APOS | JSON_HEX_QUOT);
 $oldJson = json_encode([
-    'province_id' => (int) ($old['province_id'] ?? 0),
-    'zone_id' => (int) ($old['zone_id'] ?? 0),
-    'area_id' => (int) ($old['area_id'] ?? 0),
+    'unit_path' => (string) ($old['unit_path'] ?? ''),
     'parish_id' => (int) ($old['parish_id'] ?? 0),
     'parish_name' => (string) ($old['parish_name'] ?? ''),
 ], JSON_UNESCAPED_SLASHES | JSON_HEX_APOS | JSON_HEX_QUOT);
+
+// One dropdown per level, stopping at the church level — which is typed in by
+// name because the church may not exist in the list yet.
+$levels = Unit::levels();
+$leafLevel = $levels[count($levels) - 1];
+$parentLevels = array_slice($levels, 0, -1);
+$parentLabels = array_map(static fn (array $l): string => $l['label'], $parentLevels);
 ?>
 <link rel="stylesheet" href="<?= asset('css/form.css') ?>">
 
@@ -52,7 +57,7 @@ $oldJson = json_encode([
           <h1 class="form-title">Register Your Church</h1>
         </div>
       </div>
-      <div class="form-desc">Register your parish's admin account. Once approved, you'll be able to manage your church's media, events, sermons, forms, and more. Church names are stored in <strong>CAPS</strong>.</div>
+      <div class="form-desc">Register your church's admin account. Once approved, you'll be able to manage your church's media, events, sermons, forms, and more. Church names are stored in <strong>CAPS</strong>.</div>
 
       <?php if ($error): ?><div class="form-error"><?= e($error) ?></div><?php endif; ?>
 
@@ -102,20 +107,22 @@ $oldJson = json_encode([
         </div>
 
         <div class="form-field">
-          <label class="form-label" for="province"><span class="field-num">6</span><span>Your Church Location *</span></label>
+          <label class="form-label" for="unit_level_0"><span class="field-num">6</span><span>Your Church Location *</span></label>
           <div class="cascade-selects">
-            <select id="province" data-province required><option value="">Select Province…</option></select>
-            <select id="zone" data-zone required><option value="">Select Zone…</option></select>
-            <select id="area" data-area required><option value="">Select Area…</option></select>
-            <input type="text" id="parish" data-parish placeholder="Type your Parish church name (CAPS)" required>
-            <datalist id="parishOptions" data-parish-list></datalist>
-            <input type="hidden" name="province_id" data-province-id>
-            <input type="hidden" name="zone_id" data-zone-id>
-            <input type="hidden" name="area_id" data-area-id>
-            <input type="hidden" name="parish_id" data-parish-id>
-            <input type="hidden" name="parish_name" data-parish-name>
+            <?php foreach ($parentLevels as $i => $level): ?>
+              <select id="unit_level_<?= (int) $i ?>" data-unit-select data-depth="<?= (int) $i ?>" data-label="<?= e($level['label']) ?>" required>
+                <option value="">Select <?= e($level['label']) ?>…</option>
+              </select>
+            <?php endforeach; ?>
+            <input type="text" id="unit_leaf" data-unit-leaf placeholder="Type your <?= e($leafLevel['label']) ?> church name (CAPS)" required>
+            <datalist id="unitLeafOptions" data-unit-leaf-list></datalist>
+            <input type="hidden" name="unit_path" data-unit-path>
+            <input type="hidden" name="parish_id" data-unit-leaf-id>
+            <input type="hidden" name="parish_name" data-unit-leaf-name>
           </div>
-          <div class="cascade-note">Select your Province, Zone, and Area, then type the Parish church name — it is automatically converted to CAPS. If the parish was added before, it appears as a suggestion as you type.</div>
+          <div class="cascade-note"><?= $parentLabels
+            ? 'Select your ' . e(implode(', ', $parentLabels)) . ', then type the ' . e($leafLevel['label']) . ' church name — it is automatically converted to CAPS. If the church was added before, it appears as a suggestion as you type.'
+            : 'Type your ' . e($leafLevel['label']) . ' church name — it is automatically converted to CAPS.' ?></div>
         </div>
 
         <div class="form-field">

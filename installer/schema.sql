@@ -61,11 +61,32 @@ CREATE TABLE IF NOT EXISTS `settings` (
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Province → Zone → Area → Parish hierarchy (posts tag to a parish and roll up).
+-- Configurable hierarchy levels. `type` is the stable key stored in
+-- org_units.type; label/plural are shown to admins and sort_order is the depth
+-- (1 = top level). The super admin can rename, reorder, add or remove levels.
+CREATE TABLE IF NOT EXISTS `unit_levels` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `type` VARCHAR(40) NOT NULL,
+  `label` VARCHAR(60) NOT NULL,
+  `plural` VARCHAR(60) NOT NULL,
+  `sort_order` INT NOT NULL DEFAULT 0,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_unit_level_type` (`type`),
+  UNIQUE KEY `uniq_unit_level_sort` (`sort_order`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO `unit_levels` (`type`, `label`, `plural`, `sort_order`) VALUES
+  ('province', 'Province', 'Provinces', 1),
+  ('zone', 'Zone', 'Zones', 2),
+  ('area', 'Area', 'Areas', 3),
+  ('parish', 'Parish', 'Parishes', 4);
+
+-- Church hierarchy (posts tag to a leaf unit and roll up through its ancestors).
+-- `type` is a VARCHAR key into unit_levels so levels stay configurable.
 CREATE TABLE IF NOT EXISTS `org_units` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `parent_id` INT NULL,
-  `type` ENUM('province','zone','area','parish') NOT NULL,
+  `type` VARCHAR(40) NOT NULL,
   `name` VARCHAR(150) NOT NULL,
   `slug` VARCHAR(160) NULL UNIQUE,
   `sort_order` INT NOT NULL DEFAULT 0,
@@ -110,6 +131,7 @@ CREATE TABLE IF NOT EXISTS `pending_registrations` (
   `area_id` INT NULL,
   `parish_name` VARCHAR(150) NULL,
   `parish_id` INT NULL,
+  `unit_path` TEXT NULL COMMENT 'JSON [{level,id}] - the chosen chain at any depth',
   `role` VARCHAR(20) NOT NULL DEFAULT 'admin',
   `alt_email` VARCHAR(190) NULL COMMENT 'Optional backup inbox; used as the corporate email forwarder',
   `password_enc` TEXT NULL COMMENT 'Encrypted plaintext password, used to create the cPanel email on approval',

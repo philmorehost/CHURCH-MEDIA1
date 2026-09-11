@@ -822,6 +822,49 @@ class Database
                     INDEX `idx_testimony_unit` (`unit_id`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
             },
+            '2026_09_unit_levels' => function (PDO $pdo): void {
+                // Configurable hierarchy levels. `type` is the stable key stored in
+                // org_units.type; `label`/`plural` are what admins see, and
+                // `sort_order` is the depth (1 = top level, ascending = deeper).
+                // The super admin can rename, reorder, add or remove levels from
+                // Admin → Unit Levels, so nothing may hard-code the four names.
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `unit_levels` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `type` VARCHAR(40) NOT NULL,
+                    `label` VARCHAR(60) NOT NULL,
+                    `plural` VARCHAR(60) NOT NULL,
+                    `sort_order` INT NOT NULL DEFAULT 0,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY `uniq_unit_level_type` (`type`),
+                    UNIQUE KEY `uniq_unit_level_sort` (`sort_order`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                // Seed the classic RCCG hierarchy once (idempotent thanks to the
+                // unique key on `type`).
+                $seed = $pdo->prepare('INSERT IGNORE INTO unit_levels (type, label, plural, sort_order) VALUES (?, ?, ?, ?)');
+                foreach ([
+                    ['province', 'Province', 'Provinces', 1],
+                    ['zone', 'Zone', 'Zones', 2],
+                    ['area', 'Area', 'Areas', 3],
+                    ['parish', 'Parish', 'Parishes', 4],
+                ] as $level) {
+                    $seed->execute($level);
+                }
+
+                // `type` can no longer be a fixed ENUM now that levels are editable.
+                $col = $pdo->prepare('SELECT DATA_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
+                $col->execute(['org_units', 'type']);
+                if (strtolower((string) $col->fetchColumn()) === 'enum') {
+                    $pdo->exec("ALTER TABLE `org_units` MODIFY COLUMN `type` VARCHAR(40) NOT NULL");
+                }
+
+                // Registrations can now capture any depth of hierarchy.
+                $tbl = $pdo->prepare('SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?');
+                $tbl->execute(['pending_registrations']);
+                if ((int) $tbl->fetchColumn() > 0) {
+                    self::addColumnIfMissing($pdo, 'pending_registrations', 'unit_path', 'TEXT NULL', 'parish_id');
+                }
+            },
         ];
     }
 

@@ -1,7 +1,13 @@
 <?php
 declare(strict_types=1);
 
-/** GET /api/units — the Province → Zone → Area → Parish hierarchy (flat, with full labels). */
+/**
+ * GET /api/units — the configured church hierarchy (flat, with full labels).
+ *
+ * Levels are whatever the super admin has set up (by default
+ * Province → Zone → Area → Parish), so clients should render the tree from
+ * `parent_id`/`type` rather than assuming a fixed depth.
+ */
 
 $labels = Unit::labelsById();
 $data = array_map(function (array $u) use ($labels): array {
@@ -15,4 +21,4 @@ $data = array_map(function (array $u) use ($labels): array {
     ];
 }, Unit::all());
 
-jsonResponse(['status' => 'success', 'data' => $data]);
+jsonResponse(['status' => 'success', 'levels' => Unit::levels(), 'data' => $data]);

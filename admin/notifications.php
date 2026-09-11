@@ -22,27 +22,28 @@ if ($isSuper) {
 }
 $scopeSet = array_flip($scopeUnitIds);
 
-// Recipient targets: parishes (churches) within the sender's scope.
+// Recipient targets: churches (the deepest level) within the sender's scope.
+$leafType = Unit::leafType();
 $targetUnits = [];
-foreach (Unit::all('type ASC, name ASC') as $u) {
-    if ($u['type'] === 'parish' && isset($scopeSet[(int) $u['id']])) {
+foreach (Unit::sortByLevel(Unit::all('name ASC')) as $u) {
+    if ($u['type'] === $leafType && isset($scopeSet[(int) $u['id']])) {
         $targetUnits[(int) $u['id']] = $u;
     }
 }
 
-// Group the target parishes by their top-level province for the picker.
-$provinceOf = [];
+// Group the target churches under their top-level unit for the picker.
+$rootOf = [];
 foreach ($targetUnits as $u) {
     $path = Unit::path((int) $u['id']);
-    $provinceOf[(int) $u['id']] = $path ? (int) $path[0]['id'] : (int) $u['id'];
+    $rootOf[(int) $u['id']] = $path ? (int) $path[0]['id'] : (int) $u['id'];
 }
 $grouped = [];
 foreach ($targetUnits as $uid => $u) {
-    $grouped[$provinceOf[$uid]][] = $u;
+    $grouped[$rootOf[$uid]][] = $u;
 }
-$provinceNames = [];
+$rootNames = [];
 foreach (array_keys($grouped) as $pid) {
-    $provinceNames[$pid] = Unit::label($pid);
+    $rootNames[$pid] = Unit::label($pid);
 }
 
 $action = $_GET['action'] ?? 'list';
@@ -173,7 +174,7 @@ require __DIR__ . '/partials/layout-open.php';
     <label>Recipients</label>
     <div class="checkbox-row">
       <input type="radio" id="rt_all" name="recipient_type" value="all" checked>
-      <label for="rt_all" style="margin:0;">All churches (<?= count($targetUnits) ?> parishes in your scope)</label>
+      <label for="rt_all" style="margin:0;">All churches (<?= count($targetUnits) ?> <?= e(mb_strtolower(Unit::pluralFor($leafType))) ?> in your scope)</label>
     </div>
     <div class="checkbox-row">
       <input type="radio" id="rt_sel" name="recipient_type" value="selected">
@@ -182,11 +183,11 @@ require __DIR__ . '/partials/layout-open.php';
 
     <div id="unit-picker" style="display:none;margin-top:10px;max-height:320px;overflow:auto;border:1px solid var(--border);border-radius:10px;padding:12px;">
       <?php if (!$grouped): ?>
-        <p class="sub">No parishes in your scope yet.</p>
+        <p class="sub">No <?= e(mb_strtolower(Unit::pluralFor($leafType))) ?> in your scope yet.</p>
       <?php else: ?>
-        <?php foreach ($grouped as $pid => $parishes): ?>
-          <h3 style="margin:8px 0 6px;font-size:14px;color:var(--gold-soft);"><?= e($provinceNames[$pid] ?? ('Unit ' . $pid)) ?></h3>
-          <?php foreach ($parishes as $p): ?>
+        <?php foreach ($grouped as $pid => $churches): ?>
+          <h3 style="margin:8px 0 6px;font-size:14px;color:var(--gold-soft);"><?= e($rootNames[$pid] ?? ('Unit ' . $pid)) ?></h3>
+          <?php foreach ($churches as $p): ?>
             <div class="checkbox-row">
               <input type="checkbox" name="unit_ids[]" value="<?= (int) $p['id'] ?>" id="unit_<?= (int) $p['id'] ?>">
               <label for="unit_<?= (int) $p['id'] ?>" style="margin:0;"><?= e($p['name']) ?></label>

@@ -520,11 +520,18 @@ $router->post('/register', function () {
     $unblockPin = trim((string) ($_POST['unblock_pin'] ?? ''));
     $role = in_array($_POST['role'] ?? '', ['admin', 'editor', 'media_team'], true) ? $_POST['role'] : 'admin';
     $altEmail = trim($_POST['alt_email'] ?? '');
-    $provinceId = (int) ($_POST['province_id'] ?? 0);
-    $zoneId = (int) ($_POST['zone_id'] ?? 0);
-    $areaId = (int) ($_POST['area_id'] ?? 0);
+    // The chosen branch is posted as an ordered id path covering every level
+    // above the church itself; the church name is typed in at the deepest level.
+    $legacyAreaId = (int) ($_POST['area_id'] ?? 0);
+    $unitPath = Unit::decodePath($_POST['unit_path'] ?? '', $legacyAreaId > 0 ? $legacyAreaId : null);
+    $chain = Unit::validateChain($unitPath);
+    $parentId = $chain ? (int) $chain[count($chain) - 1]['id'] : 0;
     $parishId = (int) ($_POST['parish_id'] ?? 0);
-    $parishName = Unit::nameFor((string) ($_POST['parish_name'] ?? ''));
+    $parishName = Unit::nameFor((string) ($_POST['parish_name'] ?? $_POST['leaf_name'] ?? ''));
+
+    // Labels drive every message so they always match the configured levels.
+    $leafLabel = Unit::labelFor(Unit::leafType());
+    $parentLabels = array_slice(array_map(static fn (array $l): string => $l['label'], Unit::levels()), 0, max(0, Unit::levelCount() - 1));
 
     $errors = [];
     if ($name === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
@@ -550,12 +557,11 @@ $router->post('/register', function () {
     if ($altEmail !== '' && !filter_var($altEmail, FILTER_VALIDATE_EMAIL)) {
         $errors[] = 'The alternative email address is not valid.';
     }
-    $area = $areaId > 0 ? Unit::find($areaId) : null;
-    if (!$area || $area['type'] !== 'area') {
-        $errors[] = 'Please select your Province, Zone, and Area.';
+    if (count($chain) !== count($parentLabels)) {
+        $errors[] = 'Please select your ' . implode(', ', $parentLabels) . '.';
     }
     if ($parishName === '') {
-        $errors[] = 'Please enter your Parish church name.';
+        $errors[] = 'Please enter your ' . $leafLabel . ' name.';
     }
 
     if (!$errors) {
@@ -582,17 +588,19 @@ $router->post('/register', function () {
         redirect('/register');
     }
 
-    // Link to an existing parish if one matches; otherwise the parish is created
-    // on approval (its name is saved here, in CAPS).
+    // Link to an existing church if one matches; otherwise it is created on
+    // approval (its name is saved here, in CAPS).
     $parish = $parishId > 0 ? Unit::find($parishId) : null;
-    if ($parish && (int) ($parish['parent_id'] ?? 0) !== $areaId) {
+    if ($parish && (int) ($parish['parent_id'] ?? 0) !== $parentId) {
         $parish = null;
     }
-    if (!$parish) {
-        $parish = Unit::findByName('parish', $parishName, $areaId);
+    if (!$parish && $parentId > 0) {
+        $parish = Unit::findByName(Unit::leafType(), $parishName, $parentId);
     }
 
-    $stmt = $pdo->prepare('INSERT INTO pending_registrations (name, email, phone, username, password_hash, unblock_pin_hash, password_enc, role, alt_email, province_id, zone_id, area_id, parish_name, parish_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "pending")');
+    // province_id/zone_id/area_id are kept populated for the older admin views;
+    // unit_path is the authoritative branch at any depth.
+    $stmt = $pdo->prepare('INSERT INTO pending_registrations (name, email, phone, username, password_hash, unblock_pin_hash, password_enc, role, alt_email, province_id, zone_id, area_id, parish_name, parish_id, unit_path, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "pending")');
     $stmt->execute([
         mb_substr($name, 0, 150),
         mb_substr($email, 0, 150),
@@ -603,11 +611,12 @@ $router->post('/register', function () {
         encryptSecret($password),
         $role,
         $altEmail !== '' ? mb_substr($altEmail, 0, 190) : null,
-        $provinceId > 0 ? $provinceId : null,
-        $zoneId > 0 ? $zoneId : null,
-        $areaId,
+        $chain ? (int) $chain[0]['id'] : null,
+        isset($chain[1]) ? (int) $chain[1]['id'] : null,
+        $parentId > 0 ? $parentId : null,
         mb_substr($parishName, 0, 150),
         $parish ? (int) $parish['id'] : null,
+        $chain ? json_encode(array_map(static fn (array $u): array => ['type' => $u['type'], 'id' => (int) $u['id']], $chain), JSON_UNESCAPED_SLASHES) : null,
     ]);
     clearFormOld();
     flash('register_sent', '1');

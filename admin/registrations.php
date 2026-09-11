@@ -21,18 +21,35 @@ $statusFilter = in_array($statusParam, ['pending', 'approved', 'rejected'], true
 function regChurchLabel(array $reg): string
 {
     $parts = [];
-    foreach (['province_id', 'zone_id', 'area_id', 'parish_id'] as $col) {
-        $uid = (int) ($reg[$col] ?? 0);
-        if ($uid > 0) {
-            $unit = Unit::find($uid);
-            if ($unit) {
-                $parts[] = $unit['name'];
+
+    // Preferred: the branch stored as JSON when the application was submitted.
+    foreach (Unit::decodePath($reg['unit_path'] ?? '', null) as $uid) {
+        $unit = Unit::find((int) $uid);
+        if ($unit) {
+            $parts[] = $unit['name'];
+        }
+    }
+
+    // Fall back to the legacy columns for records created before unit_path.
+    if (!$parts) {
+        foreach (['province_id', 'zone_id', 'area_id'] as $col) {
+            $uid = (int) ($reg[$col] ?? 0);
+            if ($uid > 0) {
+                $unit = Unit::find($uid);
+                if ($unit) {
+                    $parts[] = $unit['name'];
+                }
             }
         }
     }
-    if (!$parts && !empty($reg['parish_name'])) {
-        $parts[] = $reg['parish_name'];
+
+    $leafId = (int) ($reg['parish_id'] ?? 0);
+    $leaf = $leafId > 0 ? Unit::find($leafId) : null;
+    $leafName = $leaf ? (string) $leaf['name'] : (string) ($reg['parish_name'] ?? '');
+    if ($leafName !== '') {
+        $parts[] = $leafName;
     }
+
     return $parts ? implode(' > ', $parts) : '—';
 }
 
@@ -85,35 +102,46 @@ if ($action === 'approve' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $phone = trim($_POST['phone'] ?? '');
     $username = trim($_POST['username'] ?? $reg['username']);
     $role = in_array($_POST['role'] ?? '', ['admin', 'editor', 'media_team'], true) ? $_POST['role'] : ($reg['role'] ?? 'admin');
-    $areaId = (int) ($_POST['area_id'] ?? $reg['area_id'] ?? 0);
+    $parentId = 0;
+    $rawPath = $_POST['unit_path'] ?? ($reg['unit_path'] ?? '');
+    $legacyArea = (int) ($_POST['area_id'] ?? $reg['area_id'] ?? 0);
+    $chain = Unit::validateChain(Unit::decodePath($rawPath, $legacyArea > 0 ? $legacyArea : null));
+    if ($chain) {
+        $parentId = (int) $chain[count($chain) - 1]['id'];
+    }
     $parishId = (int) ($_POST['parish_id'] ?? $reg['parish_id'] ?? 0);
     $parishName = Unit::nameFor((string) ($_POST['parish_name'] ?? $reg['parish_name'] ?? ''));
+
+    // Level names drive the copy so it always matches the configured hierarchy.
+    $leafType = Unit::leafType();
+    $leafLabel = Unit::labelFor($leafType);
+    $parentLabels = array_slice(array_map(static fn (array $l): string => $l['label'], Unit::levels()), 0, max(0, Unit::levelCount() - 1));
 
     if ($name === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
         $errors[] = 'Please provide a valid name and email.';
     } elseif (!preg_match('/^[a-zA-Z0-9_.-]+$/', $username) || $username === '') {
         $errors[] = 'Invalid username.';
-    } elseif ($areaId <= 0 || !$area = Unit::find($areaId)) {
-        $errors[] = 'Select the church Area for this registration.';
+    } elseif ($parentId <= 0) {
+        $errors[] = 'Select the ' . implode(', ', $parentLabels) . ' for this registration.';
     } else {
-        // Resolve the parish: existing id, existing name under the area, or create.
+        // Resolve the church: existing id, existing name under the parent, or create.
         $parish = $parishId > 0 ? Unit::find($parishId) : null;
-        if ($parish && (int) ($parish['parent_id'] ?? 0) !== $areaId) {
+        if ($parish && (int) ($parish['parent_id'] ?? 0) !== $parentId) {
             $parish = null;
         }
         if (!$parish && $parishName !== '') {
-            $parish = Unit::findByName('parish', $parishName, $areaId);
+            $parish = Unit::findByName($leafType, $parishName, $parentId);
         }
         if (!$parish && $parishName !== '') {
-            $res = Unit::findOrCreate('parish', $areaId, $parishName);
+            $res = Unit::findOrCreate($leafType, $parentId, $parishName);
             if (isset($res['errors'])) {
-                $errors[] = 'Could not create the parish: ' . implode(' ', $res['errors']);
+                $errors[] = 'Could not create the ' . $leafLabel . ': ' . implode(' ', $res['errors']);
             } else {
                 $parish = Unit::find((int) $res['id']);
             }
         }
         if (!$errors && !$parish) {
-            $errors[] = 'A parish name is required to approve this registration.';
+            $errors[] = 'A ' . $leafLabel . ' name is required to approve this registration.';
         }
 
         if (!$errors) {
@@ -227,10 +255,7 @@ require __DIR__ . '/partials/layout-open.php';
     <form method="post" action="/admin/registrations?action=approve&id=<?= (int) $reviewing['id'] ?>" id="reviewForm"
           data-units='<?= e(json_encode(Unit::treeLight(), JSON_UNESCAPED_SLASHES | JSON_HEX_APOS | JSON_HEX_QUOT)) ?>'
           data-old='<?= e(json_encode([
-              'province_id' => (int) ($reviewing['province_id'] ?? 0),
-              'zone_id' => (int) ($reviewing['zone_id'] ?? 0),
-              'area_id' => (int) ($reviewing['area_id'] ?? 0),
-              'parish_id' => (int) ($reviewing['parish_id'] ?? 0),
+              'unit_path' => (string) ($reviewing['unit_path'] ?? ''),
               'parish_name' => (string) ($reviewing['parish_name'] ?? ''),
           ], JSON_UNESCAPED_SLASHES | JSON_HEX_APOS | JSON_HEX_QUOT)) ?>'>
       <?= Csrf::field() ?>
@@ -277,31 +302,31 @@ require __DIR__ . '/partials/layout-open.php';
       </div>
 
       <h2 style="margin-top:26px;">Church</h2>
+      <?php
+      $reviewLevels = Unit::levels();
+      $reviewLeaf = $reviewLevels[count($reviewLevels) - 1];
+      $reviewParents = array_slice($reviewLevels, 0, -1);
+      $reviewDeepest = $reviewParents ? $reviewParents[count($reviewParents) - 1] : null;
+      ?>
       <div class="cascade-selects">
+        <?php foreach ($reviewParents as $i => $level): ?>
+          <div>
+            <label for="unit_level_<?= (int) $i ?>"><?= e($level['label']) ?></label>
+            <select id="unit_level_<?= (int) $i ?>" data-unit-select data-depth="<?= (int) $i ?>" data-label="<?= e($level['label']) ?>" required>
+              <option value="">Select <?= e($level['label']) ?>…</option>
+            </select>
+          </div>
+        <?php endforeach; ?>
         <div>
-          <label for="province">Province</label>
-          <select id="province" data-province required><option value="">Select Province…</option></select>
+          <label for="unit_leaf"><?= e($reviewLeaf['label']) ?> church</label>
+          <input type="text" id="unit_leaf" data-unit-leaf required placeholder="Type <?= e(mb_strtolower($reviewLeaf['label'])) ?> name (CAPS)">
+          <datalist id="unitLeafOptions" data-unit-leaf-list></datalist>
         </div>
-        <div>
-          <label for="zone">Zone</label>
-          <select id="zone" data-zone required><option value="">Select Zone…</option></select>
-        </div>
-        <div>
-          <label for="area">Area</label>
-          <select id="area" data-area required><option value="">Select Area…</option></select>
-        </div>
-        <div>
-          <label for="parish">Parish church</label>
-          <input type="text" id="parish" data-parish required placeholder="Type parish name (CAPS)">
-          <datalist id="parishOptions" data-parish-list></datalist>
-        </div>
-        <input type="hidden" name="province_id" data-province-id>
-        <input type="hidden" name="zone_id" data-zone-id>
-        <input type="hidden" name="area_id" data-area-id>
-        <input type="hidden" name="parish_id" data-parish-id>
-        <input type="hidden" name="parish_name" data-parish-name>
+        <input type="hidden" name="unit_path" data-unit-path>
+        <input type="hidden" name="parish_id" data-unit-leaf-id>
+        <input type="hidden" name="parish_name" data-unit-leaf-name>
       </div>
-      <p class="sub" style="margin-top:10px;">Existing parishes under the selected Area appear as suggestions. A new parish name is created automatically on approval.</p>
+      <p class="sub" style="margin-top:10px;">Existing <?= e(mb_strtolower(Unit::pluralFor($reviewLeaf['type']))) ?><?php if ($reviewDeepest): ?> under the selected <?= e($reviewDeepest['label']) ?><?php endif; ?> appear as suggestions. A new name is created automatically on approval.</p>
 
       <div class="btn-row">
         <button class="btn" type="submit">✔ Approve &amp; Create Admin Account</button>

@@ -170,7 +170,7 @@ $metaRobots = 'noindex, nofollow';
                  data-cascade='<?= e(json_encode(array_values($cascadePaths), JSON_UNESCAPED_SLASHES | JSON_HEX_APOS | JSON_HEX_QUOT)) ?>'
                  data-old="<?= e($oldPath) ?>">
               <div class="cascade-selects"></div>
-              <div class="cascade-note"><?= $field['field_type'] === 'church' ? 'Auto-filled from the church list — select your parish (Province → Zone → Area → Parish).' : 'Choose from the dropdowns — each one is filtered by the one before it.' ?></div>
+              <div class="cascade-note"><?= $field['field_type'] === 'church' ? 'Auto-filled from the church list — pick your way down the levels to your church.' : 'Choose from the dropdowns — each one is filtered by the one before it.' ?></div>
               <input type="hidden" name="<?= e($key) ?>" value="<?= e($oldPath) ?>">
             </div>
 

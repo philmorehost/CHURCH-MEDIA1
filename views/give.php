@@ -150,7 +150,7 @@ $s = settings();
   <div class="grid grid-3">
     <div class="glass-card" style="padding:26px;">
       <h3 style="font-size:16px; margin-top:0;">Tithes &amp; Offerings</h3>
-      <p style="color:var(--ink-dim); font-size:13.5px; margin-bottom:0;">Sustaining the ongoing ministry, worship services, and community care across all our parishes.</p>
+      <p style="color:var(--ink-dim); font-size:13.5px; margin-bottom:0;">Sustaining the ongoing ministry, worship services, and community care across all our churches.</p>
     </div>
     <div class="glass-card" style="padding:26px;">
       <h3 style="font-size:16px; margin-top:0;">Missions &amp; Evangelism</h3>

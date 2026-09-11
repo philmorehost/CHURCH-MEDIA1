@@ -71,7 +71,10 @@ p{margin:0 0 1em;}
   margin-right: 12px;
 }
 .go-declaration-bar .go-icon {
-  font-size: 13px;
+  width: 14px;
+  height: 14px;
+  display: block;
+  flex-shrink: 0;
 }
 .go-declaration-marquee {
   justify-content: flex-start;

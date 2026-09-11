@@ -417,8 +417,8 @@ function formFieldOptions(array $field): array
 }
 
 /**
- * Splits "Province > Zone > Area > Parish" path lines into nested path arrays.
- * Used by the cascading-dropdown field type ('cascade').
+ * Splits "Province > Zone > Area > Parish" style path lines into nested path
+ * arrays. Used by the cascading-dropdown field type ('cascade').
  */
 function formCascadeOptions(array $field): array
 {
@@ -439,8 +439,8 @@ function formCascadePaths(array $field): array
 }
 
 /**
- * Full "Province > Zone > Area > Parish" paths for every church in the org
- * hierarchy (leaves only). Powers the auto church-list field ('church').
+ * Full "A > B > C" paths for every church in the org hierarchy (leaves only),
+ * using the configured level names. Powers the auto church-list field ('church').
  */
 function churchCascadePaths(): array
 {

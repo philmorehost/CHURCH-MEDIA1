@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 $metaTitle = 'Media Gallery';
-$metaDescription = 'All media — images and videos — from every parish, area, and zone, in one place.';
+$metaDescription = 'All media — images and videos — from every church, in one place.';
 
 $pdo = Database::getInstance()->getConnection();
 $categories = $pdo->query('SELECT c.slug, c.name FROM media_categories c WHERE EXISTS (SELECT 1 FROM media_post_categories mpc JOIN media_posts p ON p.id = mpc.media_post_id WHERE mpc.media_category_id = c.id AND p.is_published = 1) ORDER BY c.name ASC')->fetchAll();
