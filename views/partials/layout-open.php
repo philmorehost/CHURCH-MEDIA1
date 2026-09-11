@@ -9,20 +9,56 @@ $metaTitle ??= $s['site_title'];
 $metaDescription ??= $s['meta_description'] ?? $s['site_tagline'] ?? '';
 $isLive = !empty($s['livestream_is_live']);
 
+/*
+ * Top-level navigation.
+ *
+ * The site has 13 public pages. Listed side by side they wrapped onto a second
+ * row on laptop screens, so they are grouped into four dropdowns — Media, The
+ * Word, Community and Connect — leaving a five-item bar. Every route that was
+ * reachable before is still one click away inside a group.
+ *
+ * A parent's `href` is its landing page (also what a keyboard or no-JS visitor
+ * can still click). Add entries to a group's `children`, or append a new
+ * top-level array with `'children' => []` to put an item back on the bar itself.
+ */
 $navTree = [
     ['href' => '/', 'label' => 'Home', 'children' => []],
-    ['href' => '/feed', 'label' => 'Feed', 'children' => []],
-    ['href' => '/media', 'label' => 'Media', 'children' => []],
-    ['href' => '/events', 'label' => 'Events', 'children' => []],
-    ['href' => '/sermons', 'label' => 'Sermons', 'children' => []],
-    ['href' => '/units', 'label' => 'Parishes', 'children' => []],
-    ['href' => '/bible', 'label' => 'Bible', 'children' => []],
-    ['href' => '/live', 'label' => 'Live', 'children' => []],
-    ['href' => '/testimonies', 'label' => 'Testimonies', 'children' => []],
-    ['href' => '/about', 'label' => 'About', 'children' => []],
-    ['href' => '/contact', 'label' => 'Contact', 'children' => []],
-    ['href' => '/advertise', 'label' => 'Advertise', 'children' => []],
-    ['href' => '/register', 'label' => 'Register', 'children' => []],
+    [
+        'href' => '/feed',
+        'label' => 'Media',
+        'children' => [
+            ['href' => '/feed', 'label' => 'Video Feed'],
+            ['href' => '/media', 'label' => 'Media Gallery'],
+            ['href' => '/live', 'label' => 'Watch Live'],
+        ],
+    ],
+    [
+        'href' => '/sermons',
+        'label' => 'The Word',
+        'children' => [
+            ['href' => '/sermons', 'label' => 'Sermons'],
+            ['href' => '/bible', 'label' => 'Holy Bible'],
+        ],
+    ],
+    [
+        'href' => '/events',
+        'label' => 'Community',
+        'children' => [
+            ['href' => '/events', 'label' => 'Events'],
+            ['href' => '/units', 'label' => 'Parishes'],
+            ['href' => '/testimonies', 'label' => 'Testimonies'],
+        ],
+    ],
+    [
+        'href' => '/about',
+        'label' => 'Connect',
+        'children' => [
+            ['href' => '/about', 'label' => 'About Us'],
+            ['href' => '/contact', 'label' => 'Contact'],
+            ['href' => '/advertise', 'label' => 'Advertise With Us'],
+            ['href' => '/register', 'label' => 'Register'],
+        ],
+    ],
 ];
 try {
     $navPages = Database::getInstance()->getConnection()
@@ -135,25 +171,29 @@ $goMode = ($s['go_declaration_mode'] ?? 'marquee') === 'static' ? 'static' : 'ma
     <nav data-nav-links class="nav-links">
       <?php foreach ($navTree as $item): ?>
         <?php
-          $href = $item['href'];
-          $label = $item['label'];
+          $href = (string) ($item['href'] ?? '');
+          $label = (string) ($item['label'] ?? '');
           $children = $item['children'] ?? [];
-          $isActive = ($path === $href);
+          $isActive = ($href !== '' && $path === $href);
           if (!$isActive && $children) {
               foreach ($children as $c) {
-                  if ($path === $c['href']) { $isActive = true; break; }
+                  if ($path === ($c['href'] ?? '')) { $isActive = true; break; }
               }
           }
+          $menuId = 'nav-menu-' . preg_replace('/[^a-z0-9]+/', '-', strtolower($label));
         ?>
         <?php if ($children): ?>
           <div class="nav-dropdown-wrap">
-            <a href="<?= e($href) ?>" class="nav-item-link <?= $isActive ? 'active' : '' ?>">
-              <?= e($label) ?> <span class="nav-caret">▾</span>
+            <a href="<?= e($href !== '' ? $href : '#') ?>" class="nav-item-link <?= $isActive ? 'active' : '' ?>" aria-haspopup="true">
+              <?= e($label) ?><span class="nav-caret" aria-hidden="true">▾</span>
             </a>
-            <div class="nav-dropdown-menu">
+            <button type="button" class="nav-dropdown-toggle" data-nav-dropdown-toggle
+                    aria-expanded="false" aria-controls="<?= e($menuId) ?>"
+                    aria-label="Show <?= e($label) ?> menu"><span aria-hidden="true">▾</span></button>
+            <div class="nav-dropdown-menu" id="<?= e($menuId) ?>">
               <?php foreach ($children as $child): ?>
                 <a href="<?= e($child['href']) ?>" class="<?= $path === $child['href'] ? 'active' : '' ?>">
-                  <?= e($child['label']) ?>
+                  <?= e($child['label']) ?><?php if (($child['href'] ?? '') === '/live' && $isLive): ?> <span class="nav-live"><span class="dot"></span>LIVE</span><?php endif; ?>
                 </a>
               <?php endforeach; ?>
             </div>

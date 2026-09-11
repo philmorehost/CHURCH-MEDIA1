@@ -6,16 +6,48 @@
   var links = document.querySelector('[data-nav-links]');
   if (toggle && links) {
     toggle.addEventListener('click', function () {
-      links.classList.toggle('open');
-      toggle.textContent = links.classList.contains('open') ? '✕' : '☰';
+      var isOpen = !links.classList.contains('open');
+      links.classList.toggle('open', isOpen);
+      toggle.textContent = isOpen ? '✕' : '☰';
+      if (!isOpen) { closeAllGroups(); }
     });
     links.querySelectorAll('a').forEach(function (a) {
       a.addEventListener('click', function () {
         links.classList.remove('open');
         toggle.textContent = '☰';
+        closeAllGroups();
       });
     });
   }
+
+  // Grouped nav: on small screens the caret button expands a group's children
+  // (accordion - opening one closes the others). On desktop the groups open on
+  // hover and the button is hidden, so this code simply never fires.
+  var dropdownToggles = Array.prototype.slice.call(document.querySelectorAll('[data-nav-dropdown-toggle]'));
+
+  function setGroup(button, open) {
+    var wrap = button.closest('.nav-dropdown-wrap');
+    if (!wrap) { return; }
+    wrap.classList.toggle('is-open', open);
+    button.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+
+  function closeAllGroups(except) {
+    dropdownToggles.forEach(function (button) {
+      if (button !== except) { setGroup(button, false); }
+    });
+  }
+
+  dropdownToggles.forEach(function (button) {
+    button.addEventListener('click', function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      var wrap = button.closest('.nav-dropdown-wrap');
+      var willOpen = !!wrap && !wrap.classList.contains('is-open');
+      closeAllGroups(button);
+      setGroup(button, willOpen);
+    });
+  });
 
   // Scroll-reveal
   var revealTargets = document.querySelectorAll('.reveal');

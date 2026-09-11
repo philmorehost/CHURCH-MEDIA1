@@ -131,17 +131,17 @@ p{margin:0 0 1em;}
   background:#0a0912cc; border-bottom:1px solid var(--border-soft);
 }
 .nav-row{display:flex; align-items:center; justify-content:space-between; padding:16px 24px;}
-.nav-brand{display:flex; align-items:center; gap:10px; font-family:var(--serif); font-weight:700; font-size:17px;}
+.nav-brand{display:flex; align-items:center; gap:10px; font-family:var(--serif); font-weight:700; font-size:17px; min-width:0; white-space:nowrap;}
 .nav-brand .mark{
   width:36px; height:36px; border-radius:11px; overflow:hidden;
   background:linear-gradient(135deg,var(--gold),#c98a3d); display:flex; align-items:center; justify-content:center;
   color:#1a1530; font-weight:800; flex-shrink:0;
 }
 .nav-brand .mark img{width:100%; height:100%; object-fit:cover;}
-.nav-links{display:flex; align-items:center; gap:6px;}
+.nav-links{display:flex; align-items:center; gap:6px; flex-wrap:nowrap;}
 .nav-links a{
   padding:9px 15px; border-radius:999px; font-size:13.5px; font-weight:600; color:var(--ink-dim);
-  transition:background .2s, color .2s;
+  transition:background .2s, color .2s; white-space:nowrap;
 }
 .nav-links a:hover,.nav-links a.active{background:var(--gold-dim); color:var(--gold-soft);}
 .nav-dropdown-wrap {
@@ -156,8 +156,12 @@ p{margin:0 0 1em;}
 }
 .nav-dropdown-wrap .nav-caret {
   font-size: 10px;
+  margin-left: 4px;
   transition: transform 0.2s ease;
 }
+/* Caret tap-target used to collapse a group on small screens; desktop opens on
+   hover / focus instead, so the button stays hidden there. */
+.nav-dropdown-toggle{display:none;}
 .nav-dropdown-menu {
   position: absolute;
   top: 100%;
@@ -205,22 +209,47 @@ p{margin:0 0 1em;}
   .nav-links{position:fixed; inset:64px 0 0 0; background:var(--bg-0); flex-direction:column; align-items:stretch; padding:18px; gap:4px; transform:translateX(100%); transition:transform .3s ease; overflow-y:auto; z-index:60;}
   .nav-links.open{transform:translateX(0);}
   .nav-links a{padding:14px 16px; font-size:16px;}
+  /* Groups become an accordion: the parent still links to its landing page,
+     while the caret button expands and collapses its children. */
   .nav-dropdown-wrap {
-    flex-direction: column;
-    align-items: stretch;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
     width: 100%;
   }
+  .nav-dropdown-wrap .nav-item-link{flex:1 1 auto;}
+  .nav-dropdown-wrap .nav-caret{display:none;}
+  .nav-dropdown-toggle{
+    display:flex; align-items:center; justify-content:center;
+    flex:0 0 46px; width:46px; height:46px; margin-left:2px;
+    background:none; border:0; color:var(--ink-dim); font-size:13px; cursor:pointer;
+    transition:transform .2s ease, color .2s ease;
+  }
+  .nav-dropdown-toggle[aria-expanded="true"]{transform:rotate(180deg); color:var(--gold-soft);}
   .nav-dropdown-menu {
+    flex-basis: 100%;
     position: static;
     display: flex;
+    flex-direction: column;
+    width: 100%;
     box-shadow: none;
     border: none;
     background: rgba(255, 255, 255, 0.03);
     border-left: 2px solid var(--gold);
     border-radius: 0 8px 8px 0;
     margin-left: 16px;
+    padding: 0;
+    max-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: max-height .28s ease, opacity .2s ease, padding .2s ease;
+  }
+  .nav-dropdown-wrap.is-open .nav-dropdown-menu {
+    max-height: 60vh;
+    opacity: 1;
     padding: 4px 0;
   }
+  .nav-dropdown-wrap.is-open > .nav-item-link{color:var(--gold-soft); background:var(--gold-dim);}
   .nav-toggle{display:block;}
 }
 
