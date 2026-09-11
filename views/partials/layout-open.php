@@ -47,6 +47,7 @@ $navTree = [
             ['href' => '/events', 'label' => 'Events'],
             ['href' => '/units', 'label' => 'Parishes'],
             ['href' => '/testimonies', 'label' => 'Testimonies'],
+            ['href' => '/prayer', 'label' => 'Prayer Wall'],
         ],
     ],
     [
