@@ -202,7 +202,7 @@ if ($action === 'reassign' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     // Scope: you can only move a post you can already manage, and only to a
     // unit you're allowed to assign to.
     if (!empty($scopeIds) && !mediaInScope($scopeIds, mediaPostOrgUnit($pdo, $targetId))) {
-        flash('error', 'You can only manage media in your own parish/zone.');
+        flash('error', 'You can only manage media in your own unit.');
     } elseif ($unitId > 0 && Unit::inAssignableScope($user, $unitId)) {
         $pdo->prepare('UPDATE media_posts SET org_unit_id = ? WHERE id = ?')->execute([$unitId, $targetId]);
         flash('success', 'Post moved to ' . Unit::label($unitId) . '.');
@@ -217,7 +217,7 @@ if ($action === 'pin' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     Csrf::requireValid();
     $targetId = (int) ($_POST['id'] ?? 0);
     if (!empty($scopeIds) && !mediaInScope($scopeIds, mediaPostOrgUnit($pdo, $targetId))) {
-        flash('error', 'You can only manage media in your own parish/zone.');
+        flash('error', 'You can only manage media in your own unit.');
         redirect('/admin/media');
     }
     $orgUnitId = mediaPostOrgUnit($pdo, $targetId);
@@ -248,7 +248,7 @@ if ($action === 'unpin' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     Csrf::requireValid();
     $targetId = (int) ($_POST['id'] ?? 0);
     if (!empty($scopeIds) && !mediaInScope($scopeIds, mediaPostOrgUnit($pdo, $targetId))) {
-        flash('error', 'You can only manage media in your own parish/zone.');
+        flash('error', 'You can only manage media in your own unit.');
         redirect('/admin/media');
     }
     $pdo->prepare('UPDATE media_posts SET is_pinned = 0, pinned_at = NULL, pinned_expires_at = NULL WHERE id = ?')->execute([$targetId]);
@@ -387,7 +387,7 @@ if ($action === 'reprocess' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     Csrf::requireValid();
     $id = (int) ($_POST['id'] ?? 0);
     if (!empty($scopeIds) && !mediaInScope($scopeIds, mediaPostOrgUnit($pdo, $id))) {
-        flash('error', 'You can only manage media in your own parish/zone.');
+        flash('error', 'You can only manage media in your own unit.');
         redirect('/admin/media');
     }
     set_time_limit(600);
@@ -408,7 +408,7 @@ if ($action === 'toggle' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     Csrf::requireValid();
     $id = (int) ($_POST['id'] ?? 0);
     if (!empty($scopeIds) && !mediaInScope($scopeIds, mediaPostOrgUnit($pdo, $id))) {
-        flash('error', 'You can only manage media in your own parish/zone.');
+        flash('error', 'You can only manage media in your own unit.');
         redirect('/admin/media');
     }
     $pdo->prepare('UPDATE media_posts SET is_published = NOT is_published WHERE id = ?')->execute([$id]);
@@ -419,7 +419,7 @@ if ($action === 'delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     Csrf::requireValid();
     $id = (int) ($_POST['id'] ?? 0);
     if (!empty($scopeIds) && !mediaInScope($scopeIds, mediaPostOrgUnit($pdo, $id))) {
-        flash('error', 'You can only manage media in your own parish/zone.');
+        flash('error', 'You can only manage media in your own unit.');
         redirect('/admin/media');
     }
     deletePostAndFiles($pdo, $id);
@@ -595,7 +595,7 @@ if ($action === 'add_item' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     Csrf::requireValid();
     $postId = (int) ($_POST['id'] ?? 0);
     if (!empty($scopeIds) && !mediaInScope($scopeIds, mediaPostOrgUnit($pdo, $postId))) {
-        flash('error', 'You can only manage media in your own parish/zone.');
+        flash('error', 'You can only manage media in your own unit.');
         redirect('/admin/media');
     }
     $file = $_FILES['file'] ?? null;
@@ -640,7 +640,7 @@ if ($action === 'edit' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     Csrf::requireValid();
     $id = (int) ($_POST['id'] ?? 0);
     if (!empty($scopeIds) && !mediaInScope($scopeIds, mediaPostOrgUnit($pdo, $id))) {
-        flash('error', 'You can only manage media in your own parish/zone.');
+        flash('error', 'You can only manage media in your own unit.');
         redirect('/admin/media');
     }
     $caption = trim($_POST['caption'] ?? '');
@@ -677,7 +677,7 @@ if ($action === 'edit') {
     $editPost->execute([(int) ($_GET['id'] ?? 0)]);
     $editPost = $editPost->fetch() ?: null;
     if ($editPost && !empty($scopeIds) && !mediaInScope($scopeIds, $editPost['org_unit_id'] !== null ? (int) $editPost['org_unit_id'] : null)) {
-        flash('error', 'You can only manage media in your own parish/zone.');
+        flash('error', 'You can only manage media in your own unit.');
         redirect('/admin/media');
     }
     if ($editPost) {
@@ -754,7 +754,7 @@ require __DIR__ . '/partials/layout-open.php';
             <option value="<?= (int) $au['id'] ?>" <?= (int) ($user['org_unit_id'] ?? 0) === (int) $au['id'] ? 'selected' : '' ?>><?= e($au['name'] . ' (' . $au['type'] . ')') ?></option>
           <?php endforeach; ?>
         </select>
-        <p class="hint">Choose the church this post belongs to. It will appear on that church's unit page (and roll up to its province/zone).</p>
+        <p class="hint">Choose the church this post belongs to. It will appear on that church's unit page (and roll up to its parent units).</p>
       <?php else: ?>
         <input type="hidden" name="org_unit_id" value="<?= (int) ($user['org_unit_id'] ?? 0) ?>">
         <p class="hint">This post will belong to <strong><?= e($unitLabels[(int) ($user['org_unit_id'] ?? 0)] ?? 'your church') ?></strong>.</p>

@@ -2,7 +2,9 @@
 declare(strict_types=1);
 
 /**
- * Organizational hierarchy: Province → Zone → Area → Parish (RCCG-style).
+ * Organizational hierarchy for church units (RCCG-style by default:
+ * Province → Zone → Area → Parish — but the levels are configurable, see
+ * levels()).
  *
  * Stored in a single self-referencing `org_units` table. Leaves are parishes;
  * a parish uniquely determines its full ancestor chain, so posts only need to
