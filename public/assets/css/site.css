@@ -361,6 +361,19 @@ p{margin:0 0 1em;}
 }
 .form-field textarea{min-height:120px; resize:vertical;}
 .form-field input:focus,.form-field textarea:focus{outline:none; border-color:var(--gold);}
+
+/*
+ * Native <select> option lists are drawn by the browser/OS, not by the page.
+ * With our white text and a near-transparent field background the list rendered
+ * white-on-white and was unreadable, so we give selects an opaque dark surface
+ * and ask the browser for a dark control palette. The explicit option colours
+ * are a fallback for engines that ignore `color-scheme`.
+ */
+select{color-scheme:dark;}
+select option,select optgroup{background-color:var(--panel-solid); color:var(--ink);}
+select option:disabled{color:var(--ink-faint);}
+.form-field select{background-color:var(--panel-solid); cursor:pointer;}
+.form-field select:focus{outline:none; border-color:var(--gold);}
 .form-note{font-size:12px; color:var(--ink-faint); margin-top:-10px; margin-bottom:16px;}
 .form-message{padding:12px 16px; border-radius:12px; font-size:13.5px; margin-bottom:16px; display:none;}
 .form-message.show{display:block;}
