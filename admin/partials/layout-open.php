@@ -19,6 +19,7 @@ $navItems = [
     ['key' => 'notifications', 'href' => '/admin/notifications', 'label' => 'Notifications'],
     ['key' => 'attendance', 'href' => '/admin/attendance', 'label' => 'Attendance'],
     ['key' => 'donations', 'href' => '/admin/donations', 'label' => 'Donations & Giving'],
+    ['key' => 'testimonies', 'href' => '/admin/testimonies', 'label' => 'Testimonies'],
     ['key' => 'newcomers', 'href' => '/admin/newcomers', 'label' => 'Newcomers'],
     ['key' => 'pages', 'href' => '/admin/pages', 'label' => 'Pages', 'super' => true],
     ['key' => 'guide', 'href' => '/admin/guide', 'label' => 'Guide'],

@@ -250,6 +250,7 @@ class Database
                 // CMS pages table (JSON section-based content rendered into a template).
                 $pdo->exec("CREATE TABLE IF NOT EXISTS `pages` (
                     `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `parent_id` INT NULL DEFAULT NULL,
                     `title` VARCHAR(200) NOT NULL,
                     `slug` VARCHAR(220) NOT NULL UNIQUE,
                     `eyebrow` VARCHAR(120) NULL,
@@ -802,6 +803,24 @@ class Database
                 self::addColumnIfMissing($pdo, 'settings', 'manual_payment_instructions', 'TEXT NULL', 'manual_payment_enabled');
                 self::addColumnIfMissing($pdo, 'settings', 'ad_display_frequency', "VARCHAR(20) NOT NULL DEFAULT '5_min'", 'manual_payment_instructions');
                 self::addColumnIfMissing($pdo, 'settings', 'free_ad_frequency', "VARCHAR(20) NOT NULL DEFAULT 'once_daily'", 'ad_display_frequency');
+                self::addColumnIfMissing($pdo, 'pages', 'parent_id', 'INT NULL DEFAULT NULL', 'id');
+            },
+            '2026_08_testimonies' => function (PDO $pdo): void {
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `testimonies` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `unit_id` INT NULL DEFAULT NULL,
+                    `name` VARCHAR(150) NOT NULL,
+                    `email` VARCHAR(190) NULL,
+                    `phone` VARCHAR(50) NULL,
+                    `title` VARCHAR(255) NOT NULL,
+                    `content` TEXT NOT NULL,
+                    `media_url` VARCHAR(500) NULL,
+                    `status` VARCHAR(20) NOT NULL DEFAULT 'pending',
+                    `submitted_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `approved_at` TIMESTAMP NULL DEFAULT NULL,
+                    INDEX `idx_testimony_status` (`status`, `submitted_at`),
+                    INDEX `idx_testimony_unit` (`unit_id`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
             },
         ];
     }

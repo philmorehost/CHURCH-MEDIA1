@@ -408,6 +408,7 @@ CREATE TABLE IF NOT EXISTS `export_files` (
 -- of design sections (hero / text / columns / image / quote / cta).
 CREATE TABLE IF NOT EXISTS `pages` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `parent_id` INT NULL DEFAULT NULL,
   `title` VARCHAR(200) NOT NULL,
   `slug` VARCHAR(220) NOT NULL UNIQUE,
   `eyebrow` VARCHAR(120) NULL,
@@ -637,4 +638,20 @@ CREATE TABLE IF NOT EXISTS `ad_payments` (
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (`ad_id`) REFERENCES `ads`(`id`) ON DELETE CASCADE,
   FOREIGN KEY (`publisher_id`) REFERENCES `ad_publishers`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `testimonies` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `unit_id` INT NULL DEFAULT NULL,
+  `name` VARCHAR(150) NOT NULL,
+  `email` VARCHAR(190) NULL,
+  `phone` VARCHAR(50) NULL,
+  `title` VARCHAR(255) NOT NULL,
+  `content` TEXT NOT NULL,
+  `media_url` VARCHAR(500) NULL,
+  `status` VARCHAR(20) NOT NULL DEFAULT 'pending',
+  `submitted_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `approved_at` TIMESTAMP NULL DEFAULT NULL,
+  INDEX `idx_testimony_status` (`status`, `submitted_at`),
+  INDEX `idx_testimony_unit` (`unit_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
