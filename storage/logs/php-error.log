@@ -29494,3 +29494,4 @@ Stack trace:
 Stack trace:
 #0 {main}
   thrown in /app/test_fcm.php on line 6
+[11-Sep-2026 13:36:39 Africa/Lagos] PHP Warning:  Undefined array key "REQUEST_METHOD" in /app/installer/steps/1-requirements.php on line 19
