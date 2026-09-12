@@ -13,16 +13,40 @@ if (!$sermon) {
 $metaTitle = $sermon['title'];
 $metaDescription = $sermon['description'] ? mb_strimwidth($sermon['description'], 0, 155, '…') : null;
 $metaImage = baseUrl(ShareCard::urlFor('sermon', (int) $sermon['id'], (string) $sermon['slug']));
+
+// The series this message belongs to, so the heading can link back to it.
+$seriesRow = !empty($sermon['series_id']) ? Series::find((int) $sermon['series_id']) : null;
+
+// An external link wins over an uploaded file, the same rule the podcast feed uses. Without
+// this the player would be silent for exactly the episodes that publish through a host.
+$audioSrc = '';
+if (!empty($sermon['audio_url'])) {
+    $audioSrc = (string) $sermon['audio_url'];
+} elseif (!empty($sermon['audio_path'])) {
+    $audioSrc = (string) uploadUrl((string) $sermon['audio_path']);
+}
 ?>
 
 <section class="section" style="padding-top:56px;">
   <div class="container" style="max-width:820px;">
-    <div class="eyebrow" style="text-align:center; display:block; margin-bottom:14px;"><?= e($sermon['series'] ?: 'Sermon') ?></div>
+    <div class="eyebrow" style="text-align:center; display:block; margin-bottom:14px;">
+      <?php if ($seriesRow !== null): ?>
+        <a href="/series/<?= e($seriesRow['slug']) ?>" style="color:inherit;"><?= e($seriesRow['title']) ?></a>
+        <?php if (!empty($sermon['series_position'])): ?>
+          <span style="color:var(--ink-dim);">· Episode <?= (int) $sermon['series_position'] ?></span>
+        <?php endif; ?>
+      <?php else: ?>
+        <?= e($sermon['series'] ?: 'Sermon') ?>
+      <?php endif; ?>
+    </div>
     <h1 style="text-align:center; font-size:clamp(28px,5vw,44px);"><?= e($sermon['title']) ?></h1>
     <div class="meta" style="justify-content:center; margin-bottom:32px; font-size:14px;">
       <?php if ($sermon['speaker']): ?><span>🎙 <?= e($sermon['speaker']) ?></span><?php endif; ?>
       <span>🗓 <?= e(date('F j, Y', strtotime($sermon['published_at']))) ?></span>
       <?php if ($sermon['scripture_ref']): ?><span>📖 <?= e($sermon['scripture_ref']) ?></span><?php endif; ?>
+      <?php if (!empty($sermon['duration_seconds'])): ?>
+        <span>⏱ <?= e(PodcastFeed::humanDuration((int) $sermon['duration_seconds'])) ?></span>
+      <?php endif; ?>
     </div>
 
     <?php if ($sermon['video_embed_url']): ?>
@@ -40,10 +64,16 @@ $metaImage = baseUrl(ShareCard::urlFor('sermon', (int) $sermon['id'], (string) $
       </div>
     <?php endif; ?>
 
-    <?php if ($sermon['audio_path']): ?>
-      <audio controls style="width:100%; margin-bottom:28px;">
-        <source src="<?= e(uploadUrl($sermon['audio_path'])) ?>">
+    <?php if ($audioSrc !== ''): ?>
+      <audio controls preload="metadata" style="width:100%; margin-bottom:12px;">
+        <source src="<?= e($audioSrc) ?>">
       </audio>
+      <div style="text-align:center; margin-bottom:28px; font-size:13px;">
+        <a href="<?= e($audioSrc) ?>" download
+           style="color:var(--gold-soft); text-decoration:underline;">
+          ⬇ Download this message
+        </a>
+      </div>
     <?php endif; ?>
 
     <?php if ($sermon['description']): ?>
@@ -51,6 +81,9 @@ $metaImage = baseUrl(ShareCard::urlFor('sermon', (int) $sermon['id'], (string) $
     <?php endif; ?>
 
     <div style="text-align:center; margin-top:40px;">
+      <?php if ($seriesRow !== null): ?>
+        <a href="/series/<?= e($seriesRow['slug']) ?>" class="btn btn-ghost">← All episodes in <?= e($seriesRow['title']) ?></a>
+      <?php endif; ?>
       <a href="/sermons" class="btn btn-ghost">← Back to Sermons</a>
     </div>
   </div>

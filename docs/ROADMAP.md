@@ -717,17 +717,39 @@ newcomer and newsletter forms (opt-in checkbox wording added to the privacy poli
 > slug, which would have broken every published link — search results, shared links and the feed.
 > The slug is now created once and kept.
 >
-> **Still open in this phase:** `api/series.php` and `api/sermons.php` (3.5), and the Flutter
-> `sermons_screen.dart` / `sermon_detail_screen.dart` work — series list, episode numbers and
-> download (3.6). `views/sermon-detail.php` has **not** been updated for the new fields: it does
-> not yet show the episode number, the duration, or a download link for the external audio.
+> **Status: shipped (3.5–3.6).** `api/series.php` lists published series and returns one series
+> with its episodes already in episode order, going through `Series::all()` so tenant scoping
+> stays in one place. An unknown or unpublished slug is a 404 rather than an empty list, which
+> would look like a bug in the app.
 >
-> Until 3.5 lands the API is behind the website in two specific ways, both in `api/sermons.php`:
-> it selects the legacy `series` text column and never `series_id` / `series_position` /
-> `duration_seconds`, so the app cannot see series structure; and it sets
-> `$sermon['audio_url'] = uploadUrl($sermon['audio_path'])`, which **overwrites** the external
-> audio column — so an episode published with only an external link reaches the app with no audio
-> at all. Neither affects the website or the podcast feed.
+> `api/sermons.php` now exposes `series_id`, `series_slug`, `series_position`, `duration_seconds`
+> and `is_explicit` alongside the legacy `series` string, so the app gets series structure without
+> breaking clients already in the field. `?series=` accepts a slug, and still accepts the old
+> free-text name, so links that predate the series table keep working.
+>
+> **A real bug was fixed here, not just extended.** `audio_url` is both a column (the external
+> link) and a response field (a playable URL). The old code did
+> `$sermon['audio_url'] = uploadUrl($sermon['audio_path'])`, which overwrote the external link —
+> so an episode published with only an external link reached the app with **no audio at all**.
+> The column is now selected under a different name and the two are resolved deliberately, with
+> an `audio_source` field saying which won. The website and the podcast feed were never affected.
+>
+> The app gained `series_screen.dart`, `series_detail_screen.dart`, a series filter bar on the
+> sermons list, and episode number, duration and a download action on the sermon detail screen.
+> `views/sermon-detail.php` gained the same: the episode number, the duration in words, a link
+> back to the series, and a player that uses the external audio when present.
+>
+> **Verified:** 47 assertions over the API and the sermon page — publication and draft filtering,
+> episode ordering, the `audio_url` resolution in all three cases (external only, upload only,
+> both), 404s for unknown and unpublished series, and both the slug and legacy-text `?series=`
+> filters. `flutter analyze` reports **no issues in any changed file and no error- or
+> warning-severity diagnostics anywhere**; the 12 remaining lints are pre-existing `info`-level
+> style notes in `bible_screen.dart`, `event_detail_screen.dart` and `home_screen.dart`.
+>
+> **Not verified:** the app was analysed but never run. The new screens compile and pass the
+> analyzer, but no one has tapped through them on a device or emulator — layout and navigation
+> behaviour on a real screen is still an open question. The feed has also still not been
+> submitted to Apple or Spotify.
 
 ## 6. Phase 4 — WhatsApp channel
 

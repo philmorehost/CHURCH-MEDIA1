@@ -97,11 +97,23 @@ class SermonCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    if (sermon.seriesPosition != null)
+                      Text(
+                        'EPISODE ${sermon.seriesPosition}',
+                        style: const TextStyle(color: AppColors.goldSoft, fontSize: 10.5, fontWeight: FontWeight.w700, letterSpacing: 0.8),
+                      ),
                     Text(sermon.title, style: Theme.of(context).textTheme.titleLarge, maxLines: 2, overflow: TextOverflow.ellipsis),
                     const SizedBox(height: 4),
                     Text(
-                      [if (sermon.speaker != null) sermon.speaker!, if (published != null) DateFormat('MMM d, yyyy').format(published)].join(' · '),
+                      [
+                        if (sermon.series != null && sermon.series!.isNotEmpty) sermon.series!,
+                        if (sermon.speaker != null) sermon.speaker!,
+                        if (published != null) DateFormat('MMM d, yyyy').format(published),
+                        if (sermon.durationLabel != null) sermon.durationLabel!,
+                      ].join(' · '),
                       style: const TextStyle(color: AppColors.inkFaint, fontSize: 12),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),

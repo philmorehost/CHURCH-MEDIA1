@@ -197,10 +197,35 @@ class ApiClient {
     return Sermon.fromJson(json['data'] as Map<String, dynamic>);
   }
 
-  Future<({List<Sermon> sermons, bool hasMore})> fetchSermons({int page = 1, String? series}) async {
-    final json = await _get('/api/sermons', {'page': page, 'series': series});
+  Future<({List<Sermon> sermons, bool hasMore})> fetchSermons({int page = 1, String? series, int? seriesId}) async {
+    final json = await _get('/api/sermons', {'page': page, 'series': series, 'series_id': seriesId});
     final sermons = (json['data'] as List<dynamic>? ?? []).map((e) => Sermon.fromJson(e as Map<String, dynamic>)).toList();
     return (sermons: sermons, hasMore: json['has_more'] as bool? ?? false);
+  }
+
+  /// Every published series, for the series list.
+  Future<List<SermonSeries>> fetchSeries() async {
+    final json = await _get('/api/series');
+    if (json['status'] != 'success') return const [];
+    return (json['data'] as List<dynamic>? ?? [])
+        .map((e) => SermonSeries.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// One series with its episodes, already in episode order.
+  ///
+  /// Returns null when the series does not exist or is not published, so the caller can show a
+  /// "not found" state rather than an empty episode list that looks like a bug.
+  Future<({SermonSeries series, List<Sermon> episodes})?> fetchSeriesDetail(String slug) async {
+    final json = await _get('/api/series', {'slug': slug});
+    if (json['status'] != 'success') return null;
+    final data = json['data'] as Map<String, dynamic>? ?? {};
+    final seriesJson = data['series'] as Map<String, dynamic>?;
+    if (seriesJson == null) return null;
+    final episodes = (data['episodes'] as List<dynamic>? ?? [])
+        .map((e) => Sermon.fromJson(e as Map<String, dynamic>))
+        .toList();
+    return (series: SermonSeries.fromJson(seriesJson), episodes: episodes);
   }
 
   Future<Map<String, List<dynamic>>> search(String query) async {

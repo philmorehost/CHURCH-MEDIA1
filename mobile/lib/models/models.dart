@@ -200,6 +200,11 @@ class Sermon {
   final String slug;
   final String? speaker;
   final String? series;
+  final int? seriesId;
+  final String? seriesSlug;
+  final int? seriesPosition;
+  final int? durationSeconds;
+  final bool isExplicit;
   final String? scriptureRef;
   final String? description;
   final String? audioUrl;
@@ -213,6 +218,11 @@ class Sermon {
     required this.slug,
     this.speaker,
     this.series,
+    this.seriesId,
+    this.seriesSlug,
+    this.seriesPosition,
+    this.durationSeconds,
+    this.isExplicit = false,
     this.scriptureRef,
     this.description,
     this.audioUrl,
@@ -221,18 +231,69 @@ class Sermon {
     required this.publishedAt,
   });
 
+  /// True when the sermon belongs to a real series rather than carrying an old free-text name.
+  bool get isInSeries => seriesId != null;
+
+  /// "42 min", or null when the duration was never recorded.
+  String? get durationLabel {
+    final seconds = durationSeconds;
+    if (seconds == null || seconds <= 0) return null;
+    if (seconds < 60) return '$seconds sec';
+    final minutes = seconds ~/ 60;
+    if (minutes < 60) return '$minutes min';
+    final hours = minutes ~/ 60;
+    final remainder = minutes % 60;
+    return remainder == 0 ? '$hours h' : '$hours h $remainder min';
+  }
+
   factory Sermon.fromJson(Map<String, dynamic> json) => Sermon(
         id: json['id'] as int,
         title: json['title'] as String,
         slug: json['slug'] as String,
         speaker: json['speaker'] as String?,
         series: json['series'] as String?,
+        seriesId: json['series_id'] as int?,
+        seriesSlug: json['series_slug'] as String?,
+        seriesPosition: json['series_position'] as int?,
+        durationSeconds: json['duration_seconds'] as int?,
+        isExplicit: json['is_explicit'] as bool? ?? false,
         scriptureRef: json['scripture_ref'] as String?,
         description: json['description'] as String?,
         audioUrl: json['audio_url'] as String?,
         videoEmbedUrl: json['video_embed_url'] as String?,
         coverImageUrl: json['cover_image_url'] as String?,
         publishedAt: json['published_at'] as String,
+      );
+}
+
+/// A named run of sermons. The app shows these as a list, and each one opens its episodes.
+class SermonSeries {
+  final int id;
+  final String title;
+  final String slug;
+  final String? description;
+  final String? coverImageUrl;
+  final int sermonCount;
+  final String? latestAt;
+
+  SermonSeries({
+    required this.id,
+    required this.title,
+    required this.slug,
+    this.description,
+    this.coverImageUrl,
+    this.sermonCount = 0,
+    this.latestAt,
+  });
+
+  factory SermonSeries.fromJson(Map<String, dynamic> json) => SermonSeries(
+        id: json['id'] as int,
+        title: json['title'] as String,
+        slug: json['slug'] as String,
+        description: json['description'] as String?,
+        coverImageUrl: json['cover_image_url'] as String?,
+        sermonCount: json['sermon_count'] as int? ?? 0,
+        latestAt: json['latest_at'] as String?,
       );
 }
 

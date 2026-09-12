@@ -7,6 +7,7 @@ import '../models/models.dart';
 import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
+import 'series_detail_screen.dart';
 
 class SermonDetailScreen extends StatefulWidget {
   final String slug;
@@ -56,12 +57,32 @@ class _SermonDetailScreenState extends State<SermonDetailScreen> {
       body: ListView(
         padding: const EdgeInsets.all(24),
         children: [
+          if (sermon.isInSeries)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: InkWell(
+                // Opens the series, so a listener who lands on episode 4 by a shared link can
+                // find the other three without going back through the sermon list. Not tappable
+                // when the slug is missing, because an empty slug would land on "not available".
+                onTap: sermon.seriesSlug == null
+                    ? null
+                    : () => Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => SeriesDetailScreen(slug: sermon.seriesSlug!)),
+                        ),
+                child: Text(
+                  '${sermon.series}${sermon.seriesPosition != null ? ' · Episode ${sermon.seriesPosition}' : ''}',
+                  style: const TextStyle(color: AppColors.goldSoft, fontSize: 12.5, fontWeight: FontWeight.w700, letterSpacing: 0.6),
+                ),
+              ),
+            ),
           Text(sermon.title, style: Theme.of(context).textTheme.headlineMedium),
           const SizedBox(height: 10),
           Wrap(spacing: 16, runSpacing: 8, children: [
             if (sermon.speaker != null) Text('🎙 ${sermon.speaker}', style: const TextStyle(color: AppColors.inkFaint, fontSize: 13)),
             if (published != null) Text('🗓 ${DateFormat('MMMM d, yyyy').format(published)}', style: const TextStyle(color: AppColors.inkFaint, fontSize: 13)),
             if (sermon.scriptureRef != null) Text('📖 ${sermon.scriptureRef}', style: const TextStyle(color: AppColors.inkFaint, fontSize: 13)),
+            if (sermon.durationLabel != null) Text('⏱ ${sermon.durationLabel}', style: const TextStyle(color: AppColors.inkFaint, fontSize: 13)),
           ]),
           const SizedBox(height: 20),
           if (sermon.coverImageUrl != null)
@@ -80,6 +101,20 @@ class _SermonDetailScreenState extends State<SermonDetailScreen> {
           if (_audioController != null) ...[
             const SizedBox(height: 20),
             _AudioPlayerBar(controller: _audioController!),
+          ],
+          if (sermon.audioUrl != null) ...[
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                // Handed to the platform rather than downloaded in-app: on Android and iOS this
+                // opens the browser or the download manager, which is where a listener expects
+                // the file to end up.
+                onPressed: () => launchUrl(Uri.parse(sermon.audioUrl!), mode: LaunchMode.externalApplication),
+                icon: const Icon(Icons.download, size: 18),
+                label: const Text('Download this message'),
+              ),
+            ),
           ],
           if (sermon.description != null) ...[
             const SizedBox(height: 24),
