@@ -632,6 +632,37 @@ $router->get('/events/{slug}', function (array $params) {
     render('event-detail', ['slug' => $params['slug']]);
 });
 
+// RSVP taken on the page itself. A plain form POST, so it works with JavaScript
+// off — the app uses POST /api/rsvp with the same underlying logic.
+$router->post('/events/{slug}', function (array $params) {
+    Csrf::requireValid();
+    RateLimiter::require('rsvp', 10, 300);
+
+    $slug = (string) $params['slug'];
+    $pdo = Database::getInstance()->getConnection();
+    $stmt = $pdo->prepare('SELECT * FROM events WHERE slug = ? AND is_published = 1 LIMIT 1');
+    $stmt->execute([$slug]);
+    $event = $stmt->fetch();
+
+    if (!$event || !Rsvp::takesRsvps($event)) {
+        flash('rsvp_error', 'That event is not taking RSVPs here.');
+        redirect('/events/' . rawurlencode($slug));
+    }
+
+    $result = Rsvp::submit($event, $_POST);
+    if (!$result['ok']) {
+        keepFormOld($_POST);
+        flash('rsvp_error', $result['message']);
+    } else {
+        // A smaller party may have freed seats for whoever is waiting.
+        Rsvp::promoteWaitlist((int) $event['id']);
+        clearFormOld();
+        flash('rsvp_ok', $result['message']);
+    }
+
+    redirect('/events/' . rawurlencode($slug));
+});
+
 $router->get('/sermons', function () {
     render('sermons');
 });

@@ -154,6 +154,15 @@ Do this **before** any Phase 1/2 work so nothing has to be retrofitted later.
   adds < 5 ms.
 
 ### 1.3 Real RSVP + calendar
+> **Status: shipped.** `events` gained `rsvp_mode` (legacy/off/external/internal),
+> `max_capacity`, `allow_guests`, `waitlist_enabled` and `rsvp_closes_at`, plus the
+> `event_rsvps` table; `core/Rsvp.php` holds the seat/waitlist/promotion logic;
+> `api/rsvp.php` for the app and a server-side form POST on `/events/{slug}` for the web
+> (works with JavaScript off); `api/calendar.php` serves the `.ics`;
+> `admin/events.php` has capacity controls and a guest list with CSV export and door
+> check-in. 71 assertions passing.
+> `rsvp_mode` defaults to `legacy`, meaning “keep using rsvp_enabled/rsvp_url”, so every
+> event that existed before behaves exactly as it did.
 - **DB**: `event_rsvps` (`event_id`, `name`, `email`, `phone`, `guests`, `status`
   ENUM('going','maybe','declined','waitlist'), `token`, `created_at`) + `events.max_capacity`,
   `events.rsvp_mode` ENUM('off','external','internal'). Keep `rsvp_url` for `external`.

@@ -986,6 +986,39 @@ class Database
                 self::addColumnIfMissing($pdo, 'settings', 'analytics_enabled', 'TINYINT(1) NOT NULL DEFAULT 1', 'comments_flag_threshold');
                 self::addColumnIfMissing($pdo, 'settings', 'analytics_retention_days', 'INT NOT NULL DEFAULT 180', 'analytics_enabled');
             },
+
+            // RSVP. `rsvp_mode` defaults to 'legacy', which means "keep using
+            // rsvp_enabled/rsvp_url", so every existing event behaves unchanged
+            // until an admin deliberately picks a different mode.
+            '2026_13_event_rsvp' => function (PDO $pdo): void {
+                self::addColumnIfMissing($pdo, 'events', 'rsvp_mode', "ENUM('legacy','off','external','internal') NOT NULL DEFAULT 'legacy'", 'rsvp_url');
+                self::addColumnIfMissing($pdo, 'events', 'max_capacity', 'INT NOT NULL DEFAULT 0', 'rsvp_mode');
+                self::addColumnIfMissing($pdo, 'events', 'allow_guests', 'TINYINT(1) NOT NULL DEFAULT 1', 'max_capacity');
+                self::addColumnIfMissing($pdo, 'events', 'waitlist_enabled', 'TINYINT(1) NOT NULL DEFAULT 1', 'allow_guests');
+                self::addColumnIfMissing($pdo, 'events', 'rsvp_closes_at', 'DATETIME NULL', 'waitlist_enabled');
+
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `event_rsvps` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `event_id` INT NOT NULL,
+                    `name` VARCHAR(150) NOT NULL,
+                    `email` VARCHAR(190) NULL,
+                    `phone` VARCHAR(45) NULL,
+                    `guests` INT NOT NULL DEFAULT 0,
+                    `status` ENUM('going','maybe','declined','waitlist','cancelled') NOT NULL DEFAULT 'going',
+                    `token` VARCHAR(64) NOT NULL,
+                    `note` VARCHAR(500) NULL,
+                    `fingerprint_hash` VARCHAR(64) NULL,
+                    `checked_in` TINYINT(1) NOT NULL DEFAULT 0,
+                    `checked_in_at` DATETIME NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY `uniq_rsvp_token` (`token`),
+                    UNIQUE KEY `uniq_rsvp_event_email` (`event_id`, `email`),
+                    INDEX `idx_rsvp_event_status` (`event_id`, `status`),
+                    INDEX `idx_rsvp_email` (`email`),
+                    FOREIGN KEY (`event_id`) REFERENCES `events`(`id`) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+            },
         ];
     }
 

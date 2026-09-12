@@ -371,11 +371,43 @@ CREATE TABLE IF NOT EXISTS `events` (
   `location` VARCHAR(255) NULL,
   `rsvp_enabled` TINYINT(1) NOT NULL DEFAULT 0,
   `rsvp_url` VARCHAR(500) NULL,
+  `rsvp_mode` ENUM('legacy','off','external','internal') NOT NULL DEFAULT 'legacy'
+    COMMENT 'legacy = keep using rsvp_enabled/rsvp_url so existing events behave unchanged',
+  `max_capacity` INT NOT NULL DEFAULT 0 COMMENT '0 = unlimited',
+  `allow_guests` TINYINT(1) NOT NULL DEFAULT 1,
+  `waitlist_enabled` TINYINT(1) NOT NULL DEFAULT 1,
+  `rsvp_closes_at` DATETIME NULL COMMENT 'Optional deadline; NULL = always open',
   `is_published` TINYINT(1) NOT NULL DEFAULT 1,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `org_unit_id` INT NULL,
   INDEX `idx_published_start` (`is_published`, `start_at`),
   FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- RSVPs taken on the site or in the app. `token` is the guest's own key, so they
+-- can amend or cancel without an account. One row per email per event, and a
+-- NULL email is allowed (multiple NULLs are fine in a UNIQUE key) because nobody
+-- is turned away for not sharing an address.
+CREATE TABLE IF NOT EXISTS `event_rsvps` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `event_id` INT NOT NULL,
+  `name` VARCHAR(150) NOT NULL,
+  `email` VARCHAR(190) NULL,
+  `phone` VARCHAR(45) NULL,
+  `guests` INT NOT NULL DEFAULT 0 COMMENT 'Extra people aside from the guest themselves',
+  `status` ENUM('going','maybe','declined','waitlist','cancelled') NOT NULL DEFAULT 'going',
+  `token` VARCHAR(64) NOT NULL,
+  `note` VARCHAR(500) NULL,
+  `fingerprint_hash` VARCHAR(64) NULL,
+  `checked_in` TINYINT(1) NOT NULL DEFAULT 0,
+  `checked_in_at` DATETIME NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_rsvp_token` (`token`),
+  UNIQUE KEY `uniq_rsvp_event_email` (`event_id`, `email`),
+  INDEX `idx_rsvp_event_status` (`event_id`, `status`),
+  INDEX `idx_rsvp_email` (`email`),
+  FOREIGN KEY (`event_id`) REFERENCES `events`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `sermons` (
