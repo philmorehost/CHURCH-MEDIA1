@@ -1157,13 +1157,28 @@ $router->get('/sitemap.xml', function () {
     require VIEWS_PATH . '/sitemap.php';
 });
 
+// The site icon. A route rather than a file on disk on purpose: a real
+// public/favicon.ico is served by the web server ahead of the front controller
+// (.htaccess and public/router.php both skip existing files), which is why every
+// site built from this code showed the same icon no matter what was uploaded.
+// Do not add that file back — deleting it is what makes this reachable.
 $router->get('/favicon.ico', function () {
-    $path = setting('favicon_path');
-    if ($path && is_file(UPLOADS_PATH . '/' . $path)) {
-        header('Content-Type: image/webp');
+    $path = (string) (setting('favicon_path') ?? '');
+    if ($path !== '' && is_file(UPLOADS_PATH . '/' . $path)) {
+        // processImage() stores WebP, but the type comes from the extension so a
+        // differently stored icon still declares itself correctly.
+        $types = [
+            'webp' => 'image/webp', 'png' => 'image/png', 'jpg' => 'image/jpeg',
+            'jpeg' => 'image/jpeg', 'gif' => 'image/gif', 'svg' => 'image/svg+xml',
+            'ico' => 'image/x-icon',
+        ];
+        $ext = strtolower((string) pathinfo($path, PATHINFO_EXTENSION));
+        header('Content-Type: ' . ($types[$ext] ?? 'application/octet-stream'));
         header('Cache-Control: public, max-age=86400');
         readfile(UPLOADS_PATH . '/' . $path);
         exit;
     }
-    MediaProcessor::renderDynamicFavicon(setting('site_title', 'C'));
+    // Nothing uploaded yet: a generated letter tile from the church's initial, so a
+    // new site shows its own mark instead of the browser's blank placeholder.
+    MediaProcessor::renderDynamicFavicon((string) setting('site_title', 'C'));
 });

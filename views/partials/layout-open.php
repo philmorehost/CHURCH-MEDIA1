@@ -114,7 +114,21 @@ try {
 <meta name="description" content="<?= e($metaDescription) ?>">
 <?php if (!empty($metaRobots)): ?><meta name="robots" content="<?= e($metaRobots) ?>"><?php endif; ?>
 <link rel="canonical" href="<?= e(baseUrl($path === '/' ? '' : ltrim($path, '/'))) ?>">
-<link rel="icon" href="/favicon.ico">
+<?php
+// The icon is served by the /favicon.ico *route*, which reads the favicon saved in
+// Settings — there is deliberately no public/favicon.ico on disk, because the web
+// server serves existing files ahead of the front controller and that file used to
+// win, showing the same icon on every site built from this code.
+//
+// The query string changes with the file's timestamp: browsers hang on to a favicon
+// far more stubbornly than any other asset, so a bare /favicon.ico keeps showing the
+// old icon long after a new one is saved.
+$faviconFile = (string) ($s['favicon_path'] ?? '');
+$faviconVersion = $faviconFile !== '' && is_file(UPLOADS_PATH . '/' . $faviconFile)
+    ? (string) filemtime(UPLOADS_PATH . '/' . $faviconFile)
+    : 'default';
+?>
+<link rel="icon" href="/favicon.ico?v=<?= e($faviconVersion) ?>">
 <meta property="og:title" content="<?= e($metaTitle) ?>">
 <meta property="og:description" content="<?= e($metaDescription) ?>">
 <meta property="og:type" content="website">
