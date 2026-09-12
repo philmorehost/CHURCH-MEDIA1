@@ -12,6 +12,7 @@ if (!$event) {
 }
 $metaTitle = $event['title'];
 $metaDescription = $event['description'] ? mb_strimwidth($event['description'], 0, 155, '…') : null;
+$metaImage = baseUrl(ShareCard::urlFor('event', (int) $event['id'], (string) $event['slug']));
 
 $rsvpMode = Rsvp::modeFor($event);
 $takesRsvps = Rsvp::takesRsvps($event);

@@ -12,6 +12,7 @@ if (!$sermon) {
 }
 $metaTitle = $sermon['title'];
 $metaDescription = $sermon['description'] ? mb_strimwidth($sermon['description'], 0, 155, '…') : null;
+$metaImage = baseUrl(ShareCard::urlFor('sermon', (int) $sermon['id'], (string) $sermon['slug']));
 ?>
 
 <section class="section" style="padding-top:56px;">

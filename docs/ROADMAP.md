@@ -174,6 +174,24 @@ Do this **before** any Phase 1/2 work so nothing has to be retrofitted later.
   `.ics` validates, no double-RSVP from the same email.
 
 ### 1.4 Auto share cards
+> **Status: shipped.** `core/ShareCard.php` renders a 1200×630 PNG with GD + TrueType —
+> eyebrow tab, auto-shrinking 2–3 line title, one-line subtitle, and the site name and
+> host in the footer. Cards are cached in `storage/cache/og/` under a hash of the visible
+> text, so editing a title mints a new card and the superseded one is pruned; the whole
+> directory is capped at 4000 files, oldest evicted first.
+> `api/og.php` serves them with `ETag`/`304` and a `Cache-Control` day, and falls back to
+> the row's cover image, then the logo, then a blank card. `views/partials/layout-open.php`
+> prefers a view-supplied `$metaImage`, so `/sermons/{slug}` and `/events/{slug}` now show
+> a real preview in WhatsApp, Facebook and X. 52 assertions passing, verified over HTTP.
+> **Graceful degradation is the whole design**: no GD, no FreeType, no readable font, an
+> unreadable cover or an unsupported format all step down to a simpler card or to the
+> plain logo, and `generate()` returns `null` rather than ever throwing at a visitor.
+> Only whitelisted types and published rows resolve, and remote cover URLs are refused, so
+> the query string cannot be used to draw arbitrary text or to make the server fetch a
+> third-party URL. Fonts are discovered from a list of common paths (overridable with the
+> `og_font_path` setting); no font file is bundled in the repo.
+> **Still open**: a Share action in the Flutter app, and cards for testimonies and reels
+> (the generator already supports `testimony` and `post` — only the views need the wiring).
 - **New**: `api/og.php?type=sermon|reel|testimony|event&id=` generating a 1200×630 PNG
   (GD `imagettftext`), cached in `storage/cache/og/`, with church branding.
 - **Modify**: `views/partials/layout-open.php` (`og:image` from the generator),

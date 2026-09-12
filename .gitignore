@@ -1,0 +1,12 @@
+# Runtime artefacts that must never be committed.
+#
+# Note: storage/cache/{bible,ratelimit} and storage/installed.lock were added to
+# git before this file existed. Ignoring a path does not untrack it, so those
+# already-committed files keep working; this only stops new ones being added.
+
+/storage/installed.lock
+/storage/logs/*
+!/storage/logs/.gitkeep
+/storage/cache/og/
+/storage/cache/ratelimit/
+/storage/cache/bible/

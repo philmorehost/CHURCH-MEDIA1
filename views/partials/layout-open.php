@@ -119,7 +119,22 @@ try {
 <meta property="og:description" content="<?= e($metaDescription) ?>">
 <meta property="og:type" content="website">
 <meta property="og:url" content="<?= e(baseUrl($path)) ?>">
-<?php if ($s['logo_path'] ?? null): ?><meta property="og:image" content="<?= e(uploadUrl($s['logo_path'])) ?>"><?php endif; ?>
+<?php
+// og:image prefers a generated share card (views set $metaImage for that), then
+// the church logo. The generated card is what makes a WhatsApp share show a
+// proper preview instead of a bare link.
+$ogImage = $metaImage ?? null;
+if (!$ogImage && ($s['logo_path'] ?? null)) {
+    $ogImage = uploadUrl($s['logo_path']);
+}
+?>
+<?php if ($ogImage): ?>
+  <meta property="og:image" content="<?= e($ogImage) ?>">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="<?= e($ogImage) ?>">
+<?php endif; ?>
 <meta name="theme-color" content="#0a0912">
 <link rel="stylesheet" href="<?= asset('css/site.css') ?>">
 <script type="application/ld+json"><?= json_encode([
