@@ -38,6 +38,7 @@ require __DIR__ . '/partials/layout-open.php';
     <a href="#team">Team</a>
     <a href="#prayer">Prayer Wall</a>
     <a href="#newsletter">Newsletter</a>
+    <a href="#sms">SMS Messaging</a>
     <a href="#forms">Forms</a>
     <a href="#notifications">Notifications</a>
     <a href="#attendance">Attendance</a>
@@ -58,12 +59,13 @@ require __DIR__ . '/partials/layout-open.php';
     <p>Every account has a role that controls what they can see and do. You'll usually only see <strong>your own church's</strong> content — each parish is fully isolated from every other parish.</p>
     <table>
       <tr><th>Role</th><th>What they can do</th></tr>
-      <tr><td><strong>Admin</strong></td><td>Full content management for their church (media, events, sermons, team, prayer, newsletter, forms), manage their church's users, and use Notifications.</td></tr>
-      <tr><td><strong>Editor</strong></td><td>Create and edit content (media, events, sermons, team, forms, prayer) but cannot manage users or site settings.</td></tr>
-      <tr><td><strong>Media Team</strong></td><td>Post and manage media &amp; reels only.</td></tr>
-      <tr><td><strong>Super Admin</strong></td><td>Everything above across the whole organisation — plus Units, Site Settings, Pages, Users, and Firebase push. Marked with a <span class="pill super">SUPER</span> badge in this guide.</td></tr>
+      <tr><td><strong>Admin</strong></td><td>Full content management for their church (media, events, sermons, team, prayer, newsletter, forms), manage their church's users, use Notifications, and send <strong>SMS</strong> to their own church.</td></tr>
+      <tr><td><strong>Editor</strong></td><td>Create and edit content (media, events, sermons, team, forms, prayer) but cannot manage users or site settings. May also compose and send <strong>SMS</strong> for their church.</td></tr>
+      <tr><td><strong>Media Team</strong></td><td>Post and manage media &amp; reels only, plus <strong>SMS</strong> for their church.</td></tr>
+      <tr><td><strong>Super Admin</strong></td><td>Everything above across the whole organisation — plus Units, Site Settings, Pages, Users, Firebase push, and the <strong>SMS gateway settings</strong> (the API token, sending hours and caps). Marked with a <span class="pill super">SUPER</span> badge in this guide.</td></tr>
     </table>
-    <p><strong>Isolation:</strong> a parish admin only sees their own parish's posts, events, sermons, team, forms, prayer requests, and newsletter subscribers — even if they log in at the organisation level. Unassigned records (e.g. visitor prayer requests) are only visible to the super admin, who can assign them to the right church.</p>
+    <p><strong>Isolation:</strong> a parish admin only sees their own parish's posts, events, sermons, team, forms, prayer requests, newsletter subscribers and <strong>SMS contacts</strong> — even if they log in at the organisation level. Unassigned records (e.g. visitor prayer requests) are only visible to the super admin, who can assign them to the right church.</p>
+    <p>Within SMS specifically, a contact, group, sender ID or campaign with <strong>no church attached is treated as shared</strong> — head office records — so every parish admin can see them. Anything attached to another parish is invisible, and opening it by its id is refused as well as hidden.</p>
   </div>
 
   <div class="card" style="margin-bottom:18px;">
@@ -156,6 +158,25 @@ require __DIR__ . '/partials/layout-open.php';
   <div class="card" style="margin-bottom:18px;">
     <h2 id="newsletter">Newsletter (<code>/admin/newsletter</code>)</h2>
     <p>View email subscribers (from the site footer signup), export them as CSV, and remove subscribers. Subscribers are scoped to your church; unassigned ones can be assigned by the super admin.</p>
+  </div>
+
+  <div class="card" style="margin-bottom:18px;">
+    <h2 id="sms">SMS Messaging (<code>/admin/sms</code>) <span class="pill role">ADMIN/EDITOR/MEDIA</span></h2>
+    <p>Text messages to your members, newcomers and team. The screen is split into nine tabs:</p>
+    <ul>
+      <li><strong>Dashboard</strong> — wallet balance, units used this month, how many messages the gateway accepted, and anything the queue is still working through. Press <em>Check balance now</em> to read it live.</li>
+      <li><strong>Compose</strong> — write a message, choose who gets it, and send. <strong>Nothing is charged until the second screen.</strong> “Check and continue” resolves the audience for real, tells you exactly how many people were left out and why, and works out the true cost — person by person, because a name with an accent in it can cost a second unit where everyone else costs one. Use <em>Send a test to myself</em> first; it costs one unit.</li>
+      <li><strong>Contacts</strong> — the address book. <em>Sync from church data</em> pulls in every phone number the site already holds (team, newcomers, RSVPs, testimonies, registrations, app installs) in one click; newsletter subscribers are only included where the subscriber explicitly agreed to text messages. You can also import a CSV — the importer shows a dry run and every rejected row <em>before</em> it writes anything — or add people one at a time.</li>
+      <li><strong>Groups &amp; Segments</strong> — a <em>group</em> is a list you keep (the choir, this term's workers). A <em>segment</em> is a rule that recalculates itself every time you send, so “joined in the last 30 days” is never stale.</li>
+      <li><strong>Sender IDs</strong> — the name your messages arrive from. Up to <strong>11 letters and numbers</strong>, no spaces. Your provider reviews it; the status updates itself and you are told the moment it is approved. <strong>Nothing can be sent until one is approved.</strong></li>
+      <li><strong>Templates</strong> — saved wording you can reuse, with placeholders like <code>{first_name}</code>.</li>
+      <li><strong>Campaigns</strong> — the full history. Open one to see every recipient and what happened to each; resend only to the failures, resume a paused campaign, or cancel one that has not finished.</li>
+      <li><strong>Settings</strong> <span class="pill super">SUPER</span> — the API token (encrypted, and never shown again), the sending window, daily unit caps, and the opt-out footer. <strong>Leave the token field blank to keep the one already stored.</strong></li>
+      <li><strong>Guide</strong> — the same walkthrough in more detail, which also knows which steps you have already finished.</li>
+    </ul>
+    <p><strong>What “sent” means.</strong> It means your SMS provider accepted the message for delivery — not that a particular handset received it. The gateway answers once per batch rather than once per number, so the failure list is the closest thing to the truth for an individual person. A campaign that runs out of credit <em>pauses</em> rather than failing silently, and resumes once you top up.</p>
+    <p><strong>Honouring STOP.</strong> Anyone who replies STOP is marked as opted out and is skipped by every campaign from then on, even if you select them directly or they are in a group you choose. This is not optional — it protects your sender ID from being blocked by the networks.</p>
+    <p><strong>Sending needs the cron worker.</strong> Nothing goes out on its own. If a campaign sits on <em>queued</em> and does not move, the cron entry is the first thing to check; the exact lines to add are shown under the Settings tab.</p>
   </div>
 
   <div class="card" style="margin-bottom:18px;">
