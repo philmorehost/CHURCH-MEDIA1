@@ -94,6 +94,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'email_cpanel_token' => trim((string) ($_POST['email_cpanel_token'] ?? '')),
         'email_domain' => trim($_POST['email_domain'] ?? ''),
         'email_default_quota' => (int) ($_POST['email_default_quota'] ?? 500),
+        'backup_retention_days' => max(0, (int) ($_POST['backup_retention_days'] ?? 14)),
+        'backup_offsite_path' => trim($_POST['backup_offsite_path'] ?? ''),
     ];
 
     $labels = $_POST['service_label'] ?? [];
@@ -402,6 +404,23 @@ require __DIR__ . '/partials/layout-open.php';
     <div id="bible-api-key-wrap" style="<?= ($row['bible_source'] ?? 'keyless') === 'api_bible' ? '' : 'display:none;' ?>">
       <label for="bible_api_key">API.Bible API Key</label>
       <input type="text" id="bible_api_key" name="bible_api_key" value="<?= e((string) ($row['bible_api_key'] ?? '')) ?>" placeholder="Paste your api.bible access token" autocomplete="off">
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Backups</h2>
+    <p class="sub">Scheduled database backups live in <code>storage/backups</code>. Take one, download it, and restore it from the <a href="/admin/backup" style="color:var(--gold-soft);">Backups</a> page — these two settings control how many are kept and whether a copy is sent somewhere else.</p>
+    <div class="row two">
+      <div>
+        <label for="backup_retention_days">Backups to keep</label>
+        <input type="number" id="backup_retention_days" name="backup_retention_days" value="<?= e((string) ($row['backup_retention_days'] ?? 14)) ?>" min="0" max="365">
+        <small style="color:var(--ink-faint);font-size:12px;">Oldest are pruned after each run. <strong>0</strong> keeps every backup and turns pruning off.</small>
+      </div>
+      <div>
+        <label for="backup_offsite_path">Off-site copy folder</label>
+        <input type="text" id="backup_offsite_path" name="backup_offsite_path" value="<?= e((string) ($row['backup_offsite_path'] ?? '')) ?>" placeholder="e.g. /home/you/backups or a mounted drive">
+        <small style="color:var(--ink-faint);font-size:12px;">A plain directory copy after each backup. Leave empty for none. A backup on the same server will not survive that server.</small>
+      </div>
     </div>
   </div>
 

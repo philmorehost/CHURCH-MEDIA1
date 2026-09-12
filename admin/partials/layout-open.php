@@ -31,6 +31,7 @@ $navItemsSystem = [
     ['key' => 'units', 'href' => '/admin/units', 'label' => 'Units', 'roles' => ['admin']],
     ['key' => 'unit-levels', 'href' => '/admin/unit-levels', 'label' => 'Unit Levels', 'super' => true],
     ['key' => 'security', 'href' => '/admin/security', 'label' => 'Security'],
+    ['key' => 'backup', 'href' => '/admin/backup', 'label' => 'Backups', 'super' => true],
     ['key' => 'settings', 'href' => '/admin/settings', 'label' => 'Settings', 'super' => true],
     ['key' => 'firebase', 'href' => '/admin/firebase', 'label' => 'Firebase', 'super' => true],
     ['key' => 'users', 'href' => '/admin/users', 'label' => 'Users', 'roles' => ['admin']],

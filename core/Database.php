@@ -1066,6 +1066,13 @@ class Database
                 self::addColumnIfMissing($pdo, 'notifications', 'target_level', 'VARCHAR(40) NULL', 'target_unit_id');
                 self::addIndexIfMissing($pdo, 'notifications', 'idx_notifications_target', 'INDEX `idx_notifications_target` (`target_unit_id`)');
             },
+
+            // Backup retention and the optional off-site copy directory. A single
+            // wide settings row means these are plain columns, not key/value pairs.
+            '2026_16_backups' => function (PDO $pdo): void {
+                self::addColumnIfMissing($pdo, 'settings', 'backup_retention_days', 'INT NOT NULL DEFAULT 14', 'analytics_retention_days');
+                self::addColumnIfMissing($pdo, 'settings', 'backup_offsite_path', 'VARCHAR(255) NULL', 'backup_retention_days');
+            },
         ];
     }
 

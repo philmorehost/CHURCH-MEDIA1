@@ -10,3 +10,10 @@
 /storage/cache/og/
 /storage/cache/ratelimit/
 /storage/cache/bible/
+
+# Backups hold the entire database, including password hashes and stored secrets.
+# They must never be committed.
+/storage/backups/
+
+# Office lock files, created beside a document while it is open.
+~$*

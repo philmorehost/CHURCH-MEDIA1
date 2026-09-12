@@ -267,6 +267,44 @@ Do this **before** any Phase 1/2 work so nothing has to be retrofitted later.
   church admin cannot target outside their own subtree.
 
 ### 1.7 Backups & data export
+> **Status: shipped.** `core/Backup.php` holds the whole thing, shared by the cron script
+> `cli/backup.php` and the `admin/backup.php` screen, so a hand-taken backup is the same
+> kind of artefact as a scheduled one.
+> **`exec()` is usually disabled on shared hosting**, which makes `mysqldump` unusable —
+> so the built-in PHP dumper is the *primary* path here and `mysqldump` is the
+> optimisation. Both engines were verified end to end: each dump restores into a fresh
+> empty database with **every one of 47 tables matching row-for-row**, and content with
+> apostrophes, backslashes, newlines, emoji, `₦` and embedded semicolons round-trips
+> byte-identically. If `mysqldump` returns anything that is not a dump — an error message,
+> a permissions failure, empty output — the run falls back and says so rather than
+> shipping a broken archive.
+> Rows are paged by primary key so a large `analytics_events` table cannot exhaust
+> memory, the archive is written to a temp name and renamed so an interrupted run can
+> never leave a valid-looking half file, and a `media-*.txt` manifest records every
+> uploaded file's path, size and timestamp — the SQL holds the rows, the manifest proves
+> the files arrived.
+> The screen shows which engine will run, whether gzip is available, how old the newest
+> backup is (warns past a week), how much media is *not* in the archive, and the exact
+> restore command. Downloads are re-authorised per request, are refused for anonymous
+> visitors, and refuse any filename that is not one of our own — verified against path
+> traversal, absolute paths and a traversal in the query string.
+> 88 assertions fresh, 89 on a pre-1.7 upgrade, plus the CLI in every mode and a real
+> logged-in run/download/delete/prune over HTTP with the download byte-for-byte identical
+> to the file on disk.
+>
+> **Two bugs found by testing:** setting `MYSQL_PWD` to an *empty* string makes the client
+> announce `using password: YES` and then fail against an account that genuinely has no
+> password, so `mysqldump` never worked and every backup silently used the slow path; the
+> password is now only set when there is one. And non-dump output was being accepted as a
+> backup — a host with a broken `mysqldump` would have produced a file containing an error
+> message. Both are fixed, and the suite now asserts *which* engine ran so a silent
+> fallback can no longer pass as a success.
+>
+> **Not included:** uploaded media is listed, not copied. Moving gigabytes through PHP on
+> every backup would time out and is better done with the host's own file tooling; the
+> manifest is what makes that checkable. There is no in-app restore button — restoring is
+> done from the command line or phpMyAdmin, because doing it from a web request while
+> people are using the site is how you lose the data that arrived mid-import.
 - **New**: `cli/backup.php` — `mysqldump` (or PHP-based dump fallback) + media manifest,
   written to `storage/backups/`, rotated (keep N days/weeks/months), optional off-site copy.
   `admin/backup.php` — list backups, download, run-now, restore instructions.

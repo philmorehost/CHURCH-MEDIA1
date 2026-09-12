@@ -86,6 +86,8 @@ CREATE TABLE IF NOT EXISTS `settings` (
   `comments_flag_threshold` INT NOT NULL DEFAULT 3 COMMENT 'Reader reports before a comment is auto-flagged',
   `analytics_enabled` TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'Collect anonymous traffic analytics',
   `analytics_retention_days` INT NOT NULL DEFAULT 180 COMMENT 'Days of raw events kept; daily roll-ups are kept forever',
+  `backup_retention_days` INT NOT NULL DEFAULT 14 COMMENT 'Newest N backups kept; 0 turns pruning off',
+  `backup_offsite_path` VARCHAR(255) NULL COMMENT 'Directory copied to after each backup; empty = none',
   `timezone` VARCHAR(64) NOT NULL DEFAULT 'Africa/Lagos',
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY `uniq_settings_tenant` (`tenant_id`),
