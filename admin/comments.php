@@ -131,12 +131,11 @@ $threshold = CommentModeration::flagThreshold();
 $lists = CommentModeration::lists();
 
 $badgeFor = static function (string $status): string {
-    return match ($status) {
-        'approved' => 'ok',
-        'pending' => 'warn',
-        'spam' => 'fail',
-        default => 'info',
-    };
+    // An array rather than a `match`: the codebase supports PHP before 8, where `match` is not a
+    // keyword and the file will not parse.
+    $badges = ['approved' => 'ok', 'pending' => 'warn', 'spam' => 'fail'];
+
+    return $badges[$status] ?? 'info';
 };
 
 $pageTitle = 'Comments';

@@ -219,11 +219,10 @@ $templates = $pdo->query(
       <tr><th>Name</th><th>Language</th><th>Category</th><th>Status</th><th>Body</th><th></th></tr>
       <?php foreach ($templates as $t): ?>
         <?php
-          $badge = match ((string) $t['status']) {
-              'approved' => 'ok',
-              'rejected', 'disabled' => 'fail',
-              default => 'warn',
-          };
+          // An array rather than a `match`: the codebase supports PHP before 8, where `match` is
+          // not a keyword and the file will not parse.
+          $badges = ['approved' => 'ok', 'rejected' => 'fail', 'disabled' => 'fail'];
+          $badge = $badges[(string) $t['status']] ?? 'warn';
         ?>
         <tr>
           <td><code><?= e((string) $t['name']) ?></code></td>

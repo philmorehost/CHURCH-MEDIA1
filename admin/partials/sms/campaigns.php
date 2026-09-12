@@ -201,13 +201,18 @@ if ($open !== null) {
 
 /** A badge colour for a campaign status. */
 $statusBadge = static function (string $status): string {
-    return match ($status) {
+    // An array rather than a `match`: the codebase supports PHP before 8, where `match` is not a
+    // keyword and the file will not parse.
+    $badges = [
         'sent' => 'ok',
         'failed' => 'fail',
-        'partial', 'cancelled' => 'warn',
-        'queued', 'sending' => 'info',
-        default => '',
-    };
+        'partial' => 'warn',
+        'cancelled' => 'warn',
+        'queued' => 'info',
+        'sending' => 'info',
+    ];
+
+    return $badges[$status] ?? '';
 };
 ?>
 

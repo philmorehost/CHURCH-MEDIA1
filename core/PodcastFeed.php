@@ -458,15 +458,21 @@ final class PodcastFeed
 
     private static function mimeFor(string $path): string
     {
-        return match (strtolower((string) pathinfo($path, PATHINFO_EXTENSION))) {
+        // An array rather than a `match`: the codebase supports PHP before 8, where `match` is not
+        // a keyword and the file will not even parse. See the polyfills at the top of helpers.php.
+        $types = [
             'mp3' => 'audio/mpeg',
-            'm4a', 'mp4', 'aac' => 'audio/mp4',
-            'ogg', 'oga' => 'audio/ogg',
+            'm4a' => 'audio/mp4',
+            'mp4' => 'audio/mp4',
+            'aac' => 'audio/mp4',
+            'ogg' => 'audio/ogg',
+            'oga' => 'audio/ogg',
             'wav' => 'audio/wav',
             'flac' => 'audio/flac',
             'opus' => 'audio/opus',
-            default => 'audio/mpeg',
-        };
+        ];
+
+        return $types[strtolower((string) pathinfo($path, PATHINFO_EXTENSION))] ?? 'audio/mpeg';
     }
 
     /** RSS dates are RFC 822, which is not what `date()` gives by default. */

@@ -406,13 +406,10 @@ $cap = WaCampaign::dailyCap();
         <tr><th>Person</th><th>Number</th><th>Status</th><th>Detail</th></tr>
         <?php foreach ($recipients as $r): ?>
           <?php
-            $badge = match ((string) $r['status']) {
-                'read' => 'ok',
-                'delivered' => 'ok',
-                'failed' => 'fail',
-                'skipped' => 'warn',
-                default => '',
-            };
+            // An array rather than a `match`: the codebase supports PHP before 8, where `match`
+            // is not a keyword and the file will not parse.
+            $badges = ['read' => 'ok', 'delivered' => 'ok', 'failed' => 'fail', 'skipped' => 'warn'];
+            $badge = $badges[(string) $r['status']] ?? '';
           ?>
           <tr>
             <td><?= e((string) ($r['contact_name'] ?: '—')) ?></td>

@@ -303,23 +303,40 @@ echo json_encode([
  */
 function waExtractBody(array $message, string $type): ?string
 {
-    return match ($type) {
-        'text' => isset($message['text']['body']) ? (string) $message['text']['body'] : null,
-        'button' => isset($message['button']['text']) ? (string) $message['button']['text'] : null,
-        'interactive' => (string) (
+    // Written as a chain rather than a `match`: the codebase supports PHP before 8, where `match`
+    // is not a keyword and this file will not parse at all. See helpers.php for the polyfills
+    // that make the same allowance for the string functions.
+    if ($type === 'text') {
+        return isset($message['text']['body']) ? (string) $message['text']['body'] : null;
+    }
+
+    if ($type === 'button') {
+        return isset($message['button']['text']) ? (string) $message['button']['text'] : null;
+    }
+
+    if ($type === 'interactive') {
+        return (string) (
             $message['interactive']['button_reply']['title']
             ?? $message['interactive']['list_reply']['title']
             ?? ''
-        ) ?: null,
-        'image', 'video', 'document' => isset($message[$type]['caption'])
-            ? (string) $message[$type]['caption']
-            : null,
-        'location' => trim(
+        ) ?: null;
+    }
+
+    if ($type === 'image' || $type === 'video' || $type === 'document') {
+        return isset($message[$type]['caption']) ? (string) $message[$type]['caption'] : null;
+    }
+
+    if ($type === 'location') {
+        return trim(
             (string) ($message['location']['name'] ?? '')
             . ' ' . (string) ($message['location']['address'] ?? '')
-        ) ?: null,
-        'reaction' => isset($message['reaction']['emoji']) ? (string) $message['reaction']['emoji'] : null,
-        // Audio, stickers and anything unrecognised carry no text at all.
-        default => null,
-    };
+        ) ?: null;
+    }
+
+    if ($type === 'reaction') {
+        return isset($message['reaction']['emoji']) ? (string) $message['reaction']['emoji'] : null;
+    }
+
+    // Audio, stickers and anything unrecognised carry no text at all.
+    return null;
 }

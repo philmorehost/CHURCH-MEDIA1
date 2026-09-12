@@ -239,15 +239,19 @@ if ($conversation === null) {
             // looks like a rendering fault.
             $text = (string) ($m['body'] ?? '');
             if ($text === '') {
-                $text = match ($m['type']) {
+                // An array rather than a `match`: the codebase supports PHP before 8, where `match`
+                // is not a keyword and the file will not parse. See helpers.php for the polyfills
+                // that make the same allowance for the string functions.
+                $labels = [
                     'audio' => '🎤 Voice message',
                     'image' => '🖼 Photo',
                     'video' => '🎬 Video',
                     'document' => '📄 Document',
                     'sticker' => '🌸 Sticker',
                     'location' => '📍 Location',
-                    default => '[' . e((string) $m['type']) . ']',
-                };
+                    'default' => '[' . e((string) $m['type']) . ']',
+                ];
+                $text = $labels[$m['type']] ?? $labels['default'];
             }
           ?>
           <?= e($text) ?>
