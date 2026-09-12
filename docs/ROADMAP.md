@@ -366,16 +366,18 @@ Recipient format: `2348012345678` — country code, **no** leading `0`, **no** `
 > texting members abroad.
 >
 > **Remaining Phase 2 work** (each a coherent next step, in dependency order):
-> - `cli/sms_worker.php` — claim a batch of `pending` recipients, send, record per-recipient
->   results, update counters, respect quiet hours and the daily cap, pause as `partial` when
->   the wallet is short. The unique key on `(campaign_id, msisdn)` already makes retries safe.
-> - `cli/sms_sender_check.php` — poll `check_senderID.php` every 15 minutes, back off to
->   hourly past a day, stop on a final status, and notify the submitting church on approval.
-> - `admin/sms.php` — the nine tabs (§2.6). Contact import/export with a dry-run needs
->   `Sms::whyInvalid()`, which is already written and tested for exactly that screen.
+> - `admin/sms.php` — the nine tabs (§2.6). The compose screen needs `Sms::estimateUnits()`
+>   for its live cost counter, `SmsCampaign::queueRecipients()` for the recipient stats
+>   (including the `rejected` count), and `Sms::whyInvalid()` for the CSV import dry-run —
+>   all already written and tested for exactly those screens.
 > - Wiring the contact sources: a "sync from church data" pass over newcomers, users,
 >   subscribers, testimonies, registrations and form-submission phone fields.
 > - A phone field on `admin/account.php` and `admin/users.php` so "send to church team" works.
+> - `admin/notifications.php` still resolves its audience inline; once `Notifier` has been in
+>   use for a release, that screen can delegate its *delivery* to `Notifier::send()` too,
+>   keeping Phase 1.6's tested audience logic and dropping the duplicated insert/push/email.
+> - A `cli/sms_maintenance.php` for old log rows (`sms_log_retention_days`) and stale
+>   `sms_campaign_recipients`, which currently accumulate.
 > - Live `balance.php` / `check_senderID.php` checks against the gateway, which need a
 >   **rotated** token (the one pasted during planning was exposed in plaintext and must not
 >   be reused).
@@ -423,6 +425,17 @@ Every table below carries `tenant_id INT NOT NULL` (Phase 0) unless noted.
 - `sms_wallet_log` — periodic balance snapshots so you can see spend over time.
 
 ### 2.3 Sender ID lifecycle — self-service with auto-approval
+> **Status: shipped (`cli/sms_sender_check.php`).** The poller checks `pending` rows and
+> writes the result back, backing off by age: 15 minutes under 6 hours, 2 hours under a day,
+> 6 hours under a week, then daily. A final status is never re-checked, so gateway calls
+> settle to zero. A row whose `status_source` is `manual` is left alone, because the super
+> admin set it deliberately — usually precisely because the gateway was unreachable.
+> The status text is matched on the words rather than an exact string, since the gateway has
+> answered "Approved", "approved." and "Sender ID approved" at different times. On approval
+> the submitting church is told in-app, by email and by push, `media_team` included; if no
+> sender ID is configured as default yet, the newly approved one becomes it, so a church can
+> send without hunting through settings.
+> Still to build: the Sender IDs tab itself, where a church submits one.
 **Confirmed requirement:** church admins / editors / media team submit their own sender
 ID; the system pushes it to the gateway, tracks the result, and flips it to approved
 automatically — with a manual override for the super admin.
@@ -517,6 +530,39 @@ newcomer and newsletter forms (opt-in checkbox wording added to the privacy poli
    section in `admin/guide.php` and a "what does this cost" worked example.
 
 ### 2.7 Worker — `cli/sms_worker.php`
+> **Status: shipped.** `cli/sms_worker.php` is a thin wrapper around `core/SmsRunner.php`,
+> and the queue mechanics live in `core/SmsCampaign.php`. One run promotes due campaigns,
+> applies the quiet-hours and daily-cap gates, checks the wallet once, then claims and sends
+> batches until the clock or the cap runs out. A lock file stops a slow run and the next cron
+> tick overlapping — verified by holding the lock and confirming the second run declines.
+> **Proving a retry never double-sends** was the point of the work, and three things do it:
+> the `UNIQUE (campaign_id, msisdn)` key, a claim written *before* anything is sent, and a
+> stale-claim timeout that retries an abandoned batch while a fresh claim is left alone.
+> 330 assertions (164 fresh, 166 upgrading a pre-2.1 database) drive a scripted fake gateway
+> through `Sms::setTransport()`, so the whole send loop runs offline.
+>
+> **Four bugs the tests found:**
+> 1. `INSERT IGNORE` silently swallows a foreign-key violation, and the import counted that
+>    as "already queued" — telling an admin their list was imported when nothing was saved.
+>    A rejected row is now reported separately.
+> 2. `pause()` left the campaign's counters a run behind, so the screen an admin reads to
+>    decide what to do next showed stale numbers.
+> 3. **`400` was treated as retryable.** It means "bad params" — a decision, not a blip — so
+>    every such batch burned two sleeps and ~7 seconds before failing identically. Only a
+>    transport failure (no gateway code at all) is retried now.
+> 4. `refreshCounters()` overwrote the intended `queued` status with `sending`, so a campaign
+>    that had not sent anything claimed to be mid-send. Claiming rows is now what marks a
+>    campaign as started.
+>
+> **Two deliberate semantic choices**, both to stop the wrong button being pressed:
+> a campaign where *nothing* went out reads `failed`; one where some did reads `partial`,
+> because only `partial` is safe to offer as "resend to failures". And a shortfall pauses
+> rather than fails — with the reason in `paused_reason` — so the recipients stay pending and
+> a top-up resumes them.
+>
+> **On delivery receipts:** the gateway answers one code per API call, not per number, so
+> "sent" means the gateway accepted it for delivery. It is not proof a handset received it,
+> and no screen should say otherwise.
 - Called by cron every minute. Claims a batch of `pending` recipients from `queued`
   campaigns, sends via `Sms::send()`, records per-recipient results, updates counters,
   and finishes the campaign when no rows remain.

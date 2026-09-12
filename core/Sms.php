@@ -490,9 +490,11 @@ final class Sms
                     break;
                 }
 
-                // Only a transient failure is worth retrying. A rejected token, a blocked
-                // word or an empty wallet will fail identically every time.
-                $retryable = in_array((string) $result['code'], ['', '400'], true);
+                // Only a transport failure is worth retrying. A gateway that answered
+                // with a code has made a decision, and "400 bad params" or "110 blocked
+                // word" will make exactly the same decision on the next attempt — so
+                // retrying only burns time and delays the rest of the campaign.
+                $retryable = $result['code'] === null;
                 if ($retryable && $attempt < count(self::RETRY_DELAYS)) {
                     sleep(self::RETRY_DELAYS[$attempt]);
                     $attempt++;
@@ -604,28 +606,37 @@ final class Sms
         if ($token === '') {
             return ['ok' => false, 'code' => '401', 'error' => 'No API token is configured.', 'raw' => [], 'http' => null];
         }
-        if (!function_exists('curl_init')) {
-            return ['ok' => false, 'code' => null, 'error' => 'cURL is not available on this server.', 'raw' => [], 'http' => null];
-        }
 
         $payload = array_merge(['token' => $token], $params);
         $started = microtime(true);
 
-        $ch = curl_init(self::BASE . $endpoint);
-        curl_setopt_array($ch, [
-            CURLOPT_POST => true,
-            CURLOPT_POSTFIELDS => http_build_query($payload),
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => 45,
-            CURLOPT_CONNECTTIMEOUT => 15,
-            CURLOPT_SSL_VERIFYPEER => true,
-            CURLOPT_SSL_VERIFYHOST => 2,
-        ]);
+        if (self::$transport !== null) {
+            // Test seam: no HTTP request and no cost. See setTransport().
+            $response = (self::$transport)($endpoint, $payload);
+            $body = (string) ($response['body'] ?? '');
+            $httpStatus = (int) ($response['http'] ?? 200);
+            $curlError = (string) ($response['error'] ?? '');
+        } else {
+            if (!function_exists('curl_init')) {
+                return ['ok' => false, 'code' => null, 'error' => 'cURL is not available on this server.', 'raw' => [], 'http' => null];
+            }
 
-        $body = curl_exec($ch);
-        $httpStatus = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $curlError = curl_error($ch);
-        curl_close($ch);
+            $ch = curl_init(self::BASE . $endpoint);
+            curl_setopt_array($ch, [
+                CURLOPT_POST => true,
+                CURLOPT_POSTFIELDS => http_build_query($payload),
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT => 45,
+                CURLOPT_CONNECTTIMEOUT => 15,
+                CURLOPT_SSL_VERIFYPEER => true,
+                CURLOPT_SSL_VERIFYHOST => 2,
+            ]);
+
+            $body = curl_exec($ch);
+            $httpStatus = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $curlError = curl_error($ch);
+            curl_close($ch);
+        }
 
         $duration = (int) round((microtime(true) - $started) * 1000);
 
@@ -730,6 +741,65 @@ final class Sms
             return str_repeat('•', strlen($token));
         }
         return substr($token, 0, 4) . str_repeat('•', 12) . substr($token, -4);
+    }
+
+    /* ------------------------------------------------------- personalisation */
+
+    /**
+     * Substitutes the placeholders a composer offers.
+     *
+     * Only three substitutions are supported, and an unknown placeholder is left
+     * alone rather than blanked — a message reading "{first_name}, join us" is
+     * obviously broken, whereas "{first_name},  join us" looks like a typo nobody
+     * notices until it has gone to four hundred people.
+     *
+     * @param array<string, mixed> $contact  name, email, and optionally church
+     */
+    public static function personalise(string $message, array $contact): string
+    {
+        $name = trim((string) ($contact['name'] ?? ''));
+        $firstName = $name !== '' ? (preg_split('/\s+/', $name)[0] ?? '') : '';
+        $church = trim((string) ($contact['church'] ?? ''));
+
+        $values = [
+            '{name}' => $name,
+            '{first_name}' => $firstName,
+            '{church}' => $church,
+        ];
+
+        $out = str_replace(array_keys($values), array_values($values), $message);
+
+        // A placeholder that resolved to nothing leaves the punctuation that belonged to
+        // it stranded — "Hi , welcome" — so tidy that up rather than letting a church
+        // send it to four hundred people.
+        $out = str_replace([' ,', ' .', ' !', ' ?', ' ;', "''"], [',', '.', '!', '?', ';', "'"], $out);
+        $out = (string) preg_replace('/[ \t]{2,}/', ' ', $out);
+        return trim($out);
+    }
+
+    /** Every placeholder the composer understands, for the on-screen help. */
+    public static function placeholders(): array
+    {
+        return ['{name}' => 'Full name', '{first_name}' => 'First name only', '{church}' => 'The church the contact belongs to'];
+    }
+
+    /* -------------------------------------------------------- test seam */
+
+    /**
+     * Test-only transport override.
+     *
+     * The worker has to be exercised end to end, and the one thing a test cannot do is
+     * spend real money at a live gateway. Setting a callable here replaces the HTTP
+     * request, so the queue, the counters and the retry logic can all be driven
+     * offline. Never set outside a test.
+     *
+     * @var callable|null fn(string $endpoint, array $params): array{body:string,http:int,error:?string}
+     */
+    private static $transport = null;
+
+    public static function setTransport(?callable $transport): void
+    {
+        self::$transport = $transport;
     }
 
     private static function tenantId(): ?int

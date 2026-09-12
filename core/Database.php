@@ -1294,6 +1294,16 @@ class Database
                     INDEX `idx_swl_tenant` (`tenant_id`, `created_at`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
             },
+
+            // The send queue. `claimed_at` + `lock_token` are what stop a cron run that
+            // overlaps, or a worker killed mid-batch, from texting the same person
+            // twice — which is a real bill, not just an annoyance.
+            '2026_18_sms_queue' => function (PDO $pdo): void {
+                self::addColumnIfMissing($pdo, 'sms_campaign_recipients', 'claimed_at', 'DATETIME NULL', 'attempts');
+                self::addColumnIfMissing($pdo, 'sms_campaign_recipients', 'lock_token', 'VARCHAR(16) NULL', 'claimed_at');
+                self::addIndexIfMissing($pdo, 'sms_campaign_recipients', 'idx_scr_claim', 'INDEX `idx_scr_claim` (`campaign_id`, `status`, `claimed_at`)');
+                self::addColumnIfMissing($pdo, 'sms_campaigns', 'paused_reason', 'VARCHAR(255) NULL', 'estimated_units');
+            },
         ];
     }
 
