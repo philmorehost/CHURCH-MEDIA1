@@ -498,6 +498,50 @@ newcomer and newsletter forms (opt-in checkbox wording added to the privacy poli
 
 ### 2.6 Admin screens — `admin/sms.php` (tabbed, super-admin + scoped admins)
 
+> **Status: shipped.** Nine tabs, each addressed by URL (`/admin/sms?tab=compose`) rather
+> than by a JavaScript widget — the flat-file CMS has no tab component, and URL tabs let the
+> guide link straight to the screen it describes, survive a reload, and work with JavaScript
+> off. Each tab lives in `admin/partials/sms/<tab>.php` and owns its own POST handling, which
+> must run before it echoes anything; the dispatcher captures it in an output buffer so a
+> redirect after a successful action still works.
+>
+> Two things are narrower than the rest. Only the super admin may reach **Settings** or force
+> a sender-ID status, and an asking-tab request from a church admin falls back to the
+> dashboard rather than rendering. And every loader (`$loadGroup`, `$loadSender`,
+> `$loadTemplate`, `$loadCampaign`) re-checks the unit scope rather than trusting the list
+> filter — a church admin cannot open, or act on, another church's record by putting its id
+> in the URL. A row with no unit is *shared* (head office), which is the same convention
+> groups, senders and campaigns already use.
+>
+> Two deliberate design choices worth keeping:
+> * **Compose is three steps, and the middle one is not optional.** "Check and continue"
+>   resolves the audience for real, lists every excluded number *with its reason*, and works
+>   the cost out by personalising the message for each recipient and counting the segments
+>   that actually results in — a name with an accent can cost a second unit where everyone
+>   else costs one. Then, and only then, "queue" re-resolves the audience before writing,
+>   because someone may have opted out in between.
+> * **Contacts export streams the current filter**, using the same direct
+>   `fputcsv(fopen('php://output','w'))` pattern as `admin/newsletter.php`, so "export" means
+>   "export this view" rather than "export everything".
+>
+> The CSV import parks the parsed file in the session under a token and shows a dry run
+> first. `SmsContacts::parseCsv()` handles a BOM and `,` / `;` / tab delimiters;
+> `importRows(..., dryRun: true)` reports `created` / `updated` / `invalid` / `duplicates`
+> and the first 50 skipped rows with line numbers. A number already in the book is *updated*
+> rather than duplicated — matching by number, so the same person typed two ways stays one
+> contact. `syncFromChurchData()` pulls from users, newcomers, testimonies, event RSVPs,
+> registrations, app devices and form phone fields, and takes newsletter subscribers **only
+> where `sms_consent = 1`**.
+>
+> Verified with 124 assertions across two harnesses (16 tab renders + 108 write flows), all
+> through real sessions with real CSRF tokens against a scratch database. The scoping block
+> is the part to keep: it proves church B cannot see, export, open by id, delete by id, or
+> overwrite the token of church A.
+>
+> Still outstanding, both noted above: a phone field on `admin/account.php` +
+> `admin/users.php`, and optionally routing `admin/notifications.php`'s inline delivery
+> through `Notifier::send()`.
+
 1. **Dashboard** — live wallet balance (`balance.php`), units used this month, delivery
    success rate, cost estimate for the next campaign, recent campaigns, low-balance warning,
    gateway diagnostics (last error).

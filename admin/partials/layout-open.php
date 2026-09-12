@@ -17,6 +17,7 @@ $navItems = [
     ['key' => 'team', 'href' => '/admin/team', 'label' => 'Team'],
     ['key' => 'prayer', 'href' => '/admin/prayer', 'label' => 'Prayer Wall'],
     ['key' => 'newsletter', 'href' => '/admin/newsletter', 'label' => 'Newsletter'],
+    ['key' => 'sms', 'href' => '/admin/sms', 'label' => 'SMS Messaging', 'roles' => ['admin', 'editor', 'media_team']],
     ['key' => 'forms', 'href' => '/admin/forms', 'label' => 'Forms'],
     ['key' => 'notifications', 'href' => '/admin/notifications', 'label' => 'Notifications'],
     ['key' => 'attendance', 'href' => '/admin/attendance', 'label' => 'Attendance'],
