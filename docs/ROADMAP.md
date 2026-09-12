@@ -21,6 +21,9 @@
 ### Conventions to follow
 - New DB changes go into the `migrations()` array in `core/Database.php` keyed
   `YYYY_NN_description`, **and** into `installer/schema.sql` so fresh installs match.
+- **Every table added from Phase 0 onward carries `tenant_id`** and every query against it
+  is tenant-scoped. Anything genuinely global (e.g. the `unit_levels` seed defaults) stores
+  `tenant_id = NULL` and is inherited by all tenants.
 - Admin pages need **no route entry** — `/admin/foo` auto-loads `admin/foo.php`
   (segment must match `/^[a-z0-9_-]+$/`).
 - Public views are rendered through `render()`; they must **never** require
@@ -55,6 +58,7 @@
 
 | Phase | Theme | Ships | Effort | Cost |
 |---|---|---|---|---|
+| **0** | **Tenancy foundation** — SaaS confirmed | `tenants` table, host/subdomain resolution in `bootstrap.php`, `tenant_id` on `settings` and **every new table from here on**, default-tenant backfill, per-tenant storage namespacing | 2–3 sessions | None |
 | **1** | Quick wins, no new vendors | Comments moderation, analytics dashboard, real RSVP + `.ics`, share cards, prayer wall depth, level-aware push targeting, backups & data export | 6–8 sessions | None |
 | **2** | **Messaging Hub — SMS** (explicit request) | Contacts address book, groups/segments, sender-ID management, compose + scheduling, templates, campaigns/history, wallet, worker, full guide | 8–10 sessions | Per-SMS (wallet) |
 | **3** | Sermons: series + podcast | Sermon series, series pages, podcast RSS feed + Spotify/Apple submission | 3–4 sessions | None |
@@ -63,14 +67,39 @@
 | **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None |
 | **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None |
 
-**Decide early:** whether **Phase 7 multi-tenant** is a real goal. If you plan to onboard
-more churches, the tenant/branding concept should be designed *before* Phases 2–6 add
-settings, templates and content, or it becomes a painful retrofit. It does not have to be
-built first — but its shape should be agreed.
+**Confirmed 2026-09-12:** multi-tenant **SaaS is a real goal**. That is why **Phase 0
+(tenancy foundation) runs before everything else** — the SMS token, sender IDs, country
+code, templates, groups, campaigns, analytics and member accounts are all *per-tenant*
+from day one. Retrofitting tenancy after Phases 1–6 would mean rewriting every table and
+screen they add.
 
 ---
 
-## 3. Phase 1 — Quick wins, no new vendors
+## 3. Phase 0 & 1 — Tenancy foundation, then quick wins
+
+### P0. Tenancy foundation (2–3 sessions)
+
+Do this **before** any Phase 1/2 work so nothing has to be retrofitted later.
+
+- **DB**: `tenants` (`id`, `name`, `slug` UNIQUE, `domain` NULL, `subdomain` NULL,
+  `logo`, `primary_colour`, `is_active`, `plan`, `created_at`). `settings` gains `tenant_id`
+  (NULL = global/default). Every table added from Phase 1 onward carries
+  `tenant_id INT NOT NULL` with an index.
+- **New**: `core/Tenant.php` — `current()`, `id()`, `resolveFromHost()`, `setCurrent()`,
+  `all()`, `create()`, `forHost()`. Resolution order: super-admin switcher (session) →
+  matched domain/subdomain → default tenant.
+- **Modify**: `bootstrap.php` (resolve the tenant before anything else),
+  `core/Database.php` (create + backfill the default tenant; attach `tenant_id` to
+  `settings`), `core/helpers.php` (`setting()` reads the current tenant, falling back to
+  global), `admin/settings.php` (tenant switcher for the super admin),
+  `admin/partials/layout-open.php` (show which tenant you are in).
+- **Media/storage**: namespace uploads and caches per tenant
+  (`public/uploads/t{n}/…`, `storage/cache/t{n}/…`) so two churches can never collide.
+- **Verify**: two tenants in a scratch database cannot see each other's settings, units,
+  media or contacts; the default tenant keeps the existing site working unchanged;
+  switching tenants in the admin changes what `setting()` returns.
+
+### Phase 1 — Quick wins, no new vendors
 
 ### 1.1 Comments moderation queue
 - **DB**: `post_comments` gains `status` ENUM('pending','approved','rejected','spam')
@@ -185,9 +214,15 @@ errorMessage(string $code): string      // friendly text for 000/400/401/405/107
 - Never throws — returns `['ok' => bool, 'error' => string]` like `CpanelApi`.
 
 ### 2.2 Schema
-- `sms_senders` — `id`, `sender_id` VARCHAR(11) UNIQUE, `status` ENUM('pending','approved','rejected'),
-  `sample_message`, `is_default`, `org_unit_id`, `checked_at`, `created_at`.
-- `sms_contacts` — `id`, `name`, `msisdn` VARCHAR(20) UNIQUE (normalised), `email`,
+
+Every table below carries `tenant_id INT NOT NULL` (Phase 0) unless noted.
+
+- `sms_senders` — `id`, `tenant_id`, `sender_id` VARCHAR(11) UNIQUE per tenant,
+  `status` ENUM('pending','approved','rejected'), `status_source` ENUM('gateway','manual')
+  DEFAULT 'gateway', `sample_message`, `is_default`, `org_unit_id`, `submitted_by`,
+  `last_checked_at`, `approved_at`, `rejection_note`, `created_at`.
+- `sms_contacts` — `id`, `tenant_id`, `name`, `msisdn` VARCHAR(20) UNIQUE (normalised,
+  no `+`), `country_code` VARCHAR(4) DEFAULT '234', `email`,
   `org_unit_id`, `source` ENUM('manual','newcomer','subscriber','team','testimony','registration','form','app','import'),
   `source_ref_id`, `tags` VARCHAR(255), `is_opted_out` TINYINT, `opt_out_at`, `notes`,
   `created_at`, `updated_at`.
@@ -206,7 +241,50 @@ errorMessage(string $code): string      // friendly text for 000/400/401/405/107
   code, HTTP status, duration, `created_at`. Used by the diagnostics view.
 - `sms_wallet_log` — periodic balance snapshots so you can see spend over time.
 
-### 2.3 Contact sources (wired to what already exists)
+### 2.3 Sender ID lifecycle — self-service with auto-approval
+**Confirmed requirement:** church admins / editors / media team submit their own sender
+ID; the system pushes it to the gateway, tracks the result, and flips it to approved
+automatically — with a manual override for the super admin.
+
+- **Submit** (`admin/sms.php` → Sender IDs): any user with role `admin`, `editor` or
+  `media_team` may submit one. Validate **≤ 11 characters, alphanumeric only** (uppercased,
+  no spaces or symbols), unique within the tenant. Store the sample message the gateway
+  requires, then immediately `POST senderID.php`.
+- **Track**: `cli/sms_sender_check.php` (cron, every 15 minutes) calls `check_senderID.php`
+  for every non-final sender ID and writes back `status` + `last_checked_at`. Polling slows to
+  hourly for IDs pending more than a day, and stops entirely once a status is final
+  (`approved` / `rejected`).
+- **Auto-approve**: when the gateway returns `approved`, the row flips to
+  `status = 'approved'`, `status_source = 'gateway'`, `approved_at = NOW()`, and the
+  **submitting church's media team is notified** — in-app always, plus email and (if enabled)
+  push. Message: *"Your sender ID `XXXX` has been approved and is ready to use."*
+- **Manual override**: the super admin can force a status from the Sender IDs screen (useful
+  when the gateway is unreachable). This writes `status_source = 'manual'` and shows a caution
+  badge, because the gateway still has the final say — a send from an ID the gateway has not
+  approved comes back as `400`/`401` and is surfaced in Campaigns.
+- **Guard rails**: a campaign cannot be queued with a sender ID that is not `approved`;
+  rejected IDs display the gateway reason; each tenant has a configurable sender-ID cap.
+- **Verify**: submit → row appears `pending` → a simulated `approved` gateway response flips
+  the row and fires the notification → the ID becomes selectable in Compose; a manual
+  override is recorded as `manual`; a non-approved ID is refused at queue time.
+
+### 2.4 Multi-country numbers
+Nigeria (`234`) is the default, but the script is sold to churches elsewhere, so numbers are
+country-aware from the start.
+
+- `sms_contacts.country_code`, defaulting from the per-tenant `sms_default_country`
+  (itself default `234`), plus a `sms_countries` lookup seeded with an initial set
+  (234, 233, 254, 27, 256, 255, 1, 44, …).
+- `Sms::normaliseMsisdn($raw, $country)`: strips spaces, `+` and leading zeros, applies the
+  country code when the number is local, and validates length per country — rejecting rather
+  than silently mangling a number.
+- Compose shows the country beside each recipient group and warns when a group spans multiple
+  countries (different local-format rules).
+- **Verify**: `0803…`, `+234803…`, `234803…` and `803…` all normalise to the same value for
+  `234`; `+447…` normalises correctly under `44`; an invalid length is rejected with a clear
+  per-row reason in the import dry-run.
+
+### 2.5 Contact sources (wired to what already exists)
 
 | Source | Table / field | Status |
 |---|---|---|
@@ -224,7 +302,7 @@ Also add a **phone field to the user profile** (`admin/account.php` + `admin/use
 so "send to church team" works, and make phone capture explicit + consented on the
 newcomer and newsletter forms (opt-in checkbox wording added to the privacy policy).
 
-### 2.4 Admin screens — `admin/sms.php` (tabbed, super-admin + scoped admins)
+### 2.6 Admin screens — `admin/sms.php` (tabbed, super-admin + scoped admins)
 
 1. **Dashboard** — live wallet balance (`balance.php`), units used this month, delivery
    success rate, cost estimate for the next campaign, recent campaigns, low-balance warning,
@@ -241,20 +319,23 @@ newcomer and newsletter forms (opt-in checkbox wording added to the privacy poli
 4. **Groups & Segments** — static groups (hand-picked or pasted) and dynamic segments built
    with simple rule rows, e.g. *Newcomers not yet followed up*, *All team in Zone X*,
    *Subscribers who opted in*, *No attendance for 3 weeks*, *Birthday this month*.
-5. **Sender IDs** — register a new sender ID (with its sample message), status badge
-   (`pending`/`approved`/`rejected`), "check status" button, set default, per-church mapping.
+5. **Sender IDs** — self-service submission (≤ 11 alphanumeric), status badge
+   (`pending`/`approved`/`rejected`) with an auto-refresh indicator, "check status now"
+   button, rejection reason, set default, per-church mapping, and a super-admin manual
+   override.
 6. **Templates** — reusable bodies with placeholders; insert into Compose in one click.
 7. **Campaigns** — history with status, recipient/sent/failed counts, units charged, cost;
    drill-down to per-recipient status; **resend to failures only**; export; cancel a
    scheduled campaign.
-8. **Settings** — token (encrypted, masked, "test connection" button), default sender ID,
-   sender display name, country code, quiet hours (no sends outside e.g. 07:00–20:00),
-   daily unit cap, per-church sending permission, opt-out footer text, retention for logs.
+8. **Settings** — **per tenant**: token (encrypted, masked, "test connection" button),
+   default sender ID, sender display name, default country code, quiet hours (no sends
+   outside e.g. 07:00–20:00), daily unit cap, sender-ID cap, per-church sending permission,
+   opt-out footer text, log retention.
 9. **Guide** — an on-page usage guide (numbered walkthrough: register sender ID → import
    contacts → build a group → compose → test → schedule → review results), plus a new
    section in `admin/guide.php` and a "what does this cost" worked example.
 
-### 2.5 Worker — `cli/sms_worker.php`
+### 2.7 Worker — `cli/sms_worker.php`
 - Called by cron every minute. Claims a batch of `pending` recipients from `queued`
   campaigns, sends via `Sms::send()`, records per-recipient results, updates counters,
   and finishes the campaign when no rows remain.
@@ -262,7 +343,7 @@ newcomer and newsletter forms (opt-in checkbox wording added to the privacy poli
   the balance is short — never half-charges silently.
 - Respects quiet hours and the daily cap; resumable and idempotent.
 
-### 2.6 Verification for Phase 2
+### 2.8 Verification for Phase 2
 - Unit-test `normaliseMsisdn()` (`0803…`, `+234803…`, `234803…`, `803…`), `segmentsFor()`
   for ASCII and `₦`/emoji, and `errorMessage()` for all six codes.
 - Scratch-DB test: import → de-dupe → group → campaign → worker sends → counters correct →
@@ -296,14 +377,15 @@ newcomer and newsletter forms (opt-in checkbox wording added to the privacy poli
 | **WhatsApp Business app** (manual) | Broadcast lists (up to 256), quick replies, catalogue — human-driven | None; no automation | ✅ Fine as a stopgap, zero build |
 | **Unofficial bridge** (whatsapp-web.js / Baileys / WPPConnect) | Free-form messages, no template approval, no per-message cost, group posting | **Violates WhatsApp's Terms of Service**; the number can be banned permanently at any time with no appeal; breaks whenever WhatsApp changes internals; you must keep a Node process + session store alive | ⚠️ Only ever on a **spare, disposable** number, never the ministry's main line, and never on a critical path |
 
-### Can you use both at once?
-Technically yes, and the sane arrangement is:
+### Decision — CONFIRMED: build both
+**Both** are in scope. The arrangement:
 - **Official Cloud API** = all *member-facing* and *business-critical* messaging: welcome
   messages, event reminders, giving receipts, follow-ups. Compliant, auditable, deliverable.
-- **Unofficial bridge** = optional, low-volume *internal* convenience only (e.g. posting the
-  weekly roster into a staff group), running on a **separate sacrificial SIM**, isolated
-  behind a feature flag with a documented kill-switch.
-- **Never** mix them on the same number, and never let an unofficial path send to the
+- **Unofficial bridge** = a small Node sidecar on a **separate sacrificial SIM**, for what the
+  Cloud API simply cannot do — **reading group participants and posting into groups**.
+  Feature-flagged (`wa_unofficial_enabled`, default **off**), bound to `127.0.0.1`, with a
+  documented kill-switch and a health check.
+- **Never** mix them on the same number, and never let an unofficial path message the
   congregation. If the bridge's number is banned, the church must lose nothing.
 
 ### Build outline (official first)
@@ -320,6 +402,19 @@ Technically yes, and the sane arrangement is:
 - **Optional bridge (separate service)**: a small Node sidecar using a maintained unofficial
   library, bound to `127.0.0.1`, with its own token, session store, and a health check;
   PHP talks to it over HTTP. Behind `wa_unofficial_enabled` (default off).
+### WhatsApp groups & number harvesting (confirmed enhancement)
+Requested: *"pull phone numbers, church WhatsApp groups"*.
+- **Bridge only** — the Cloud API cannot enumerate or post to groups.
+- `admin/whatsapp.php` → Groups tab: list the groups the bridge has joined, show participant
+  counts, and **import participants into `sms_contacts`** (source `whatsapp_group`) with a
+  dry-run preview, de-dupe against existing contacts, and an explicit opt-in step — imported
+  numbers start as `is_opted_out = 1` until they confirm, so a group scrape can never become
+  unsolicited bulk SMS.
+- Save a group as an `sms_groups` row so it can be a broadcast target on either channel.
+- **Verify**: group import de-dupes against existing contacts; imported contacts default to
+  opted-out and are excluded from campaigns until they opt in; a group post uses the bridge
+  and records itself in the outbound audit log.
+
 - **Verify**: webhook signature rejection test; template send in sandbox; inbound reply
   within the window does not require a template; 24-h expiry forces a template; bridge off
   by default.
@@ -363,12 +458,12 @@ Technically yes, and the sane arrangement is:
 
 ## 9. Phase 7 — Reach & platform
 
-- **Multi-tenant**: `tenants` table + `tenant_id` on the content tables that differ per
-  church (settings, pages, sermons, events, units root, branding, domains), host-based
-  resolution in `bootstrap.php`, per-tenant settings/media/storage prefixes, and a
-  super-admin tenant switcher. **Agree the shape before Phase 2–6 add settings.**
-  This is what makes onboarding a third church cheap — and it is the foundation for the
-  second church's app.
+- **Multi-tenant SaaS** — *the foundation is already built in Phase 0*. Phase 7 finishes the
+  job: tenant-aware settings UI, per-tenant branding (logo, colours, domain) applied across
+  the public site and the app, self-service tenant provisioning with plan limits,
+  per-tenant admin accounts, and tenant-scoped analytics and reporting. This is what makes
+  onboarding a third, fourth and fifth church cheap — and it is the foundation for the second
+  church's app.
 - **Localisation**: `lang/` message catalogues + a `t()` helper for PHP, `intl`/ARB files
   for Flutter; ship English first, then Yoruba / Igbo / Hausa; Bible translation selector.
 - **PWA**: web app manifest, service worker with cache-first shell + stale-while-revalidate
@@ -392,30 +487,33 @@ Technically yes, and the sane arrangement is:
 
 ---
 
-## 11. Decisions needed from you
+## 11. Decisions — confirmed 2026-09-12
 
-1. **WhatsApp**: official Cloud API only, or official + a quarantined unofficial bridge on a
-   spare number? (I recommend official-only for anything member-facing.)
-2. **Multi-tenant in Phase 7**: is onboarding more churches a real goal? If yes, I'll design
-   the tenant shape before Phase 2 settings are written.
-3. **SMS sender ID**: what should we register (max 11 alphanumeric characters, e.g.
-   `YAYA` / `LP63YAYA` / `RCCGLP63`)? Sender IDs need approval — we can register one now so
-   it is approved by the time the module ships.
-4. **SMS defaults**: default country code (`234`), quiet hours, and the monthly unit cap you
-   are comfortable with.
-5. **Ordering**: happy with 1 → 2 → 3 → 4 → 5 → 6 → 7, or would you rather pull WhatsApp
-   (Phase 4) or Members (Phase 5) forward?
+| # | Decision | Answer | Effect on the plan |
+|---|---|---|---|
+| 1 | WhatsApp | **Both** — official Cloud API + quarantined unofficial bridge | Phase 4 builds both; the bridge is flag-gated (default off) on a spare SIM and owns groups + number harvesting only |
+| 2 | Sender IDs | **Self-service.** Admin / editor / media team submit one (≤ 11 alphanumeric); it is pushed to the gateway automatically; the system polls and auto-approves; the super admin can also force a status | New §2.3 + `cli/sms_sender_check.php` + approval notification |
+| 3 | Numbers | **Nigeria (`234`) default, other countries supported** for churches that buy the script | New §2.4 + `sms_countries` lookup and a per-tenant default country |
+| 4 | Multi-tenant | **Yes — building it as SaaS** | **Phase 0 (tenancy foundation) runs first**; `tenant_id` on every new table |
+| 5 | Order | **Happy with 1 → 7**, plus extra enhancements (pull phone numbers, WhatsApp groups) | Order unchanged; enhancements folded into §2.4 and Phase 4 |
+
+To settle at build time (not blockers): the quiet-hours window, the monthly unit cap, and the
+first sender ID value to register.
 
 ---
 
 ## 12. Recommended immediate next step
 
-**Phase 1** is pure upside: no vendors, no recurring cost, and it makes the site feel
-finished. I suggest starting with **1.1 comments moderation** and **1.2 analytics**, because
-analytics immediately starts collecting data that makes every later decision
-(what to promote, who to text, which sermon to repeat) measurable.
+**Phase 0 first.** The tenancy foundation is 2–3 sessions and it is the difference between
+adding SaaS support now and rewriting Phases 1–6 later. It ships with the existing site
+behaving exactly as it does today (one default tenant).
 
-Then **Phase 2 (SMS)** in full, since it is the explicit request and unlocks reminder,
+Then **Phase 1** — pure upside: no vendors, no recurring cost. Start with **1.1 comments
+moderation** and **1.2 analytics**, because analytics immediately starts collecting the data
+that makes every later decision (what to promote, who to text, which sermon to repeat)
+measurable.
+
+Then **Phase 2 (SMS)** in full, since it is the explicit request and it unlocks the reminder,
 follow-up and roster automation in Phase 6 for free.
 
 ---
