@@ -803,6 +803,51 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
   within the window does not require a template; 24-h expiry forces a template; bridge off
   by default.
 
+> **Status: foundation shipped (4.1).** Migration `2026_21_whatsapp` creates `wa_templates`,
+> `wa_conversations`, `wa_messages` and `wa_opt_ins`, plus the `wa_*` settings. `core/WhatsApp.php`
+> covers the credential accessors with masking, the webhook handshake and signature check, the
+> 24-hour window, and template / text / media sends through the Graph API.
+> `api/wa-webhook.php` handles the handshake, verifies the signature, and files inbound messages,
+> delivery statuses and opt-ins.
+>
+> **The channel is off by default** (`wa_enabled = 0`), as is the bridge
+> (`wa_unofficial_enabled = 0`). Nothing can be sent from an install that has not been configured.
+>
+> Three decisions worth knowing about:
+> - **`wa_messages.wa_message_id` is UNIQUE.** Meta retries a webhook delivery that does not get a
+>   2xx. Without that key a retry would file the same inbound message twice and the conversation
+>   would show it twice.
+> - **The window expiry is stored, not derived.** `window_expires_at` is written as
+>   `last_inbound_at + 24h`. Recomputing it from `last_inbound_at` on every read would mean a later
+>   change to the rule retroactively re-opening conversations that had already closed.
+> - **Inbound messages are `received`, not `delivered`.** They were delivered *to* us. Marking
+>   them `delivered` made every delivery report wrong by counting our own inbox.
+>
+> **Verified:** 103 assertions. The signature suite is the point of most of them, and is written
+> to distinguish *failing closed* from *being broken*: unsigned requests, a wrong digest, a digest
+> without the `sha256=` prefix, a truncated digest, **a body altered after signing**, and a
+> missing app secret are each refused — and the handshake refuses too when no verify token is
+> configured rather than accepting anyone who guesses the URL. Also covered: Meta retry
+> idempotency (the same delivery twice files one message), the window boundary at exactly 24
+> hours (closed) and a minute either side, out-of-order delivery statuses not downgrading `read`,
+> `FIELD()`-based status ranking, Meta error objects surfacing their own numeric code rather than
+> the HTTP 400, button replies unwrapped into text, voice notes storing no empty body, and
+> refusals never reaching the transport at all.
+>
+> **A real bug the suite caught:** the status rank used a 0-based array against MySQL's 1-based
+> `FIELD()`, so every promotion by one step — including `sent` → `delivered` — was silently
+> dropped with no error. Both sides now use `FIELD()`.
+>
+> **Not verified, and it cannot be from here:** nothing has been sent to a real Meta endpoint. The
+> transport is a stub, so the Graph API payload *shapes* are asserted but their acceptance by Meta
+> is not. The app has to be created, the business verified, a number registered, and the webhook
+> URL subscribed before any of that is testable. There is also no admin UI yet — templates,
+> conversations and the composer are 4.2.
+>
+> **Still to build in this phase:** `admin/whatsapp.php` (template manager, conversation inbox with
+> the window indicator, broadcast composer reusing the Phase 2 contacts/groups, per-church number
+> mapping), `cli/wa_worker.php`, and the optional Node bridge for groups and number harvesting.
+
 ## 7. Phase 5 — Members & daily engagement
 
 - **Member accounts**: `members` table (name, email, phone, password_hash, `org_unit_id`,

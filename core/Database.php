@@ -1415,6 +1415,134 @@ class Database
                     $link->execute([$seriesId, $title, $unitId]);
                 }
             },
+
+            // WhatsApp, via Meta's Cloud API.
+            //
+            // The channel is **off by default**. Messaging a congregation on a number that is
+            // not yet verified or approved is worse than not messaging them at all, so
+            // `wa_enabled` has to be turned on deliberately once the credentials work.
+            '2026_21_whatsapp' => function (PDO $pdo): void {
+                // Credentials. The access token and app secret are secrets: TEXT, encrypted,
+                // and never rendered in full by any screen (see WhatsApp::maskedToken()).
+                self::addColumnIfMissing($pdo, 'settings', 'wa_enabled', 'TINYINT(1) NOT NULL DEFAULT 0', 'sms_log_retention_days');
+                self::addColumnIfMissing($pdo, 'settings', 'wa_phone_number_id', 'VARCHAR(40) NULL', 'wa_enabled');
+                self::addColumnIfMissing($pdo, 'settings', 'wa_business_account_id', 'VARCHAR(40) NULL', 'wa_phone_number_id');
+                self::addColumnIfMissing($pdo, 'settings', 'wa_access_token', 'TEXT NULL', 'wa_business_account_id');
+                self::addColumnIfMissing($pdo, 'settings', 'wa_app_secret', 'TEXT NULL', 'wa_access_token');
+                self::addColumnIfMissing($pdo, 'settings', 'wa_verify_token', 'VARCHAR(120) NULL', 'wa_app_secret');
+                self::addColumnIfMissing($pdo, 'settings', 'wa_display_name', 'VARCHAR(60) NULL', 'wa_verify_token');
+                self::addColumnIfMissing($pdo, 'settings', 'wa_default_language', "VARCHAR(12) NOT NULL DEFAULT 'en'", 'wa_display_name');
+                self::addColumnIfMissing($pdo, 'settings', 'wa_log_retention_days', 'INT NOT NULL DEFAULT 60', 'wa_default_language');
+
+                // The unofficial bridge. Off by default, bound to loopback, and never used for
+                // anything member-facing — see the roadmap. It exists only for reading group
+                // participants, which the Cloud API cannot do at all.
+                self::addColumnIfMissing($pdo, 'settings', 'wa_unofficial_enabled', 'TINYINT(1) NOT NULL DEFAULT 0', 'wa_log_retention_days');
+                self::addColumnIfMissing($pdo, 'settings', 'wa_bridge_url', "VARCHAR(255) NOT NULL DEFAULT 'http://127.0.0.1:8787'", 'wa_unofficial_enabled');
+                self::addColumnIfMissing($pdo, 'settings', 'wa_bridge_token', 'TEXT NULL', 'wa_bridge_url');
+
+                // Approved message templates. A template has to be approved by Meta before it
+                // can be sent, and it can only be sent by name and language — so this is a cache
+                // of what has been approved, refreshed from the API, not the source of truth.
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `wa_templates` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `tenant_id` INT NULL,
+                    `name` VARCHAR(120) NOT NULL COMMENT 'Lowercase, underscores — Meta normalises it',
+                    `language` VARCHAR(12) NOT NULL DEFAULT 'en',
+                    `category` VARCHAR(40) NULL COMMENT 'MARKETING / UTILITY / AUTHENTICATION',
+                    `status` ENUM('draft','pending','approved','rejected','paused','disabled') NOT NULL DEFAULT 'draft',
+                    `body_text` TEXT NULL COMMENT 'The body as typed, for previewing and editing',
+                    `components` JSON NULL COMMENT 'The components array exactly as sent to Meta',
+                    `rejection_reason` VARCHAR(255) NULL,
+                    `org_unit_id` INT NULL,
+                    `last_synced_at` DATETIME NULL,
+                    `created_by` INT NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY `uniq_wa_template` (`tenant_id`, `name`, `language`),
+                    INDEX `idx_wa_template_status` (`status`),
+                    FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL,
+                    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                // One row per phone number we have talked to.
+                //
+                // `window_expires_at` is the whole Cloud API in one column: Meta only allows a
+                // free-form reply within 24 hours of the person's last message. Outside that
+                // window the only thing that may be sent is an approved template. Storing the
+                // expiry rather than deriving it from `last_inbound_at` means a later change to
+                // the rule cannot retroactively re-open conversations that had already closed.
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `wa_conversations` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `tenant_id` INT NULL,
+                    `msisdn` VARCHAR(20) NOT NULL COMMENT 'Same normalised form as sms_contacts',
+                    `contact_id` INT NULL,
+                    `display_name` VARCHAR(150) NULL COMMENT 'The WhatsApp profile name, when Meta sends it',
+                    `org_unit_id` INT NULL,
+                    `status` ENUM('open','closed','archived') NOT NULL DEFAULT 'open',
+                    `last_inbound_at` DATETIME NULL,
+                    `last_outbound_at` DATETIME NULL,
+                    `window_expires_at` DATETIME NULL COMMENT 'last_inbound_at + 24h, stored so it is never recomputed',
+                    `unread_count` INT NOT NULL DEFAULT 0,
+                    `is_opted_out` TINYINT(1) NOT NULL DEFAULT 0,
+                    `opt_out_at` DATETIME NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY `uniq_wa_conversation` (`tenant_id`, `msisdn`),
+                    INDEX `idx_wa_conv_inbox` (`tenant_id`, `status`, `last_inbound_at`),
+                    INDEX `idx_wa_conv_unit` (`org_unit_id`),
+                    FOREIGN KEY (`contact_id`) REFERENCES `sms_contacts`(`id`) ON DELETE SET NULL,
+                    FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                // Every message in either direction.
+                //
+                // `wa_message_id` is UNIQUE because Meta retries webhook deliveries. Without
+                // that key a retry would file the same inbound message a second time, and the
+                // reply thread would show it twice.
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `wa_messages` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `tenant_id` INT NULL,
+                    `conversation_id` INT NOT NULL,
+                    `direction` ENUM('in','out') NOT NULL,
+                    `type` VARCHAR(24) NOT NULL DEFAULT 'text' COMMENT 'text, template, image, audio, document, interactive, sticker, location, reaction, system',
+                    `template_name` VARCHAR(120) NULL,
+                    `body` TEXT NULL COMMENT 'Text content, or the rendered template body',
+                    `media_id` VARCHAR(190) NULL,
+                    `media_mime` VARCHAR(100) NULL,
+                    `wa_message_id` VARCHAR(190) NULL,
+                    `status` ENUM('received','queued','sent','delivered','read','failed') NOT NULL DEFAULT 'queued',
+                    `error_code` VARCHAR(20) NULL,
+                    `error_note` VARCHAR(255) NULL,
+                    `payload` JSON NULL COMMENT 'The raw webhook or API object, for diagnosis',
+                    `sent_by` INT NULL COMMENT 'Admin who sent it, when sent by hand',
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `status_at` DATETIME NULL COMMENT 'When the last delivery status arrived',
+                    UNIQUE KEY `uniq_wa_message_id` (`wa_message_id`),
+                    INDEX `idx_wa_msg_conversation` (`conversation_id`, `created_at`),
+                    INDEX `idx_wa_msg_tenant` (`tenant_id`, `created_at`),
+                    FOREIGN KEY (`conversation_id`) REFERENCES `wa_conversations`(`id`) ON DELETE CASCADE,
+                    FOREIGN KEY (`sent_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                // Consent, recorded per number rather than assumed from the fact that we hold
+                // it. `is_opted_in` defaults to 0 for anything imported; the webhook sets it to 1
+                // when the person messages us first, which is the strongest opt-in there is.
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `wa_opt_ins` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `tenant_id` INT NULL,
+                    `msisdn` VARCHAR(20) NOT NULL,
+                    `is_opted_in` TINYINT(1) NOT NULL DEFAULT 0,
+                    `opted_in_at` DATETIME NULL,
+                    `opted_out_at` DATETIME NULL,
+                    `source` ENUM('inbound','manual','import','group','member','form') NOT NULL DEFAULT 'manual',
+                    `note` VARCHAR(255) NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY `uniq_wa_optin` (`tenant_id`, `msisdn`),
+                    INDEX `idx_wa_optin_state` (`is_opted_in`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+            },
         ];
     }
 
