@@ -139,8 +139,9 @@ Do this **before** any Phase 1/2 work so nothing has to be retrofitted later.
 > The Flutter app reports too, via `mobile/lib/services/analytics_beacon.dart`:
 > `app_open` on launch, content views from the sermon and event screens, and search
 > terms from the app's search. All of it sends `device=app`, which is what puts a hit
-> in the app column instead of showing every visitor as web. App hits carry no `path`,
-> so `topPages()` resolves them to `/` alongside the site's own home-page views.
+> in the app column instead of showing every visitor as web. The app deliberately never
+> sends `page_view`, and `topPaths()` counts only `page_view`, so app activity cannot
+> appear in "Most visited pages" — that panel stays a website measure.
 - **DB**: `analytics_events` (`id`, `occurred_at`, `event` VARCHAR(60), `path`, `org_unit_id`,
   `post_id`, `sermon_id`, `event_id`, `device` ENUM('web','app'), `session_hash`,
   `referrer_host`, `country`, `meta` JSON) + indexes on `(occurred_at)`, `(event)`,

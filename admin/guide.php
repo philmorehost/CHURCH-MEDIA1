@@ -25,9 +25,11 @@ require __DIR__ . '/partials/layout-open.php';
 <div class="card" style="margin-bottom:18px;">
   <h2 style="margin:0 0 6px;">📖 Admin Guide</h2>
   <p class="sub">Everything you can do in the admin panel — how to manage your church's content, your account, and the site. Use the links below to jump to a section.</p>
+  <p class="sub">The sidebar is grouped, so only one group is open at a time — click a group heading to open it and close the one you were in. Each screen below also carries a badge showing the lowest role that can open it, and <span class="pill super">SUPER</span> means super admin only.</p>
   <div class="guide-toc">
     <a href="#roles">Roles &amp; Permissions</a>
     <a href="#dashboard">Dashboard</a>
+    <a href="#analytics">Analytics</a>
     <a href="#ads">Ads Management</a>
     <a href="#donations">Donations &amp; Giving</a>
     <a href="#media">Media &amp; Reels</a>
@@ -35,17 +37,23 @@ require __DIR__ . '/partials/layout-open.php';
     <a href="#comments">Comments</a>
     <a href="#events">Events</a>
     <a href="#sermons">Sermons</a>
+    <a href="#series">Series &amp; Podcast</a>
     <a href="#team">Team</a>
     <a href="#prayer">Prayer Wall</a>
+    <a href="#testimonies">Testimonies</a>
     <a href="#newsletter">Newsletter</a>
     <a href="#sms">SMS Messaging</a>
+    <a href="#whatsapp">WhatsApp</a>
     <a href="#forms">Forms</a>
     <a href="#notifications">Notifications</a>
     <a href="#attendance">Attendance</a>
     <a href="#newcomers">Newcomers</a>
     <a href="#pages">Pages</a>
     <a href="#units">Units</a>
+    <a href="#unit-levels">Unit Levels</a>
+    <a href="#registrations">Registrations</a>
     <a href="#security">Security</a>
+    <a href="#backup">Backups</a>
     <a href="#settings">Settings</a>
     <a href="#users">Users</a>
     <a href="#firebase">Push (Firebase)</a>
@@ -75,6 +83,26 @@ require __DIR__ . '/partials/layout-open.php';
   </div>
 
   <div class="card" style="margin-bottom:18px;">
+    <h2 id="analytics">Analytics (<code>/admin/analytics</code>) <span class="pill role">ADMIN/EDITOR</span></h2>
+    <p>How many people are reading and watching, where they came from, and what they searched for. Pick a range — <strong>Last 7 / 30 / 90 days</strong>, or a custom window — and everything on the page follows it.</p>
+    <ul>
+      <li><strong>Overview</strong> — page views, app opens and the rest of the headline counts, each with its share of traffic.</li>
+      <li><strong>Daily page views</strong> — the shape of the period, so you can see which days actually landed.</li>
+      <li><strong>Top sermons, reels, events and testimonies</strong> — what is being opened, ranked.</li>
+      <li><strong>Most visited pages</strong> — which pages people land on.</li>
+      <li><strong>What people searched for</strong> — the clearest signal of content you do not have yet. A search that returned nothing is a request.</li>
+      <li><strong>Where visitors come from</strong> — the referring site, host only, never the full link.</li>
+      <li><strong>Web vs app</strong> — how much of your audience is in the mobile app rather than the website.</li>
+      <li><strong>Per church</strong> — the same numbers broken down across your churches.</li>
+      <li><strong>Meanwhile, in this period</strong> and <strong>All time</strong> — giving, newcomers and other activity shown alongside the traffic.</li>
+    </ul>
+    <p><strong>What is deliberately not counted.</strong> Search engine crawlers, link-preview fetchers (whatever builds a WhatsApp or Telegram preview) and uptime monitors are filtered out, so the numbers are people. <strong>No IP address is stored</strong> — visitors are told apart by the same rotating one-way device hash the rest of the site uses, which cannot be traced back to a person. Browsers that ask not to be tracked are honoured and simply do not report at all.</p>
+    <p><strong>Settings</strong> at the foot of the page switch collection on or off and set how long raw events are kept (7–3650 days). Turning collection off stops recording immediately; the numbers you already have stay. The daily roll-ups behind <strong>All time</strong> are kept indefinitely, so shortening the retention window never loses long-range trends.</p>
+    <p><strong>Run the nightly roll-up</strong> (<code>php cli/analytics_rollup.php</code> from cron) so long-range history is preserved.</p>
+    <p><em>The app reports separately from the website.</em> Expect the "App opens" figure and the web-vs-app split to stay low until people are running a recent build of the app — the website's own traffic will always dominate it.</p>
+  </div>
+
+  <div class="card" style="margin-bottom:18px;">
     <h2 id="donations">Donations &amp; Giving (<code>/admin/donations</code>) <span class="pill admin">ADMIN</span></h2>
     <p>Track, manage, and audit all online giving, tithes, offerings, special seed pledges, and manual bank transfer receipts.</p>
     <ul>
@@ -87,9 +115,9 @@ require __DIR__ . '/partials/layout-open.php';
 
   <div class="card" style="margin-bottom:18px;">
     <h2 id="ads">Ads Management (<code>/admin/ads</code>) <span class="pill super">SUPER</span></h2>
-    <p>Monetize and manage vertical 9:16 display advertisements for the website and Mobile App.</p>
+    <p>Monetize and manage vertical 9:16 display advertisements for the website and Mobile App. The gateway keys live on a separate screen, reached from <strong>System → Payment Gateway</strong> in the sidebar (or <code>/admin/ads?action=settings</code>).</p>
     <ul>
-      <li><strong>Ad Gateway Settings:</strong> Configure Payhub Online Gateway keys (`payhub_public_key`, `payhub_secret_key`) and Manual Bank Transfer details for advertiser checkout.</li>
+      <li><strong>Ad Gateway Settings</strong> (<strong>System → Payment Gateway</strong> <span class="pill super">SUPER</span>): Configure Payhub Online Gateway keys (`payhub_public_key`, `payhub_secret_key`) and Manual Bank Transfer details for advertiser checkout.</li>
       <li><strong>Packages &amp; Pricing:</strong> Create and edit ad duration packages with custom pricing and display frequencies (every 5m, 10m, 15m, 30m, once daily). Free packages default to once daily.</li>
       <li><strong>Review &amp; Approval:</strong> Review advertiser submissions, view uploaded bank transfer receipts, and approve/reject campaigns.</li>
       <li><strong>Publisher Ad Manager Portal:</strong> Approved publishers receive a secure link via email to track their ad impressions, clicks, CTR, and create additional ads.</li>
@@ -141,8 +169,23 @@ require __DIR__ . '/partials/layout-open.php';
   </div>
 
   <div class="card" style="margin-bottom:18px;">
-    <h2 id="sermons">Sermons (<code>/admin/sermons</code>)</h2>
-    <p>Upload sermon audio, attach a YouTube video, add speaker/series/scripture reference, and publish. Sermons appear on the site and app's Sermons tab.</p>
+    <h2 id="sermons">Sermons (<code>/admin/sermons</code>) <span class="pill role">ADMIN/EDITOR</span></h2>
+    <p>Upload sermon audio, attach a YouTube video, add speaker/series/scripture reference, and publish. Sermons appear on the site and app's Sermons tab. Attaching a sermon to a <strong>series</strong> and giving it an <strong>episode number</strong> also puts it in your podcast feed — see the next section.</p>
+  </div>
+
+  <div class="card" style="margin-bottom:18px;">
+    <h2 id="series">Sermon Series &amp; Podcast (<code>/admin/series</code>) <span class="pill role">ADMIN/EDITOR</span></h2>
+    <p>A <strong>series</strong> is a named run of messages — "Walking in Grace, parts 1–8". Grouping sermons into one does two things: listeners get the next message without hunting for it, and the series becomes a <strong>podcast feed</strong> people can subscribe to.</p>
+    <ul>
+      <li><strong>Create a series</strong> with a name, description and cover image. The name becomes the <strong>podcast title</strong>, so keep it recognisable — this is what listeners see in Spotify and Apple Podcasts.</li>
+      <li><strong>Cover art should be square.</strong> Podcast directories require it, and a wide image gets cropped.</li>
+      <li><strong>Attach sermons</strong> to the series and give each one an <strong>episode number</strong>. The episode count on the series list is worked out from the sermons themselves, so it can never drift out of step with reality.</li>
+      <li><strong>A sermon with no episode number is flagged</strong>, and the series list shows how many. That matters because a missing number is exactly what makes a feed list episodes by date instead of in the order you meant.</li>
+      <li><strong>Unpublished series</strong> are hidden from the website and left out of the feed, but their sermons are not touched — you can take a series down without losing anything.</li>
+      <li><strong>+ Episode</strong> on any series jumps straight to the sermon form with that series already selected.</li>
+    </ul>
+    <p><strong>Subscribing:</strong> your feed lives at <code>/podcast.xml</code>. Paste that address into Spotify for Podcasters, Apple Podcasts or any other directory <strong>once</strong> — after that every new sermon published into a series appears there on its own. There is also a friendly <code>/podcast</code> page to share with people who are not podcast apps.</p>
+    <p><strong>Two things to know before you submit:</strong> a feed with no episodes is <em>rejected</em> by the directories, so <strong>publish at least one sermon with audio first</strong>; and only sermons that have an audio file are listed, because a video-only sermon has nothing for a podcast app to play.</p>
   </div>
 
   <div class="card" style="margin-bottom:18px;">
@@ -153,6 +196,17 @@ require __DIR__ . '/partials/layout-open.php';
   <div class="card" style="margin-bottom:18px;">
     <h2 id="prayer">Prayer Wall (<code>/admin/prayer</code>)</h2>
     <p>View prayer requests submitted from the public Prayer page. Mark them <em>new / prayed / archived</em>, toggle public visibility to feature them on the site, and delete spam. Requests with no church are marked <strong>Unassigned</strong> — the super admin can assign them to the right parish.</p>
+  </div>
+
+  <div class="card" style="margin-bottom:18px;">
+    <h2 id="testimonies">Testimonies &amp; Praise Reports (<code>/admin/testimonies</code>) <span class="pill role">ADMIN/EDITOR</span></h2>
+    <p>Members submit testimonies from the public site and they arrive here as <strong>Pending</strong> — nothing is published until you approve it.</p>
+    <ul>
+      <li><strong>Approve</strong> publishes it to the website and records when it was approved. <strong>Reject</strong> takes it out of the queue without deleting it, and <strong>Delete</strong> removes it for good (it asks first).</li>
+      <li><strong>Filter buttons</strong> show live counts for Pending, Approved and Rejected, so the size of the queue is visible the moment you open the page.</li>
+      <li><strong>Edit anything</strong> before publishing — name, email, phone, church, title and the testimony text itself. Correcting a spelling is usually better than rejecting somebody's testimony.</li>
+    </ul>
+    <p>Approved testimonies appear on the public site and are counted in Analytics, so you can see which ones people actually open.</p>
   </div>
 
   <div class="card" style="margin-bottom:18px;">
@@ -177,6 +231,25 @@ require __DIR__ . '/partials/layout-open.php';
     <p><strong>What “sent” means.</strong> It means your SMS provider accepted the message for delivery — not that a particular handset received it. The gateway answers once per batch rather than once per number, so the failure list is the closest thing to the truth for an individual person. A campaign that runs out of credit <em>pauses</em> rather than failing silently, and resumes once you top up.</p>
     <p><strong>Honouring STOP.</strong> Anyone who replies STOP is marked as opted out and is skipped by every campaign from then on, even if you select them directly or they are in a group you choose. This is not optional — it protects your sender ID from being blocked by the networks.</p>
     <p><strong>Sending needs the cron worker.</strong> Nothing goes out on its own. If a campaign sits on <em>queued</em> and does not move, the cron entry is the first thing to check; the exact lines to add are shown under the Settings tab.</p>
+  </div>
+
+  <div class="card" style="margin-bottom:18px;">
+    <h2 id="whatsapp">WhatsApp (<code>/admin/whatsapp</code>) <span class="pill role">ADMIN/EDITOR/MEDIA</span></h2>
+    <p>Message your members on WhatsApp through <strong>Meta's official Business API</strong> — the channel WhatsApp itself provides, on your own verified business number. Nothing here uses a personal WhatsApp account or an unofficial sender, so your number cannot be banned for using it.</p>
+    <p>The screen is split into six tabs:</p>
+    <ul>
+      <li><strong>Dashboard</strong> — whether the channel is connected and what still needs doing, plus the webhook address to give Meta.</li>
+      <li><strong>Inbox</strong> — every conversation in one place, so a message from a member gets an answer. Anyone who can use the messaging screens can read and reply here, because a member's message that nobody answers is worse than no inbox at all.</li>
+      <li><strong>Broadcast</strong> — send one approved template to a set of people, using the same audiences as SMS (everyone, a group, a church, or a saved segment).</li>
+      <li><strong>Templates</strong> — the wording of the messages you are allowed to send. Meta reviews each one before it can be used.</li>
+      <li><strong>Settings</strong> <span class="pill super">SUPER</span> — your Phone number ID, access token, app secret and verify token. The token and secret are encrypted and never shown again; <strong>leave a field blank to keep the value already stored</strong>.</li>
+      <li><strong>Guide</strong> — the same walkthrough with the Meta setup steps in order.</li>
+    </ul>
+    <h3>The 24-hour rule — the thing that confuses everyone</h3>
+    <p>WhatsApp allows a free-form reply <strong>only within 24 hours</strong> of that person's last message to you. Inside that window you can type anything back from the Inbox. <strong>Outside it, only an approved template can be sent</strong> — which is why Broadcast offers templates and nothing else. This is WhatsApp's rule, not a limitation of your site, and it exists to stop businesses messaging people who never asked.</p>
+    <p><strong>A broadcast only reaches people who opted in.</strong> Someone counts as opted in if they are on the opt-in list, or if they have messaged you at all. Anyone who has opted out is skipped permanently, and everyone skipped is counted as skipped rather than messaged anyway.</p>
+    <p><strong>How to switch it on</strong> <span class="pill super">SUPER</span>: create a Meta app and a WhatsApp Business account, verify your business, register the number, then paste the credentials into the Settings tab and give Meta the webhook address it shows. Until the credentials are saved the channel is <strong>off</strong>, and every tab says so at the top rather than failing silently. The Guide tab lists the steps in order.</p>
+    <p><em>Broadcasts are sent by their own cron worker</em> (<code>php cli/wa_worker.php</code>), separate from SMS. If a broadcast sits on <em>queued</em> and does not move, the cron entry is the first thing to check. Sending is paced and capped per day so a large list cannot get your number rate-limited.</p>
   </div>
 
   <div class="card" style="margin-bottom:18px;">
@@ -263,6 +336,20 @@ require __DIR__ . '/partials/layout-open.php';
       <li><strong>Security Unblock PIN:</strong> Every user sets a 4–6 digit PIN during registration or in <em>My Account</em>. If an IP or account is blocked due to failed login attempts, the user can restore access directly via <strong>/unblock</strong> using their credentials + PIN without waiting for manual intervention.</li>
       <li><strong>Email OTP Password Reset:</strong> Users who forget their password can request a 6-digit OTP sent to their primary and backup emails via <strong>/forgot-password</strong>. If email access is lost, they can fall back to resetting their password using their Security Unblock PIN.</li>
       <li><strong>Automatic MD5 Re-hashing:</strong> Existing passwords modified directly via phpMyAdmin in MD5 format are automatically detected on login and upgraded to Argon2id cryptographic hashes.</li>
+    </ul>
+  </div>
+
+  <div class="card" style="margin-bottom:18px;">
+    <h2 id="backup">Backups (<code>/admin/backup</code>) <span class="pill super">SUPER</span></h2>
+    <p>Everything on the site lives in one database, and this is where you keep a copy of it. Use it before any major change.</p>
+    <ul>
+      <li><strong>Backups</strong> — how many are stored, how big they are, and how old the newest one is. If the newest backup is surprisingly old the page says so plainly, because that is usually the first sign the scheduled job has stopped running.</li>
+      <li><strong>Stored Backups</strong> — each archive with its size, when it was taken, and a <strong>Manifest</strong> link. Keep a copy somewhere other than the server: a backup stored only on the machine it is backing up is not a backup.</li>
+      <li><strong>The manifest is the part people forget.</strong> An archive holds the database only. The manifest lists the uploaded media that is <em>not</em> inside it — how many files and how much space — so you know exactly what to copy separately. A database restored without its uploads comes back with every image missing.</li>
+      <li><strong>Retention</strong> — the newest backups are kept and older ones pruned on the schedule, according to the retention setting (change it in Settings). <em>Apply retention now</em> runs the pruning immediately.</li>
+      <li><strong>Restoring</strong> — the page gives you the exact command, built from your own filenames, rather than a generic example: download the archive you intend to restore, check its size is plausible (a 0&nbsp;KB file is not a backup), then run the command or import the file through phpMyAdmin.</li>
+      <li><strong>Media files are not in the archive</strong> — the database is. Uploaded images and video live in the uploads folder and are backed up separately; the page lists what to copy and where.</li>
+      <li><strong>Scheduling</strong> — the page shows the cron line that keeps backups running without anyone remembering.</li>
     </ul>
   </div>
 
