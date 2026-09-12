@@ -21,7 +21,7 @@ declare(strict_types=1);
 final class SmsContacts
 {
     /** Where a contact came from. Kept in sync with the column enum. */
-    public const SOURCES = ['manual', 'newcomer', 'subscriber', 'team', 'testimony', 'registration', 'rsvp', 'form', 'app', 'import', 'member'];
+    public const SOURCES = ['manual', 'newcomer', 'subscriber', 'team', 'testimony', 'registration', 'rsvp', 'form', 'app', 'import', 'member', 'group'];
 
     /**
      * Rule types a dynamic segment may use.
@@ -933,6 +933,7 @@ final class SmsContacts
         $labels = [
             'manual' => 'Added by hand',
             'import' => 'CSV import',
+            'group' => 'WhatsApp group import',
             'newcomer' => 'Newcomer form',
             'subscriber' => 'Newsletter (consented)',
             'team' => 'Church team',

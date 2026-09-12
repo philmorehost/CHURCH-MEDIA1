@@ -85,8 +85,16 @@ declare(strict_types=1);
   <h2 style="margin-top:0;">The unofficial bridge — read before switching it on</h2>
   <p style="color:var(--ink-dim);font-size:14px;line-height:1.75;">
     The official API cannot read the members of a WhatsApp group, and cannot post into one. That is
-    a deliberate restriction. If that capability is wanted, it needs a separate small service using
-    a non-official library.
+    a deliberate restriction. Reading groups is done instead by a separate small service
+    (<code>bridge/</code> — a Node process that pairs a number the way WhatsApp Web does). Its
+    screen is the <strong>Groups</strong> tab, and nothing there works until a super admin switches
+    the bridge on and starts that service.
+  </p>
+  <p style="color:var(--ink-dim);font-size:14px;line-height:1.75;">
+    <strong>Importing members</strong> only writes contacts. Every one of them arrives
+    <strong>opted out</strong>, and somebody who is already opted in is left opted in — sharing a
+    group with the youth leader is not consent to be messaged. <strong>Posting into a group</strong>
+    is super-admin only, goes out the instant it is submitted, and reaches everyone in the group.
   </p>
   <p style="color:var(--ink-dim);font-size:14px;line-height:1.75;">
     <strong>This violates WhatsApp's terms of service.</strong> The number can be banned

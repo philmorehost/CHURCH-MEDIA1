@@ -1,0 +1,13 @@
+# The paired WhatsApp session lives here. Anyone holding these files is logged in as that number,
+# so nothing in this directory may ever be served over HTTP.
+#
+# On shared hosting the repository root is often also the document root, which would otherwise
+# make creds.json fetchable at /storage/wa-bridge/creds.json. If this host does not honour
+# .htaccess (AllowOverride None), the bridge must be moved outside the document root instead.
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+</IfModule>

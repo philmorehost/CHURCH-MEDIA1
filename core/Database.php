@@ -1165,7 +1165,7 @@ class Database
                     `country_code` VARCHAR(4) NOT NULL DEFAULT '234',
                     `email` VARCHAR(190) NULL,
                     `org_unit_id` INT NULL,
-                    `source` ENUM('manual','newcomer','subscriber','team','testimony','registration','form','app','import','member') NOT NULL DEFAULT 'manual',
+                    `source` ENUM('manual','newcomer','subscriber','team','testimony','registration','rsvp','form','app','import','member','group') NOT NULL DEFAULT 'manual',
                     `source_ref_id` INT NULL,
                     `tags` VARCHAR(255) NULL,
                     `is_opted_out` TINYINT(1) NOT NULL DEFAULT 0,
@@ -1619,6 +1619,20 @@ class Database
                     FOREIGN KEY (`conversation_id`) REFERENCES `wa_conversations`(`id`) ON DELETE SET NULL,
                     FOREIGN KEY (`contact_id`) REFERENCES `sms_contacts`(`id`) ON DELETE SET NULL
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+            },
+
+            // Two contact sources were missing from the column's ENUM, so both were being stored
+            // as 'manual' - which on a consent table means the record of *why* a number is here
+            // was wrong. 'rsvp' has been in SmsContacts::SOURCES all along without a matching
+            // enum value, and 'group' arrives with the WhatsApp bridge: somebody who shares a
+            // church group chat has not been "added by hand" and did not fill in a CSV.
+            //
+            // Widening an ENUM is additive, so no existing row changes. The CREATE TABLE above
+            // carries the same list, so a fresh install never depends on this running.
+            '2026_23_contact_source_group_rsvp' => function (PDO $pdo): void {
+                $pdo->exec("ALTER TABLE `sms_contacts` MODIFY COLUMN `source`
+                    ENUM('manual','newcomer','subscriber','team','testimony','registration','rsvp','form','app','import','member','group')
+                    NOT NULL DEFAULT 'manual'");
             },
         ];
     }

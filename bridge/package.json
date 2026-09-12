@@ -1,0 +1,20 @@
+{
+  "name": "churchmedia-wa-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Localhost-only WhatsApp sidecar used to read group members and post into groups. Unofficial - read README.md first.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "pair": "node server.js --show-qr"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.0",
+    "pino": "^9.0.0",
+    "qrcode-terminal": "^0.12.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
