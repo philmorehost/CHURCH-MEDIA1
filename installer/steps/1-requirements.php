@@ -3,8 +3,15 @@ declare(strict_types=1);
 
 /** Stage 1 — PHP/extension/writable-path requirements, then license validation. */
 
+// The source deliberately stays inside the PHP 7.4 grammar so it can run on
+// shared hosting, where the version is fixed by the host. Development happens
+// on 8.x, so anything newer than 7.4 has to be back-filled in core/helpers.php.
+// cli/php-compat-check.php enforces this. The running version is shown in the
+// label because "PHP >= 8.2" failing on PHP 7.4 told nobody what was wrong.
+$phpFloor = '7.4.0';
+
 $checks = [
-    'PHP >= 8.2' => version_compare(PHP_VERSION, '8.2.0', '>='),
+    'PHP >= ' . $phpFloor . ' (running ' . PHP_VERSION . ')' => version_compare(PHP_VERSION, $phpFloor, '>='),
     'PDO MySQL extension' => extension_loaded('pdo_mysql'),
     'GD extension (image/WebP)' => extension_loaded('gd') && function_exists('imagewebp'),
     'cURL extension' => extension_loaded('curl'),
