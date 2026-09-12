@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
 import '../models/models.dart';
+import '../services/analytics_beacon.dart';
 import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
@@ -31,6 +32,9 @@ class _SermonDetailScreenState extends State<SermonDetailScreen> {
         _sermon = s;
         _loading = false;
       });
+      // Report the listen — only for a sermon that actually loaded, so a dead
+      // link is not counted as a view.
+      if (s != null) AnalyticsBeacon.contentView('sermon', s.id);
       if (s?.audioUrl != null) {
         _audioController = VideoPlayerController.networkUrl(Uri.parse(s!.audioUrl!))..initialize().then((_) => setState(() {}));
       }

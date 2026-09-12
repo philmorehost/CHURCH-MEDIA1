@@ -528,6 +528,7 @@ class _FeedSlideState extends State<_FeedSlide> {
                             unitSlug: p.slug,
                             unitName: p.name,
                             unitPath: post.unit.map((u) => u.name).toList(),
+                            unitId: p.id,
                           ),
                         ),
                       );

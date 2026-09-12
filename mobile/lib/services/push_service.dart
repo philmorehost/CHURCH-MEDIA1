@@ -4,6 +4,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../screens/notifications_screen.dart';
 import 'api_client.dart';
@@ -64,6 +65,45 @@ class PushService {
       }
       await messaging.subscribeToTopic('all');
     } catch (_) {}
+  }
+
+  /// How many church topics one device stays subscribed to.
+  ///
+  /// A device only follows churches whose page someone actually opens, and it
+  /// should not sit on those forever — browsing a dozen churches would
+  /// otherwise leave a dozen live subscriptions. The oldest is dropped as a new
+  /// one is added.
+  static const int _maxUnitTopics = 10;
+  static const String _unitTopicsKey = 'push_unit_topics';
+
+  /// Subscribes this device to a church's topic.
+  ///
+  /// Without this, a notification an admin aims at one church reaches nobody:
+  /// `admin/notifications.php` and `core/Notifier.php` both push to a per-church
+  /// topic rather than the broadcast topic, so until a device joins that topic
+  /// the send is silently dropped. Called when someone opens a church's page.
+  static Future<void> followUnit(int unitId) async {
+    if (unitId <= 0) return;
+    // Firebase may simply not be configured for this platform — init() leaves
+    // this false in that case, and there is nothing to subscribe with.
+    if (!_initialized) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final followed = prefs.getStringList(_unitTopicsKey) ?? <String>[];
+      final topic = 'unit-$unitId';
+      if (followed.contains(topic)) return;
+
+      final messaging = FirebaseMessaging.instance;
+      await messaging.subscribeToTopic(topic);
+      followed.add(topic);
+
+      while (followed.length > _maxUnitTopics) {
+        await messaging.unsubscribeFromTopic(followed.removeAt(0));
+      }
+      await prefs.setStringList(_unitTopicsKey, followed);
+    } catch (_) {
+      // Push plumbing must never interrupt navigation.
+    }
   }
 
   static void _handleMessage(RemoteMessage message) {

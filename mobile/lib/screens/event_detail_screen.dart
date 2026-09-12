@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models/models.dart';
+import '../services/analytics_beacon.dart';
 import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
@@ -27,6 +28,8 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
         _event = e;
         _loading = false;
       });
+      // Report the view — only for an event that actually loaded.
+      if (e != null) AnalyticsBeacon.contentView('event', e.id);
     });
   }
 

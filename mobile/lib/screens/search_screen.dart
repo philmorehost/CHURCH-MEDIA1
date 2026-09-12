@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../services/analytics_beacon.dart';
 import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
@@ -29,6 +30,10 @@ class _SearchScreenState extends State<SearchScreen> {
     setState(() => _loading = true);
     try {
       final results = await _api.search(query.trim());
+      // Record the term even when nothing came back — a search with no results is
+      // the clearest signal of content the church does not have yet, which is
+      // what the dashboard's "What people searched for" panel is for.
+      AnalyticsBeacon.search(query);
       setState(() {
         _results = results;
         _loading = false;

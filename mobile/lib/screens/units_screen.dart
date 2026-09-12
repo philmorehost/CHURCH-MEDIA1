@@ -142,6 +142,7 @@ class _UnitsScreenState extends State<UnitsScreen> {
           unitSlug: unit.slug,
           unitName: unit.name,
           unitPath: _pathFor(unit),
+          unitId: unit.id,
         ),
       ),
     );

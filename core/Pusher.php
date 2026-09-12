@@ -166,7 +166,13 @@ class Pusher
 
     /**
      * Send to every device subscribed to a unit's topic (topic 'unit-{id}').
-     * The app subscribes to this topic when the user browses that church.
+     *
+     * The app subscribes to this topic when the user browses that church
+     * (PushService::followUnit keeps the ten most recently opened churches).
+     * This is the *only* delivery path for a notification an admin aims at one
+     * church — admin/notifications.php and core/Notifier.php both push here and
+     * never broadcast, which is why per-church notifications used to reach
+     * nobody at all.
      */
     public static function sendToUnit(int $unitId, string $title, string $body, ?string $imageUrl = null, array $data = []): bool
     {
@@ -203,13 +209,30 @@ class Pusher
         self::notifyContent($orgUnitId, 'New sermon', mb_strimwidth($title, 0, 100, '…'), null, ['type' => 'sermon', 'sermon_id' => (string) $sermonId]);
     }
 
-    /** Shared: send to the church's topic (with church name) + broadcast. */
+    /**
+     * Shared: announce new content to everyone, tagged with its church.
+     *
+     * This used to send twice — once to the church's topic and once to the
+     * broadcast — which was harmless only because no device had ever subscribed
+     * to a church topic. Now that the app follows the churches it browses,
+     * keeping both sends would deliver every new reel, event and sermon twice to
+     * anyone who had opened that church.
+     *
+     * Content goes out once, on the broadcast topic, because that is the only
+     * topic every device is on from its first launch — a device that has not
+     * opened any church yet would otherwise hear nothing at all. Targeting stays
+     * where it belongs: notices an admin aims at one church, which are sent with
+     * sendToUnit() and deliberately not broadcast.
+     *
+     * The church name moves into the title so the origin is still visible.
+     */
     private static function notifyContent(?int $orgUnitId, string $title, string $body, ?string $imageUrl = null, array $data = []): void
     {
         if ($orgUnitId !== null && $orgUnitId > 0) {
             $unit = Unit::find($orgUnitId);
-            $unitTitle = $unit ? $unit['name'] . ' — ' . $title : $title;
-            self::sendToUnit($orgUnitId, $unitTitle, $body, $imageUrl, $data);
+            if ($unit) {
+                $title = $unit['name'] . ' — ' . $title;
+            }
         }
         self::broadcast($title, $body, $imageUrl, $data);
     }

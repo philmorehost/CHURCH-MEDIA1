@@ -4,6 +4,7 @@ import 'package:video_player/video_player.dart';
 import 'package:youtube_player_iframe/youtube_player_iframe.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
+import '../services/push_service.dart';
 import '../theme/app_theme.dart';
 
 /// A church/group media gallery: all images + videos beneath the selected node
@@ -12,7 +13,17 @@ class UnitScreen extends StatefulWidget {
   final String unitSlug;
   final String unitName;
   final List<String> unitPath; // ancestor names, root → the selected unit
-  const UnitScreen({super.key, required this.unitSlug, required this.unitName, required this.unitPath});
+
+  /// Numeric id of this church, used to follow its push topic. 0 disables that,
+  /// which is what happens if a caller only has the slug to hand.
+  final int unitId;
+  const UnitScreen({
+    super.key,
+    required this.unitSlug,
+    required this.unitName,
+    required this.unitPath,
+    this.unitId = 0,
+  });
 
   @override
   State<UnitScreen> createState() => _UnitScreenState();
@@ -28,6 +39,10 @@ class _UnitScreenState extends State<UnitScreen> {
   @override
   void initState() {
     super.initState();
+    // Opening a church follows its notifications. This is what makes per-church
+    // push targeting work at all — the senders already exist, but nothing was
+    // ever subscribed to receive them.
+    if (widget.unitId > 0) PushService.followUnit(widget.unitId);
     _load();
   }
 
