@@ -177,7 +177,20 @@ final class Series
 
         try {
             $pdo = self::db();
-            $slug = self::uniqueSlug($title, $id);
+
+            // A published series address is out in the world: search results, a link shared on
+            // WhatsApp, and the item links inside the podcast feed. Renaming a series must not
+            // move it, or every one of those stops working. So the existing slug is kept and only
+            // a series that has never had one is given a fresh slug from its title.
+            $slug = '';
+            if ($id > 0) {
+                $current = $pdo->prepare('SELECT slug FROM sermon_series WHERE id = ?');
+                $current->execute([$id]);
+                $slug = (string) $current->fetchColumn();
+            }
+            if ($slug === '') {
+                $slug = self::uniqueSlug($title, $id);
+            }
 
             $fields = [
                 'title' => $title,

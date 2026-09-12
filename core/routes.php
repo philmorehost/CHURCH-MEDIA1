@@ -672,6 +672,26 @@ $router->get('/sermons/{slug}', function (array $params) {
     render('sermon-detail', ['slug' => $params['slug']]);
 });
 
+$router->get('/series', function () {
+    render('series');
+});
+
+$router->get('/series/{slug}', function (array $params) {
+    render('series-detail', ['slug' => $params['slug']]);
+});
+
+// The podcast feed. Served directly rather than through render(), because it is a document
+// for a machine: an RSS reader, Spotify, or Apple Podcasts. Wrapping it in the site layout
+// would put HTML around the XML and break every one of them.
+$router->get('/podcast.xml', function () {
+    require VIEWS_PATH . '/podcast.php';
+});
+
+// A human-readable page explaining how to subscribe, for people who are not podcast apps.
+$router->get('/podcast', function () {
+    render('podcast-page');
+});
+
 $router->get('/about', function () {
     render('page', ['slug' => 'about']);
 });

@@ -14,6 +14,7 @@ $navItems = [
     ['key' => 'ads', 'href' => '/admin/ads', 'label' => 'Ads Management'],
     ['key' => 'events', 'href' => '/admin/events', 'label' => 'Events'],
     ['key' => 'sermons', 'href' => '/admin/sermons', 'label' => 'Sermons'],
+    ['key' => 'series', 'href' => '/admin/series', 'label' => 'Series & Podcast'],
     ['key' => 'team', 'href' => '/admin/team', 'label' => 'Team'],
     ['key' => 'prayer', 'href' => '/admin/prayer', 'label' => 'Prayer Wall'],
     ['key' => 'newsletter', 'href' => '/admin/newsletter', 'label' => 'Newsletter'],

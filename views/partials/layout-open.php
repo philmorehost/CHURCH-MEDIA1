@@ -136,6 +136,9 @@ if (!$ogImage && ($s['logo_path'] ?? null)) {
   <meta name="twitter:image" content="<?= e($ogImage) ?>">
 <?php endif; ?>
 <meta name="theme-color" content="#0a0912">
+<?php /* Lets a podcast app find the feed from any page, which is how a listener who lands on the
+         website ends up subscribing instead of having to be sent the address. */ ?>
+<link rel="alternate" type="application/rss+xml" title="Podcast" href="<?= e(baseUrl('/podcast.xml')) ?>">
 <link rel="stylesheet" href="<?= asset('css/site.css') ?>">
 <script type="application/ld+json"><?= json_encode([
     '@context' => 'https://schema.org',
