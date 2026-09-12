@@ -19,27 +19,49 @@ $isLive = !empty($s['livestream_is_live']);
 ?>
 
 <?php
-$heroType = $s['hero_type'] ?? 'gradient';
-$hasBgMedia = ($heroType === 'image' && !empty($s['hero_image_path']))
-    || ($heroType === 'video_upload' && !empty($s['hero_video_path']))
-    || ($heroType === 'youtube' && !empty($s['hero_youtube_url']));
+$heroType  = $s['hero_type'] ?? 'gradient';
+$heroImage = (string) ($s['hero_image_path'] ?? '');
+$heroVideo = (string) ($s['hero_video_path'] ?? '');
 $ytId = ($heroType === 'youtube' && !empty($s['hero_youtube_url'])) ? youtubeVideoId($s['hero_youtube_url']) : null;
+
+/*
+ * Decide what is actually about to be drawn rather than trusting hero_type alone.
+ *
+ * The image branch below doubles as the final fallback, so a hero shows a photo whenever
+ * hero_image_path is set - even when hero_type says "gradient". The demo site was in
+ * exactly that state, and because the old test only looked at hero_type it emitted no
+ * media class at all. The portrait rules in site.css are scoped to `.hero.has-image`, so
+ * with the class missing they never applied and the photo was cropped to fill a tall phone
+ * screen: a 1376x768 upload fitted into 375x709, which shows about a quarter of it.
+ *
+ * So: has-media means "some background media is present" (background colour, dimmed dots),
+ * and has-image means "specifically a photo", which is what gets the contain treatment.
+ * Video and YouTube deliberately stay out of has-image, because they should keep filling.
+ */
+$heroMode = 'none';
+if ($heroType === 'image' && $heroImage !== '') {
+    $heroMode = 'image';
+} elseif ($heroType === 'video_upload' && $heroVideo !== '') {
+    $heroMode = 'video';
+} elseif ($ytId) {
+    $heroMode = 'youtube';
+} elseif ($heroImage !== '') {
+    $heroMode = 'image';
+}
+$hasBgMedia = $heroMode !== 'none';
 ?>
 
-<section class="hero<?= $hasBgMedia ? ' has-media' : '' ?>">
-  <?php if ($heroType === 'image' && !empty($s['hero_image_path'])): ?>
-    <?= heroPhotoMarkup(uploadUrl($s['hero_image_path'])) ?>
+<section class="hero<?= $hasBgMedia ? ' has-media' : '' ?><?= $heroMode === 'image' ? ' has-image' : '' ?>">
+  <?php if ($heroMode === 'image'): ?>
+    <?= heroPhotoMarkup(uploadUrl($heroImage)) ?>
     <div class="hero-shade"></div>
-  <?php elseif ($heroType === 'video_upload' && !empty($s['hero_video_path'])): ?>
-    <video class="hero-video" src="<?= e(uploadUrl($s['hero_video_path'])) ?>" autoplay loop muted playsinline fetchpriority="high"></video>
+  <?php elseif ($heroMode === 'video'): ?>
+    <video class="hero-video" src="<?= e(uploadUrl($heroVideo)) ?>" autoplay loop muted playsinline fetchpriority="high"></video>
     <div class="hero-shade"></div>
-  <?php elseif ($heroType === 'youtube' && $ytId): ?>
+  <?php elseif ($heroMode === 'youtube'): ?>
     <div class="hero-youtube-container">
       <iframe class="hero-iframe" src="https://www.youtube-nocookie.com/embed/<?= e($ytId) ?>?autoplay=1&mute=1&loop=1&playlist=<?= e($ytId) ?>&controls=0&showinfo=0&rel=0&enablejsapi=1&playsinline=1" allow="autoplay; encrypted-media" frameborder="0"></iframe>
     </div>
-    <div class="hero-shade"></div>
-  <?php elseif ($s['hero_image_path']): ?>
-    <?= heroPhotoMarkup(uploadUrl($s['hero_image_path'])) ?>
     <div class="hero-shade"></div>
   <?php endif; ?>
   <div class="hero-content">

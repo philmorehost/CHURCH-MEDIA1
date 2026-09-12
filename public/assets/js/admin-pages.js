@@ -114,6 +114,9 @@
         var img = el('img');
         img.src = path.indexOf('http') === 0 ? path : '/uploads/' + path;
         img.alt = '';
+        // The picker's buttons and rows are draggable, and an image is natively draggable,
+        // so grabbing the preview would start an image drag and hijack reordering.
+        img.draggable = false;
         preview.appendChild(img);
         clearBtn.hidden = false;
       } else {
@@ -186,7 +189,7 @@
     });
 
     function createCardNode(colData) {
-      colData = colData || { heading: '', body: '', link: '' };
+      colData = colData || { heading: '', body: '', link: '', image: '', alt: '' };
       var card = el('div', 'cms-col-card', { draggable: 'true', style: 'border:1px solid var(--border); border-radius:10px; padding:12px; background:#0f0d1f; cursor:grab;' });
 
       var cardGrip = el('div', 'card-grip', { style: 'display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid #1f1b3a;' });
@@ -204,11 +207,20 @@
       b.className += ' col-body';
       var l = textInput(colData.link, 'Optional button link (e.g. /contact)');
       l.className += ' col-link';
+      var a = textInput(colData.alt, 'Describe the image for screen readers');
+      a.className += ' col-alt';
+      // Reuse the same uploader the hero and image blocks use, so cards get the identical
+      // compression, the same 8MB guard and the same cms/ folder (which the page delete
+      // already sweeps for orphaned files).
+      var img = imageField(colData.image);
+      img.classList.add('col-image');
 
       card.appendChild(cardGrip);
+      card.appendChild(fieldLabel('Card Image (Optional)', img, ''));
       card.appendChild(fieldLabel('Card Heading', h, ''));
       card.appendChild(fieldLabel('Card Text / Description', b, ''));
       card.appendChild(fieldLabel('Card Link (Optional)', l, ''));
+      card.appendChild(fieldLabel('Image Description (Optional, for screen readers)', a, ''));
 
       card.addEventListener('dragstart', function (e) {
         e.stopPropagation();
@@ -348,7 +360,14 @@
         var h = (col.querySelector('.col-heading') || {}).value || '';
         var b = (col.querySelector('.col-body') || {}).value || '';
         var l = (col.querySelector('.col-link') || {}).value || '';
-        if (h.trim() || b.trim() || l.trim()) { out.columns.push({ heading: h, body: b, link: l }); }
+        var a = (col.querySelector('.col-alt') || {}).value || '';
+        var imgNode = col.querySelector('.col-image .img-path');
+        var img = imgNode ? imgNode.value : '';
+        // A card carrying only a photo is still a card, so the image counts here too -
+        // otherwise a photo-only card would be thrown away on save.
+        if (h.trim() || b.trim() || l.trim() || img) {
+          out.columns.push({ heading: h, body: b, link: l, image: img, alt: a });
+        }
       });
     }
     return out;

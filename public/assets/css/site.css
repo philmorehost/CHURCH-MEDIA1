@@ -422,6 +422,18 @@ p{margin:0 0 1em;}
 }
 .glass-card:hover{transform:translateY(-4px); border-color:#e8b95f44;}
 
+/* CMS "Cards (columns)" block. A card may or may not carry a photo, so the body keeps its
+   own padding and the photo bleeds to the card edges via overflow:hidden on .glass-card. */
+.cms-card{display:flex; flex-direction:column; justify-content:space-between;}
+.cms-card-media{aspect-ratio:16/9; overflow:hidden; background:var(--bg-2);}
+.cms-card-media img{display:block; width:100%; height:100%; object-fit:cover;}
+/* padding-bottom is dropped when a footer follows, because the footer supplies it. */
+.cms-card-body{padding:26px 26px 0;}
+.cms-card-body:last-child{padding-bottom:26px;}
+.cms-card-title{margin:0 0 10px; font-size:18px; font-weight:700;}
+.cms-card-text{color:var(--ink-dim); margin:0; line-height:1.6;}
+.cms-card-foot{padding:0 26px 26px; margin-top:14px;}
+
 /* Media card (feed preview) */
 .media-card{position:relative; aspect-ratio:9/13; border-radius:18px; overflow:hidden; background:var(--bg-2); display:block;}
 .media-card img,.media-card video{width:100%; height:100%; object-fit:cover;}

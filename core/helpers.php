@@ -782,16 +782,21 @@ function renderPageSections(array $sections): void
                 $n = min(4, max(1, $layoutCols));
                 echo '<div class="grid grid-' . $n . '">';
                 foreach ($cols as $col) {
-                    echo '<div class="glass-card" style="padding:26px; display:flex; flex-direction:column; justify-content:space-between;"><div>';
+                    $colImage = !empty($col['image']) ? uploadUrl((string) $col['image']) : '';
+                    echo '<div class="glass-card cms-card">';
+                    if ($colImage !== '') {
+                        echo '<div class="cms-card-media"><img src="' . e($colImage) . '" alt="' . e((string) ($col['alt'] ?? '')) . '" loading="lazy" decoding="async"></div>';
+                    }
+                    echo '<div class="cms-card-body">';
                     if (!empty($col['heading'])) {
-                        echo '<h3 style="margin:0 0 10px; font-size:18px; font-weight:700;">' . e((string) $col['heading']) . '</h3>';
+                        echo '<h3 class="cms-card-title">' . e((string) $col['heading']) . '</h3>';
                     }
                     if (!empty($col['body'])) {
-                        echo '<p style="color:var(--ink-dim); margin:0 0 14px; line-height:1.6;">' . nl2br(e((string) $col['body'])) . '</p>';
+                        echo '<p class="cms-card-text">' . nl2br(e((string) $col['body'])) . '</p>';
                     }
                     echo '</div>';
                     if (!empty($col['link'])) {
-                        echo '<div><a href="' . e((string) $col['link']) . '" class="btn sm secondary" style="margin-top:12px;">Learn More →</a></div>';
+                        echo '<div class="cms-card-foot"><a href="' . e((string) $col['link']) . '" class="btn sm secondary">Learn More →</a></div>';
                     }
                     echo '</div>';
                 }
