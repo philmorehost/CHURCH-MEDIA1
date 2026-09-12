@@ -6,38 +6,107 @@ $pageTitle ??= 'Dashboard';
 $activeNav ??= '';
 $adminUser = Auth::user();
 
-$navItems = [
-    ['key' => 'dashboard', 'href' => '/admin', 'label' => 'Dashboard'],
-    ['key' => 'analytics', 'href' => '/admin/analytics', 'label' => 'Analytics', 'super' => true],
-    ['key' => 'media', 'href' => '/admin/media', 'label' => 'Media & Reels'],
-    ['key' => 'comments', 'href' => '/admin/comments', 'label' => 'Comments'],
-    ['key' => 'ads', 'href' => '/admin/ads', 'label' => 'Ads Management'],
-    ['key' => 'events', 'href' => '/admin/events', 'label' => 'Events'],
-    ['key' => 'sermons', 'href' => '/admin/sermons', 'label' => 'Sermons'],
-    ['key' => 'series', 'href' => '/admin/series', 'label' => 'Series & Podcast'],
-    ['key' => 'whatsapp', 'href' => '/admin/whatsapp', 'label' => 'WhatsApp'],
-    ['key' => 'team', 'href' => '/admin/team', 'label' => 'Team'],
-    ['key' => 'prayer', 'href' => '/admin/prayer', 'label' => 'Prayer Wall'],
-    ['key' => 'newsletter', 'href' => '/admin/newsletter', 'label' => 'Newsletter'],
-    ['key' => 'sms', 'href' => '/admin/sms', 'label' => 'SMS Messaging', 'roles' => ['admin', 'editor', 'media_team']],
-    ['key' => 'forms', 'href' => '/admin/forms', 'label' => 'Forms'],
-    ['key' => 'notifications', 'href' => '/admin/notifications', 'label' => 'Notifications'],
-    ['key' => 'attendance', 'href' => '/admin/attendance', 'label' => 'Attendance'],
-    ['key' => 'donations', 'href' => '/admin/donations', 'label' => 'Donations & Giving'],
-    ['key' => 'testimonies', 'href' => '/admin/testimonies', 'label' => 'Testimonies'],
-    ['key' => 'newcomers', 'href' => '/admin/newcomers', 'label' => 'Newcomers'],
-    ['key' => 'pages', 'href' => '/admin/pages', 'label' => 'Pages', 'super' => true],
-    ['key' => 'guide', 'href' => '/admin/guide', 'label' => 'Guide'],
-];
-$navItemsSystem = [
-    ['key' => 'registrations', 'href' => '/admin/registrations', 'label' => 'Registrations', 'super' => true],
-    ['key' => 'units', 'href' => '/admin/units', 'label' => 'Units', 'roles' => ['admin']],
-    ['key' => 'unit-levels', 'href' => '/admin/unit-levels', 'label' => 'Unit Levels', 'super' => true],
-    ['key' => 'security', 'href' => '/admin/security', 'label' => 'Security'],
-    ['key' => 'backup', 'href' => '/admin/backup', 'label' => 'Backups', 'super' => true],
-    ['key' => 'settings', 'href' => '/admin/settings', 'label' => 'Settings', 'super' => true],
-    ['key' => 'firebase', 'href' => '/admin/firebase', 'label' => 'Firebase', 'super' => true],
-    ['key' => 'users', 'href' => '/admin/users', 'label' => 'Users', 'roles' => ['admin']],
+/** Whether the signed-in user may see a nav entry. Shared by every group below. */
+$canSeeNav = static function (array $item) use ($adminUser): bool {
+    if (!empty($item['roles']) && (!$adminUser || !in_array($adminUser['role'], $item['roles'], true))) {
+        return false;
+    }
+    if (!empty($item['super']) && (!$adminUser || empty($adminUser['is_super_admin']))) {
+        return false;
+    }
+    return true;
+};
+
+/*
+ * Sidebar navigation, grouped into collapsible sections.
+ *
+ * The flat list ran to 29 links, so reaching Settings meant scrolling past everything else and
+ * the rail always carried a scrollbar. Groups cut it to one open section at a time (admin.js
+ * closes the others) and make the area you are in obvious. Dashboard stays outside the groups:
+ * it is the landing page, so it should never need a click to reveal.
+ *
+ * These are display groups, not permissions. The `roles` and `super` keys on an item are still
+ * the single source of truth for who may see it, and an empty group is dropped entirely.
+ */
+$navHome = ['key' => 'dashboard', 'href' => '/admin', 'label' => 'Dashboard'];
+
+$navGroups = [
+    [
+        'key' => 'content',
+        'label' => 'Content',
+        'items' => [
+            ['key' => 'media', 'href' => '/admin/media', 'label' => 'Media & Reels'],
+            ['key' => 'comments', 'href' => '/admin/comments', 'label' => 'Comments'],
+            ['key' => 'ads', 'href' => '/admin/ads', 'label' => 'Ads Management'],
+            ['key' => 'pages', 'href' => '/admin/pages', 'label' => 'Pages', 'super' => true],
+        ],
+    ],
+    [
+        'key' => 'word',
+        'label' => 'The Word',
+        'items' => [
+            ['key' => 'sermons', 'href' => '/admin/sermons', 'label' => 'Sermons'],
+            ['key' => 'series', 'href' => '/admin/series', 'label' => 'Series & Podcast'],
+        ],
+    ],
+    [
+        'key' => 'community',
+        'label' => 'Events & Community',
+        'items' => [
+            ['key' => 'events', 'href' => '/admin/events', 'label' => 'Events'],
+            ['key' => 'prayer', 'href' => '/admin/prayer', 'label' => 'Prayer Wall'],
+            ['key' => 'testimonies', 'href' => '/admin/testimonies', 'label' => 'Testimonies'],
+            ['key' => 'newcomers', 'href' => '/admin/newcomers', 'label' => 'Newcomers'],
+            ['key' => 'team', 'href' => '/admin/team', 'label' => 'Team'],
+        ],
+    ],
+    [
+        'key' => 'people',
+        'label' => 'Churches & People',
+        'items' => [
+            ['key' => 'units', 'href' => '/admin/units', 'label' => 'Units', 'roles' => ['admin']],
+            ['key' => 'unit-levels', 'href' => '/admin/unit-levels', 'label' => 'Unit Levels', 'super' => true],
+            ['key' => 'registrations', 'href' => '/admin/registrations', 'label' => 'Registrations', 'super' => true],
+            ['key' => 'users', 'href' => '/admin/users', 'label' => 'Users', 'roles' => ['admin']],
+        ],
+    ],
+    [
+        'key' => 'engagement',
+        'label' => 'Engagement',
+        'items' => [
+            ['key' => 'forms', 'href' => '/admin/forms', 'label' => 'Forms'],
+            ['key' => 'newsletter', 'href' => '/admin/newsletter', 'label' => 'Newsletter'],
+            ['key' => 'notifications', 'href' => '/admin/notifications', 'label' => 'Notifications'],
+            ['key' => 'donations', 'href' => '/admin/donations', 'label' => 'Donations & Giving'],
+        ],
+    ],
+    [
+        'key' => 'messaging',
+        'label' => 'Messaging',
+        'items' => [
+            ['key' => 'whatsapp', 'href' => '/admin/whatsapp', 'label' => 'WhatsApp'],
+            ['key' => 'sms', 'href' => '/admin/sms', 'label' => 'SMS Messaging', 'roles' => ['admin', 'editor', 'media_team']],
+        ],
+    ],
+    [
+        'key' => 'reports',
+        'label' => 'Reports',
+        'items' => [
+            ['key' => 'analytics', 'href' => '/admin/analytics', 'label' => 'Analytics', 'super' => true],
+            ['key' => 'attendance', 'href' => '/admin/attendance', 'label' => 'Attendance'],
+        ],
+    ],
+    [
+        'key' => 'system',
+        'label' => 'System',
+        'items' => [
+            ['key' => 'security', 'href' => '/admin/security', 'label' => 'Security'],
+            ['key' => 'backup', 'href' => '/admin/backup', 'label' => 'Backups', 'super' => true],
+            ['key' => 'settings', 'href' => '/admin/settings', 'label' => 'Settings', 'super' => true],
+            ['key' => 'firebase', 'href' => '/admin/firebase', 'label' => 'Firebase', 'super' => true],
+            ['key' => 'guide', 'href' => '/admin/guide', 'label' => 'Guide'],
+        ],
+    ],
 ];
 ?><!doctype html>
 <html lang="en">
@@ -56,21 +125,41 @@ $navItemsSystem = [
       <div class="mark">C</div>
       <span><?= e(setting('site_title')) ?><br><small style="color:var(--ink-faint);font-weight:400;">Admin</small></span>
     </div>
-    <nav>
-      <?php foreach ($navItems as $item): ?>
+    <nav aria-label="Admin sections">
+      <?php $isHome = $activeNav === $navHome['key']; ?>
+      <a href="<?= e($navHome['href']) ?>" class="<?= $isHome ? 'active' : '' ?>"<?= $isHome ? ' aria-current="page"' : '' ?>><?= e($navHome['label']) ?></a>
+
+      <?php foreach ($navGroups as $group): ?>
         <?php
-          if (!empty($item['roles']) && (!$adminUser || !in_array($adminUser['role'], $item['roles'], true))) continue;
-          if (!empty($item['super']) && (!$adminUser || empty($adminUser['is_super_admin']))) continue;
+          // Drop a group the user cannot see any part of, rather than showing an empty shell.
+          $items = array_values(array_filter($group['items'], $canSeeNav));
+          if (!$items) {
+              continue;
+          }
+          // Open the group holding the current page, so arriving somewhere never needs a click.
+          $isOpen = false;
+          foreach ($items as $item) {
+              if ($activeNav === $item['key']) {
+                  $isOpen = true;
+                  break;
+              }
+          }
+          $panelId = 'navgroup-' . $group['key'];
         ?>
-        <a href="<?= e($item['href']) ?>" class="<?= $activeNav === $item['key'] ? 'active' : '' ?>"><?= e($item['label']) ?></a>
-      <?php endforeach; ?>
-      <div class="group">System</div>
-      <?php foreach ($navItemsSystem as $item): ?>
-        <?php
-          if (!empty($item['roles']) && (!$adminUser || !in_array($adminUser['role'], $item['roles'], true))) continue;
-          if (!empty($item['super']) && (!$adminUser || empty($adminUser['is_super_admin']))) continue;
-        ?>
-        <a href="<?= e($item['href']) ?>" class="<?= $activeNav === $item['key'] ? 'active' : '' ?>"><?= e($item['label']) ?></a>
+        <div class="nav-group<?= $isOpen ? ' is-open' : '' ?>" data-nav-group>
+          <button type="button" class="nav-group-toggle" data-nav-toggle
+                  aria-expanded="<?= $isOpen ? 'true' : 'false' ?>" aria-controls="<?= e($panelId) ?>">
+            <span><?= e($group['label']) ?></span>
+            <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
+          </button>
+          <div class="nav-group-panel" id="<?= e($panelId) ?>">
+            <?php foreach ($items as $item): ?>
+              <?php $isActive = $activeNav === $item['key']; ?>
+              <a href="<?= e($item['href']) ?>" class="<?= $isActive ? 'active' : '' ?>"<?= $isActive ? ' aria-current="page"' : '' ?>><?= e($item['label']) ?></a>
+            <?php endforeach; ?>
+          </div>
+        </div>
       <?php endforeach; ?>
     </nav>
     <div class="foot">
