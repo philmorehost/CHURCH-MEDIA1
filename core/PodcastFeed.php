@@ -191,7 +191,12 @@ final class PodcastFeed
                 : $square;
 
             if (!is_dir($directory) && !@mkdir($directory, 0775, true) && !is_dir($directory)) {
-                return uploadUrl($storedPath);
+                // No artwork rather than the WebP URL. Apple and Spotify refuse WebP, so handing
+                // them one trades "this episode has no cover" for "this feed is invalid" — and a
+                // feed that will not load is worse than one missing a picture. This is also what
+                // happens on a host where uploads/ is not writable, which is common enough on
+                // shared hosting that the degradation needs to be the safe one.
+                return null;
             }
 
             $ok = imagejpeg($out, $target, 88);
