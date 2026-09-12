@@ -1055,6 +1055,17 @@ class Database
                     FOREIGN KEY (`request_id`) REFERENCES `prayer_requests`(`id`) ON DELETE CASCADE
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
             },
+
+            // Level-aware notification targeting. `target_unit_id` records the unit
+            // the sender actually picked — any level, not just a church — and
+            // `target_level` snapshots its type, because level names are configurable
+            // and may be renamed later. NULL means "every unit in the sender's scope",
+            // which is how every notification sent before this landed is treated.
+            '2026_15_notification_targeting' => function (PDO $pdo): void {
+                self::addColumnIfMissing($pdo, 'notifications', 'target_unit_id', 'INT NULL', 'body');
+                self::addColumnIfMissing($pdo, 'notifications', 'target_level', 'VARCHAR(40) NULL', 'target_unit_id');
+                self::addIndexIfMissing($pdo, 'notifications', 'idx_notifications_target', 'INDEX `idx_notifications_target` (`target_unit_id`)');
+            },
         ];
     }
 

@@ -635,7 +635,10 @@ CREATE TABLE IF NOT EXISTS `notifications` (
   `sender_id` INT NULL,
   `title` VARCHAR(255) NOT NULL,
   `body` TEXT NOT NULL,
+  `target_unit_id` INT NULL COMMENT 'The unit picked when sending - any level. NULL = every unit in the sender scope',
+  `target_level` VARCHAR(40) NULL COMMENT 'Type of the target unit at send time, since level names are configurable',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_notifications_target` (`target_unit_id`),
   FOREIGN KEY (`sender_id`) REFERENCES `users`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

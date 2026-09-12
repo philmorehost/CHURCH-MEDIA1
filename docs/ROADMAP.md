@@ -243,6 +243,23 @@ Do this **before** any Phase 1/2 work so nothing has to be retrofitted later.
   not in admin, answered wall only shows approved entries.
 
 ### 1.6 Level-aware push targeting
+> **Status: shipped.** `notifications` gained `target_unit_id` and `target_level`, and
+> the picker now offers **every** level in the sender's scope — not just churches — so
+> "everyone under Zone A" is a first-class choice. Each pick expands to its whole
+> subtree, which is what makes a mid-level target mean what it says.
+> `target_level` snapshots the unit's type at send time, because level names are
+> configurable and may be renamed later; a notification still describes itself after a
+> rename. `target_unit_id = NULL` means "everything in the sender's scope", which is how
+> every notification sent before this landed is treated, so history reads correctly.
+> A scoped admin **cannot** reach outside their subtree, even by posting a hand-crafted
+> `unit_ids[]`: anything outside the scope is dropped, and picking the province above them
+> resolves to just the part they govern. Verified with a Zone A admin picking the province,
+> Zone B and a foreign church.
+> Push goes to the churches plus the picked unit rather than to every intermediate level,
+> since a device subscribes to the topic of the church it is browsing. Email now uses
+> bound parameters instead of interpolated ids. The Sent table shows the target and how
+> many units it reached. 50 assertions fresh, 55 on a pre-1.6 upgrade, plus a real
+> logged-in send over HTTP.
 - **DB**: `notifications` gains `target_level` VARCHAR(40) NULL, `target_unit_id` INT NULL.
 - **Modify**: `admin/notifications.php` (pick **any** level from `Unit::levels()` — "everyone
   under Zone X"), `core/Pusher.php` (resolve audience via `Unit::subtreeIds()`).
