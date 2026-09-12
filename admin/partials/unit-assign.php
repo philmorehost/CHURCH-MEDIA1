@@ -29,7 +29,7 @@ $isUnassigned = empty($reassignUnitId);
       <select name="org_unit_id" required>
         <option value=""><?= $isUnassigned ? 'Assign to…' : 'Move to…' ?></option>
         <?php foreach ($assignableUnits as $u): ?>
-          <option value="<?= (int) $u['id'] ?>" <?= $reassignUnitId === (int) $u['id'] ? 'selected' : '' ?>><?= e($u['name'] . ' (' . $u['type'] . ')') ?></option>
+          <option value="<?= (int) $u['id'] ?>" <?= $reassignUnitId === (int) $u['id'] ? 'selected' : '' ?>><?= e(Unit::optionLabel($u)) ?></option>
         <?php endforeach; ?>
       </select>
       <button class="btn secondary sm" type="submit"><?= $isUnassigned ? 'Assign' : 'Move' ?></button>

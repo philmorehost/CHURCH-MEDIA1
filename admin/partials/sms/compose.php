@@ -604,8 +604,8 @@ $placeholders = Sms::placeholders();
             <input type="text" name="rule_tag" value="<?= e($formValues['rule_tag']) ?>" placeholder="…or a tag" style="margin-top:8px;">
             <select name="rule_unit_id" style="margin-top:8px;">
               <option value="">…or a unit</option>
-              <?php foreach ($assignableUnits as $unitId => $label): ?>
-                <option value="<?= (int) $unitId ?>" <?= $formValues['rule_unit_id'] === (string) $unitId ? 'selected' : '' ?>><?= e((string) $label) ?></option>
+              <?php foreach ($assignableUnits as $unit): ?>
+                <option value="<?= (int) $unit['id'] ?>" <?= $formValues['rule_unit_id'] === (string) $unit['id'] ? 'selected' : '' ?>><?= e(Unit::optionLabel($unit)) ?></option>
               <?php endforeach; ?>
             </select>
             <div class="checkbox-row">
@@ -621,8 +621,8 @@ $placeholders = Sms::placeholders();
         <label for="unit_id">Unit</label>
         <select id="unit_id" name="unit_id">
           <option value="">— choose a unit —</option>
-          <?php foreach ($assignableUnits as $unitId => $label): ?>
-            <option value="<?= (int) $unitId ?>" <?= $formValues['unit_id'] === (string) $unitId ? 'selected' : '' ?>><?= e((string) $label) ?></option>
+          <?php foreach ($assignableUnits as $unit): ?>
+            <option value="<?= (int) $unit['id'] ?>" <?= $formValues['unit_id'] === (string) $unit['id'] ? 'selected' : '' ?>><?= e(Unit::optionLabel($unit)) ?></option>
           <?php endforeach; ?>
         </select>
         <div class="checkbox-row">

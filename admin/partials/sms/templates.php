@@ -142,8 +142,8 @@ $assignableUnits = Unit::assignableScope($smsContext['user']);
         <?php if ($isSuper): ?>
           <select id="org_unit_id" name="org_unit_id">
             <option value="">— shared with every church —</option>
-            <?php foreach ($assignableUnits as $unitId => $label): ?>
-              <option value="<?= (int) $unitId ?>" <?= (int) ($editing['org_unit_id'] ?? 0) === (int) $unitId ? 'selected' : '' ?>><?= e((string) $label) ?></option>
+            <?php foreach ($assignableUnits as $unit): ?>
+              <option value="<?= (int) $unit['id'] ?>" <?= (int) ($editing['org_unit_id'] ?? 0) === (int) $unit['id'] ? 'selected' : '' ?>><?= e(Unit::optionLabel($unit)) ?></option>
             <?php endforeach; ?>
           </select>
         <?php else: ?>

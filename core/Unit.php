@@ -481,6 +481,28 @@ class Unit
         return false;
     }
 
+    /**
+     * The label for one unit in a `<select>`: "Name (type)".
+     *
+     * `assignableScope()` returns whole unit rows, not an `id => label` map. Reading it as a
+     * map is an easy mistake to make and a silent one: `foreach ($units as $id => $label)`
+     * yields the array *index* as the id and the row array as the label, so every option ends
+     * up posting 0, 1, 2 and reading "Array" — and nothing errors, so the picker simply
+     * assigns the wrong church. Writing the label in one place gives that mistake nowhere to
+     * hide, and gives every picker the same wording as the rest of the admin.
+     */
+    public static function optionLabel(array $unit): string
+    {
+        $name = trim((string) ($unit['name'] ?? ''));
+        $type = trim((string) ($unit['type'] ?? ''));
+
+        if ($name === '') {
+            return $type !== '' ? ucfirst($type) : 'Unit';
+        }
+
+        return $type !== '' ? $name . ' (' . $type . ')' : $name;
+    }
+
     /** $id plus every descendant id — used for "all media in a unit" roll-ups. */
     public static function subtreeIds(int $id): array
     {

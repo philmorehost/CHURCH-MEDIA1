@@ -264,8 +264,8 @@ $defaultSender = (string) setting('sms_default_sender_id', '');
         <?php if ($isSuper): ?>
           <select id="org_unit_id" name="org_unit_id">
             <option value="">— none / head office —</option>
-            <?php foreach ($assignableUnits as $unitId => $label): ?>
-              <option value="<?= (int) $unitId ?>" <?= formOld('org_unit_id') === (string) $unitId ? 'selected' : '' ?>><?= e((string) $label) ?></option>
+            <?php foreach ($assignableUnits as $unit): ?>
+              <option value="<?= (int) $unit['id'] ?>" <?= formOld('org_unit_id') === (string) $unit['id'] ? 'selected' : '' ?>><?= e(Unit::optionLabel($unit)) ?></option>
             <?php endforeach; ?>
           </select>
         <?php else: ?>

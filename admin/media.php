@@ -751,7 +751,7 @@ require __DIR__ . '/partials/layout-open.php';
         <select name="org_unit_id" id="org_unit_id">
           <option value="0">— No church / unassigned —</option>
           <?php foreach ($assignableUnits as $au): ?>
-            <option value="<?= (int) $au['id'] ?>" <?= (int) ($user['org_unit_id'] ?? 0) === (int) $au['id'] ? 'selected' : '' ?>><?= e($au['name'] . ' (' . $au['type'] . ')') ?></option>
+            <option value="<?= (int) $au['id'] ?>" <?= (int) ($user['org_unit_id'] ?? 0) === (int) $au['id'] ? 'selected' : '' ?>><?= e(Unit::optionLabel($au)) ?></option>
           <?php endforeach; ?>
         </select>
         <p class="hint">Choose the church this post belongs to. It will appear on that church's unit page (and roll up to its parent units).</p>

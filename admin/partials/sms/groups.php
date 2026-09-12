@@ -223,8 +223,8 @@ if ($openGroup !== null && (string) $openGroup['kind'] === 'dynamic') {
       <label for="org_unit_id">Church</label>
       <select id="org_unit_id" name="org_unit_id">
         <option value="">— shared with every church —</option>
-        <?php foreach ($assignableUnits as $unitId => $label): ?>
-          <option value="<?= (int) $unitId ?>" <?= (int) ($openGroup['org_unit_id'] ?? 0) === (int) $unitId ? 'selected' : '' ?>><?= e((string) $label) ?></option>
+        <?php foreach ($assignableUnits as $unit): ?>
+          <option value="<?= (int) $unit['id'] ?>" <?= (int) ($openGroup['org_unit_id'] ?? 0) === (int) $unit['id'] ? 'selected' : '' ?>><?= e(Unit::optionLabel($unit)) ?></option>
         <?php endforeach; ?>
       </select>
     <?php endif; ?>
@@ -266,8 +266,8 @@ if ($openGroup !== null && (string) $openGroup['kind'] === 'dynamic') {
           <label for="rule_unit_id">Unit</label>
           <select id="rule_unit_id" name="rule_unit_id">
             <option value="">— not used —</option>
-            <?php foreach ($assignableUnits as $unitId => $label): ?>
-              <option value="<?= (int) $unitId ?>" <?= (int) ($rule['unit_id'] ?? 0) === (int) $unitId ? 'selected' : '' ?>><?= e((string) $label) ?></option>
+            <?php foreach ($assignableUnits as $unit): ?>
+              <option value="<?= (int) $unit['id'] ?>" <?= (int) ($rule['unit_id'] ?? 0) === (int) $unit['id'] ? 'selected' : '' ?>><?= e(Unit::optionLabel($unit)) ?></option>
             <?php endforeach; ?>
           </select>
           <div class="checkbox-row">
@@ -385,8 +385,8 @@ if ($openGroup !== null && (string) $openGroup['kind'] === 'dynamic') {
           <div>
             <select name="filter_unit_id">
               <option value="">Any unit</option>
-              <?php foreach ($assignableUnits as $unitId => $label): ?>
-                <option value="<?= (int) $unitId ?>"><?= e((string) $label) ?></option>
+              <?php foreach ($assignableUnits as $unit): ?>
+                <option value="<?= (int) $unit['id'] ?>"><?= e(Unit::optionLabel($unit)) ?></option>
               <?php endforeach; ?>
             </select>
           </div>

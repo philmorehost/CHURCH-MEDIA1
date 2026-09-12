@@ -559,8 +559,8 @@ $staticGroups = array_values(array_filter($groups, static fn(array $g): bool => 
         <label for="unit">Church unit</label>
         <select id="unit" name="unit">
           <option value="">Any unit</option>
-          <?php foreach ($assignableUnits as $unitId => $label): ?>
-            <option value="<?= (int) $unitId ?>" <?= (int) $criteria['unit_id'] === (int) $unitId ? 'selected' : '' ?>><?= e((string) $label) ?></option>
+          <?php foreach ($assignableUnits as $unit): ?>
+            <option value="<?= (int) $unit['id'] ?>" <?= (int) $criteria['unit_id'] === (int) $unit['id'] ? 'selected' : '' ?>><?= e(Unit::optionLabel($unit)) ?></option>
           <?php endforeach; ?>
         </select>
         <div class="checkbox-row">
@@ -644,8 +644,8 @@ $staticGroups = array_values(array_filter($groups, static fn(array $g): bool => 
           <label for="add_unit">Church</label>
           <select id="add_unit" name="org_unit_id">
             <option value="">— none / head office —</option>
-            <?php foreach ($assignableUnits as $unitId => $label): ?>
-              <option value="<?= (int) $unitId ?>"><?= e((string) $label) ?></option>
+            <?php foreach ($assignableUnits as $unit): ?>
+              <option value="<?= (int) $unit['id'] ?>"><?= e(Unit::optionLabel($unit)) ?></option>
             <?php endforeach; ?>
           </select>
         <?php endif; ?>
