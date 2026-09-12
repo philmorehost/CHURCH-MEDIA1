@@ -690,6 +690,45 @@ newcomer and newsletter forms (opt-in checkbox wording added to the privacy poli
 - **Verify**: feed validates against the W3C RSS validator and Apple's podcast requirements;
   audio enclosure URL plays in a browser; series ordering is stable.
 
+> **Status: shipped (3.1–3.4).** `sermon_series` plus the podcast columns on `sermons`
+> (`series_id`, `series_position`, `audio_url`, `duration_seconds`, `episode_guid`,
+> `is_explicit`) and `core/Series.php`, which is the single writer of the legacy `sermons.series`
+> text column so the two can never disagree. Migration `2026_20_sermon_series` backfills existing
+> free-text series into rows — one per (title, church), since two churches may legitimately use
+> the same series name — and gives every sermon a stable `episode_guid`.
+>
+> `core/PodcastFeed.php` builds the RSS 2.0 + iTunes feed. `admin/series.php` manages series
+> (delete keeps the sermons and says how many it will detach); `admin/sermons.php` files a sermon
+> under a series with an episode number that auto-numbers when left blank, a duration that accepts
+> `42 min` or `42:30`, an external audio link, and an explicit flag. Public `/series`,
+> `/series/{slug}`, `/sermons?series=<slug>`, `/podcast` and `/podcast.xml`.
+>
+> **Verified:** 64 end-to-end assertions driving the real admin forms with a real session and
+> CSRF, and 58 more on the feed — XML well-formedness through a real parser, enclosure byte
+> lengths checked against the actual file size, RFC 822 dates, `&` and angle brackets surviving
+> the round trip, the 304 revalidation path, empty and data-free rendering, and 404s. The feed was
+> checked against Apple's documented requirements (JPEG artwork at 1400px+, `atom:link` self
+> reference, `itunes:category`, honest `explicit`, per-item duration and episode number); it has
+> **not** yet been submitted to Apple or Spotify, which is the real test. `audio/mpeg` enclosures
+> for uploaded files are exercised; playback in a browser is not, because the harness audio is
+> placeholder bytes rather than a real mp3.
+>
+> One real bug was caught by the suite rather than by review: renaming a series regenerated its
+> slug, which would have broken every published link — search results, shared links and the feed.
+> The slug is now created once and kept.
+>
+> **Still open in this phase:** `api/series.php` and `api/sermons.php` (3.5), and the Flutter
+> `sermons_screen.dart` / `sermon_detail_screen.dart` work — series list, episode numbers and
+> download (3.6). `views/sermon-detail.php` has **not** been updated for the new fields: it does
+> not yet show the episode number, the duration, or a download link for the external audio.
+>
+> Until 3.5 lands the API is behind the website in two specific ways, both in `api/sermons.php`:
+> it selects the legacy `series` text column and never `series_id` / `series_position` /
+> `duration_seconds`, so the app cannot see series structure; and it sets
+> `$sermon['audio_url'] = uploadUrl($sermon['audio_path'])`, which **overwrites** the external
+> audio column — so an episode published with only an external link reaches the app with no audio
+> at all. Neither affects the website or the podcast feed.
+
 ## 6. Phase 4 — WhatsApp channel
 
 ### Options
