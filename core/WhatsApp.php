@@ -584,6 +584,155 @@ final class WhatsApp
         return Sms::normaliseMsisdn($digits, $country);
     }
 
+    /* --------------------------------------------------------------- replies */
+
+    /**
+     * Replies to a conversation with free text, recording it either way.
+     *
+     * The window is checked here rather than by the caller so that no screen can forget to. A
+     * screen that offered a text box outside the window would produce a message Meta refuses and
+     * an admin who cannot tell whether it went.
+     *
+     * @param  array<string, mixed> $conversation  A wa_conversations row
+     * @return array{ok:bool,error:?string,message_id:?string,code:?string,http:?int,raw:array<string,mixed>}
+     */
+    public static function replyToConversation(array $conversation, string $body, ?int $userId = null, ?int $now = null): array
+    {
+        $msisdn = (string) ($conversation['msisdn'] ?? '');
+        if ($msisdn === '') {
+            return self::failure('That conversation has no number attached.');
+        }
+
+        $windowOpen = self::isWindowOpen(
+            isset($conversation['window_expires_at']) ? (string) $conversation['window_expires_at'] : null,
+            $now
+        );
+
+        return self::dispatch(
+            (int) ($conversation['id'] ?? 0),
+            fn (): array => self::sendText($msisdn, $body, $windowOpen),
+            'text',
+            trim($body),
+            null,
+            $userId
+        );
+    }
+
+    /**
+     * Sends an approved template into a conversation, recording it either way.
+     *
+     * This is the only thing that works once the window has closed, and the only thing that can
+     * start a conversation with somebody who has not messaged first.
+     *
+     * @param  array<int, string>   $params
+     * @param  array<string, mixed> $conversation
+     * @return array{ok:bool,error:?string,message_id:?string,code:?string,http:?int,raw:array<string,mixed>}
+     */
+    public static function sendTemplateToConversation(array $conversation, string $templateName, array $params = [], ?int $userId = null): array
+    {
+        $msisdn = (string) ($conversation['msisdn'] ?? '');
+        if ($msisdn === '') {
+            return self::failure('That conversation has no number attached.');
+        }
+
+        return self::dispatch(
+            (int) ($conversation['id'] ?? 0),
+            fn (): array => self::sendTemplate($msisdn, $templateName, $params),
+            'template',
+            self::renderTemplatePreview($templateName, $params),
+            $templateName,
+            $userId
+        );
+    }
+
+    /**
+     * Runs a send and files the result, whatever it was.
+     *
+     * A refused send is recorded too, marked failed. Not recording it would leave an admin
+     * looking at a conversation with no sign they had tried, and the reason would exist only in
+     * a log they cannot see.
+     *
+     * @param  callable():array{ok:bool,message_id:?string,error:?string,code:?string,http:?int,raw:array<string,mixed>} $send
+     * @return array{ok:bool,error:?string,message_id:?string,code:?string,http:?int,raw:array<string,mixed>}
+     */
+    private static function dispatch(
+        int $conversationId,
+        callable $send,
+        string $type,
+        ?string $body,
+        ?string $templateName,
+        ?int $userId
+    ): array {
+        $result = $send();
+
+        if ($conversationId <= 0) {
+            return $result;
+        }
+
+        try {
+            $pdo = Database::getInstance()->getConnection();
+
+            $pdo->prepare(
+                'INSERT INTO wa_messages
+                    (tenant_id, conversation_id, direction, type, template_name, body, wa_message_id, status, error_code, error_note, sent_by)
+                 VALUES (?, ?, "out", ?, ?, ?, ?, ?, ?, ?, ?)'
+            )->execute([
+                self::tenantId(),
+                $conversationId,
+                mb_substr($type, 0, 24),
+                $templateName,
+                $body,
+                $result['message_id'] ?? null,
+                !empty($result['ok']) ? 'sent' : 'failed',
+                $result['code'] ?? null,
+                isset($result['error']) && $result['error'] !== null ? mb_substr((string) $result['error'], 0, 255) : null,
+                $userId,
+            ]);
+
+            if (!empty($result['ok'])) {
+                $pdo->prepare('UPDATE wa_conversations SET last_outbound_at = NOW() WHERE id = ?')
+                    ->execute([$conversationId]);
+            }
+        } catch (Throwable $e) {
+            // The send already happened. Losing the local record is bad, but throwing here would
+            // be worse: the admin would be told it failed when the person may already have it.
+            error_log('WhatsApp outbound record failed: ' . $e->getMessage());
+        }
+
+        return $result;
+    }
+
+    /**
+     * A best-effort rendering of what a template will look like, for the conversation view.
+     *
+     * This is our *local* copy of the body, which may have drifted from what Meta has approved.
+     * It is for reading, never for deciding whether a template may be sent.
+     *
+     * @param array<int, string> $params
+     */
+    public static function renderTemplatePreview(string $templateName, array $params): ?string
+    {
+        try {
+            $stmt = Database::getInstance()->getConnection()
+                ->prepare('SELECT body_text FROM wa_templates WHERE tenant_id <=> ? AND name = ? ORDER BY id LIMIT 1');
+            $stmt->execute([self::tenantId(), $templateName]);
+            $body = (string) $stmt->fetchColumn();
+        } catch (Throwable $e) {
+            return null;
+        }
+
+        if ($body === '') {
+            return null;
+        }
+
+        // {{1}}, {{2}} … are Meta's positional placeholders.
+        foreach (array_values($params) as $index => $value) {
+            $body = str_replace('{{' . ($index + 1) . '}}', (string) $value, $body);
+        }
+
+        return $body;
+    }
+
     private static function tenantId(): ?int
     {
         return class_exists('Tenant') ? Tenant::id() : null;
