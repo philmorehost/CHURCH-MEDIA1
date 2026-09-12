@@ -258,7 +258,7 @@ p{margin:0 0 1em;}
 
 /* Hero */
 .hero{
-  position:relative; min-height:92vh; display:flex; align-items:center; overflow:hidden;
+  position:relative; min-height:92vh; min-height:92svh; display:flex; align-items:center; overflow:hidden;
   background:
     radial-gradient(ellipse 70% 60% at 15% 0%, #4a2f8a55, transparent 60%),
     radial-gradient(ellipse 60% 50% at 100% 10%, #8a3f6b44, transparent 60%),
@@ -281,17 +281,79 @@ p{margin:0 0 1em;}
 
 /* Hero with an admin-uploaded background media (image, video upload, or YouTube) */
 .hero.has-image,.hero.has-media{background:#0a0912;}
-.hero-img,.hero-video{position:absolute; inset:0; width:100%; height:100%; object-fit:cover; z-index:0; pointer-events:none;}
+
+/*
+ * Hero background photo.
+ *
+ * A hero fills the viewport. On a phone that makes it very tall and narrow — about
+ * 375x709 — and a landscape photo cannot fill a box like that without being blown up until
+ * almost all of it is off-screen. A 2:1 photo at 375px wide is only 188px tall, so
+ * `object-fit: cover` scales it to 709px tall, giving a 1,418px-wide image of which just
+ * 375px — 26% — is visible. The church uploads a picture of the congregation and gets a
+ * zoomed crop of the middle of it. The wider the photo, the worse it gets: 16:9 lands at 30%.
+ *
+ * Where the box is WIDER than it is tall (every desktop, a phone held sideways) that
+ * problem does not arise — cover crops a little off the top and bottom and keeps the whole
+ * width — so nothing changes there.
+ *
+ * Where the box is TALLER than it is wide the photo is not asked to fill it at all. The
+ * whole picture is shown, over a blurred copy of itself which fills the rest of the hero,
+ * and the words sit below the picture instead of on top of it. Nothing the church uploads
+ * is ever lost, for any shape of photo, at any phone size — and because the headline is no
+ * longer over the picture, a bright upload cannot make the words unreadable.
+ *
+ * Video and YouTube heroes are left alone: 16:9 footage cropped to fill looks deliberate,
+ * and letterboxed video with a blurred fill looks wrong.
+ */
+.hero-img-blur{
+  position:absolute; inset:0; width:100%; height:100%; object-fit:cover; z-index:0; pointer-events:none;
+  filter:blur(34px) saturate(1.15) brightness(.5);
+  /* Scaled past the edges because a blur samples beyond the element and would otherwise
+     leave a soft border. */
+  transform:scale(1.15) translateZ(0);
+}
+.hero-img-contain{
+  position:absolute; inset:0; width:100%; height:100%;
+  object-fit:cover; object-position:center; z-index:0; pointer-events:none;
+}
+
+.hero-video{position:absolute; inset:0; width:100%; height:100%; object-fit:cover; z-index:0; pointer-events:none;}
 .hero-youtube-container{position:absolute; inset:0; z-index:0; overflow:hidden; pointer-events:none;}
 .hero-iframe{
   position:absolute; top:50%; left:50%;
   width:100vw; height:56.25vw; min-height:100vh; min-width:177.77vh;
+  min-height:100svh; min-width:177.77svh;
   transform:translate(-50%, -50%); pointer-events:none; border:0;
 }
 .hero-shade{position:absolute; inset:0; z-index:1; background:
   linear-gradient(180deg, rgba(10,9,18,.5), rgba(10,9,18,.3) 45%, var(--bg-0) 100%),
   radial-gradient(ellipse 80% 60% at 50% 20%, rgba(10,9,18,.3), transparent 70%);}
 .hero.has-image::before,.hero.has-media::before{opacity:.18;}
+
+/*
+ * Portrait-shaped hero: the photo goes above the words, whole, over a blurred fill.
+ * The photo is taken out of the absolute overlay and put back into the flow, so it sits in
+ * the hero rather than behind it — which is what lets the text have a dark, quiet space of
+ * its own underneath.
+ */
+@media (max-width:900px) and (max-aspect-ratio:1/1){
+  .hero.has-image{flex-direction:column; align-items:center; justify-content:center;}
+  .hero.has-image .hero-img-contain{
+    position:relative; inset:auto; z-index:2;
+    width:100%;
+    /* auto, so the photo keeps its own proportions and is never stretched. The cap stops a
+       very tall portrait photo from squeezing the words off the screen; when it bites,
+       object-fit letterboxes the picture inside its box instead of cropping it. */
+    height:auto; max-height:46svh;
+    object-fit:contain; object-position:center;
+  }
+  .hero.has-image .hero-content{padding:26px 20px 38px; z-index:3;}
+  .hero.has-image .hero-actions{margin-top:24px;}
+  /* The words are no longer over the picture, so the scrim only has to shade the blurred
+     fill behind them and melt the bottom of the hero into the page. */
+  .hero.has-image .hero-shade{background:
+    linear-gradient(180deg, rgba(10,9,18,.12) 0%, rgba(10,9,18,.34) 40%, rgba(10,9,18,.72) 66%, var(--bg-0) 100%);}
+}
 
 /* CMS pages — section templates */
 .page-header{
@@ -301,10 +363,15 @@ p{margin:0 0 1em;}
 .page-header h1{font-size:clamp(34px,6vw,54px); margin:14px 0 0;}
 .page-header .eyebrow{display:inline-block;}
 
-.page-hero{position:relative; min-height:62vh; display:flex; align-items:flex-end; overflow:hidden;}
+.page-hero{position:relative; min-height:62vh; min-height:62svh; display:flex; align-items:flex-end; overflow:hidden;}
 .page-hero.has-img{background:#0a0912;}
-.page-hero img{position:absolute; inset:0; width:100%; height:100%; object-fit:cover; z-index:0;}
-.page-hero-shade{position:absolute; inset:0; z-index:1; background:linear-gradient(180deg, rgba(10,9,18,.35), rgba(10,9,18,.55) 55%, var(--bg-0) 100%);}
+/* Same reason as the home hero: a CMS hero photo is shown whole over a blurred copy of
+   itself rather than cropped to fill. See heroPhotoMarkup() in core/helpers.php. */
+.page-hero .hero-img-blur,
+.page-hero .hero-img-contain{position:absolute; inset:0; width:100%; height:100%; z-index:0; pointer-events:none;}
+.page-hero .hero-img-blur{object-fit:cover; filter:blur(34px) saturate(1.15) brightness(.5); transform:scale(1.15) translateZ(0);}
+.page-hero .hero-img-contain{object-fit:contain; object-position:center;}
+.page-hero-shade{position:absolute; inset:0; z-index:1; background:linear-gradient(180deg, rgba(10,9,18,.5), rgba(10,9,18,.6) 55%, var(--bg-0) 100%);}
 .page-hero-inner{position:relative; z-index:2; width:100%; max-width:820px; margin:0 auto; padding:110px 24px 70px; text-align:center;}
 .page-hero-inner .eyebrow{display:inline-block; margin-bottom:14px;}
 .page-hero-inner h1{font-size:clamp(34px,6vw,58px);}
@@ -443,7 +510,10 @@ select option:disabled{color:var(--ink-faint);}
 @media (max-width:768px){
   .container{padding:0 18px;}
   .nav-row{padding:14px 18px;}
-  .hero{min-height:84vh;}
+  /* svh, not vh: on a phone `vh` means the viewport with the browser's address bar
+     HIDDEN, so an 84vh hero is taller than the screen on first paint and pushes the
+     "Scroll" cue below the fold. svh is the smallest the viewport ever gets. */
+  .hero{min-height:84vh; min-height:84svh;}
   .hero-content{padding:96px 20px 64px;}
   .hero-actions{width:100%; flex-direction:column; align-items:stretch;}
   .hero-actions .btn{width:100%;}

@@ -28,7 +28,7 @@ $ytId = ($heroType === 'youtube' && !empty($s['hero_youtube_url'])) ? youtubeVid
 
 <section class="hero<?= $hasBgMedia ? ' has-media' : '' ?>">
   <?php if ($heroType === 'image' && !empty($s['hero_image_path'])): ?>
-    <img class="hero-img" src="<?= e(uploadUrl($s['hero_image_path'])) ?>" alt="" fetchpriority="high">
+    <?= heroPhotoMarkup(uploadUrl($s['hero_image_path'])) ?>
     <div class="hero-shade"></div>
   <?php elseif ($heroType === 'video_upload' && !empty($s['hero_video_path'])): ?>
     <video class="hero-video" src="<?= e(uploadUrl($s['hero_video_path'])) ?>" autoplay loop muted playsinline fetchpriority="high"></video>
@@ -39,7 +39,7 @@ $ytId = ($heroType === 'youtube' && !empty($s['hero_youtube_url'])) ? youtubeVid
     </div>
     <div class="hero-shade"></div>
   <?php elseif ($s['hero_image_path']): ?>
-    <img class="hero-img" src="<?= e(uploadUrl($s['hero_image_path'])) ?>" alt="" fetchpriority="high">
+    <?= heroPhotoMarkup(uploadUrl($s['hero_image_path'])) ?>
     <div class="hero-shade"></div>
   <?php endif; ?>
   <div class="hero-content">

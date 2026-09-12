@@ -82,6 +82,41 @@ function uploadUrl(?string $path): ?string
     return baseUrl('uploads/' . ltrim($path, '/'));
 }
 
+/**
+ * The markup for a hero background photo — two elements, never one.
+ *
+ * A hero fills the viewport, so on a phone it is very tall and very narrow (roughly
+ * 375 x 709). A landscape photo cannot fill a box like that without being blown up until
+ * almost all of it is off-screen: a 2:1 photo at 375px wide is only 188px tall, so
+ * `object-fit: cover` would scale it to 709px tall, giving a 1,418px-wide image of which
+ * just 375px — 26% — is visible. The church uploads a picture of the congregation and sees
+ * a zoomed crop of the middle of it.
+ *
+ * So the photo is never asked to fill the box. The whole thing is shown, complete, over a
+ * blurred copy of itself, which keeps the hero looking deliberate rather than like a
+ * photo floating on a background. Nothing the church uploads is ever lost, at any screen
+ * size, whatever shape their picture is.
+ *
+ * The blurred layer is decorative: it is hidden from assistive technology and carries no
+ * alt text, and the real alt belongs to the sharp copy. Both are the same URL, so the
+ * browser fetches it once.
+ *
+ * @param string $alt     Meaningful alt for the photo; empty for a purely decorative one.
+ * @param string $loading 'eager' for the first hero on a page, otherwise 'lazy'.
+ */
+function heroPhotoMarkup(?string $src, string $alt = '', string $loading = 'eager'): string
+{
+    if (!$src) {
+        return '';
+    }
+
+    $safeSrc = e($src);
+
+    return '<img class="hero-img-blur" src="' . $safeSrc . '" alt="" aria-hidden="true" loading="' . e($loading) . '" decoding="async">'
+        . '<img class="hero-img-contain" src="' . $safeSrc . '" alt="' . e($alt) . '" loading="' . e($loading) . '" decoding="async"'
+        . ($loading === 'eager' ? ' fetchpriority="high"' : '') . '>';
+}
+
 function redirect(string $path)
 {
     header('Location: ' . $path);
@@ -707,7 +742,7 @@ function renderPageSections(array $sections): void
                 $img = !empty($section['image']) ? uploadUrl((string) $section['image']) : null;
                 echo '<section class="page-hero' . ($img ? ' has-img' : '') . '">';
                 if ($img) {
-                    echo '<img src="' . e($img) . '" alt="' . e((string) ($section['alt'] ?? '')) . '" loading="eager">';
+                    echo heroPhotoMarkup($img, (string) ($section['alt'] ?? ''));
                     echo '<div class="page-hero-shade"></div>';
                 }
                 echo '<div class="page-hero-inner">';
