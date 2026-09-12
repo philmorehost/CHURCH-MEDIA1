@@ -131,6 +131,13 @@ Do this **before** any Phase 1/2 work so nothing has to be retrofitted later.
   scope isolation between two churches.
 
 ### 1.2 Analytics dashboard
+> **Status: shipped.** `analytics_events` (raw, tenant-scoped, no IP addresses) and
+> `analytics_daily` (nightly roll-up kept indefinitely); `core/Analytics.php`;
+> `api/analytics.php` beacon + `public/assets/js/analytics.js`; server-side content views on
+> the sermon/event routes and `api/post.php`; `admin/analytics.php` dashboard with a
+> pure-SVG chart; `cli/analytics_rollup.php` for cron. 45 assertions passing.
+> Still open: the Flutter app does not yet send `app_open`/`device=app`, so the
+> web-vs-app split reads as all-web until that one-line client change lands.
 - **DB**: `analytics_events` (`id`, `occurred_at`, `event` VARCHAR(60), `path`, `org_unit_id`,
   `post_id`, `sermon_id`, `event_id`, `device` ENUM('web','app'), `session_hash`,
   `referrer_host`, `country`, `meta` JSON) + indexes on `(occurred_at)`, `(event)`,
