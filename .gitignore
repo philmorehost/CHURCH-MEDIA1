@@ -15,5 +15,9 @@
 # They must never be committed.
 /storage/backups/
 
+# Cron lock files (cli/sms_worker.php, cli/sms_maintenance.php, ...). Runtime state by
+# definition: their contents are meaningless and they are recreated on the next run.
+/storage/cache/*.lock
+
 # Office lock files, created beside a document while it is open.
 ~$*

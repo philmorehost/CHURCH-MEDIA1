@@ -145,6 +145,8 @@ CREATE TABLE IF NOT EXISTS `users` (
   `username` VARCHAR(100) NOT NULL UNIQUE,
   `email` VARCHAR(150) NOT NULL UNIQUE,
   `alt_email` VARCHAR(190) NULL,
+  `phone` VARCHAR(32) NULL COMMENT 'Normalised dial code + national number, e.g. 2348031234567. Set by the user or an admin.',
+  `sms_consent` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 = this person agreed to receive text messages on that number',
   `password` VARCHAR(255) NOT NULL,
   `unblock_pin_hash` VARCHAR(255) NULL,
   `reset_otp` VARCHAR(10) NULL,

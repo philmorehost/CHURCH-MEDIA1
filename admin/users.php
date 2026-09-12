@@ -30,14 +30,24 @@ if ($action === 'create' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    // An admin setting a number here is recording consent the person gave in person
+    // (on a form, at the desk), which is why the box is next to the field rather than
+    // implied by filling it in.
+    $phone = Sms::checkPhone((string) ($_POST['phone'] ?? ''));
+    $smsConsent = isset($_POST['sms_consent']) ? 1 : 0;
+
     if ($name === '' || $username === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
         $errors[] = 'Please provide a valid name, username, and email.';
+    } elseif (!$phone['ok']) {
+        $errors[] = 'That phone number could not be used: ' . $phone['error'];
+    } elseif ($smsConsent === 1 && $phone['msisdn'] === null) {
+        $errors[] = 'Add a phone number, or untick the box about text messages.';
     } elseif (strlen($password) < 10) {
         $errors[] = 'Password must be at least 10 characters.';
     } else {
         try {
-            $pdo->prepare('INSERT INTO users (name, username, email, password, role, org_unit_id) VALUES (?, ?, ?, ?, ?, ?)')
-                ->execute([$name, $username, $email, password_hash($password, PASSWORD_ARGON2ID), $role, $orgUnitId]);
+            $pdo->prepare('INSERT INTO users (name, username, email, phone, sms_consent, password, role, org_unit_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+                ->execute([$name, $username, $email, $phone['msisdn'], $smsConsent, password_hash($password, PASSWORD_ARGON2ID), $role, $orgUnitId]);
             flash('success', 'User created.');
             redirect('/admin/users');
         } catch (Throwable $e) {
@@ -69,12 +79,20 @@ if ($action === 'edit' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $stmt = $pdo->prepare('SELECT id FROM users WHERE id = ?');
     $stmt->execute([$targetId]);
+
+    $phone = Sms::checkPhone((string) ($_POST['phone'] ?? ''));
+    $smsConsent = isset($_POST['sms_consent']) ? 1 : 0;
+
     if ($targetId === $superAdminId && !$isSuperAdmin) {
         $errors[] = 'The super admin account is protected and cannot be edited.';
     } elseif (!$stmt->fetch()) {
         $errors[] = 'User not found.';
     } elseif ($name === '' || $username === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
         $errors[] = 'Please provide a valid name, username, and email.';
+    } elseif (!$phone['ok']) {
+        $errors[] = 'That phone number could not be used: ' . $phone['error'];
+    } elseif ($smsConsent === 1 && $phone['msisdn'] === null) {
+        $errors[] = 'Add a phone number, or untick the box about text messages.';
     } elseif ($password !== '' && strlen($password) < 10) {
         $errors[] = 'Password must be at least 10 characters if you change it.';
     } else {
@@ -87,19 +105,24 @@ if ($action === 'edit' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($unblockPin !== '' && !preg_match('/^[0-9]{4,6}$/', $unblockPin)) {
                 $errors[] = 'Security Unblock PIN must be 4 to 6 digits.';
             } else {
-                if ($password !== '' && $unblockPin !== '') {
-                    $pdo->prepare('UPDATE users SET name = ?, username = ?, email = ?, role = ?, password = ?, unblock_pin_hash = ?, org_unit_id = ? WHERE id = ?')
-                        ->execute([$name, $username, $email, $role, password_hash($password, PASSWORD_ARGON2ID), password_hash($unblockPin, PASSWORD_DEFAULT), $orgUnitId, $targetId]);
-                } elseif ($password !== '') {
-                    $pdo->prepare('UPDATE users SET name = ?, username = ?, email = ?, role = ?, password = ?, org_unit_id = ? WHERE id = ?')
-                        ->execute([$name, $username, $email, $role, password_hash($password, PASSWORD_ARGON2ID), $orgUnitId, $targetId]);
-                } elseif ($unblockPin !== '') {
-                    $pdo->prepare('UPDATE users SET name = ?, username = ?, email = ?, role = ?, unblock_pin_hash = ?, org_unit_id = ? WHERE id = ?')
-                        ->execute([$name, $username, $email, $role, password_hash($unblockPin, PASSWORD_DEFAULT), $orgUnitId, $targetId]);
-                } else {
-                    $pdo->prepare('UPDATE users SET name = ?, username = ?, email = ?, role = ?, org_unit_id = ? WHERE id = ?')
-                        ->execute([$name, $username, $email, $role, $orgUnitId, $targetId]);
+                // One statement, assembled from the parts that were actually filled in.
+                // This used to be four near-identical UPDATEs, one per combination of the
+                // optional password fields, so every new column had to be added to all four.
+                $set = ['name = ?', 'username = ?', 'email = ?', 'phone = ?', 'sms_consent = ?', 'role = ?', 'org_unit_id = ?'];
+                $params = [$name, $username, $email, $phone['msisdn'], $smsConsent, $role, $orgUnitId];
+
+                if ($password !== '') {
+                    $set[] = 'password = ?';
+                    $params[] = password_hash($password, PASSWORD_ARGON2ID);
                 }
+                if ($unblockPin !== '') {
+                    $set[] = 'unblock_pin_hash = ?';
+                    $params[] = password_hash($unblockPin, PASSWORD_DEFAULT);
+                }
+
+                $params[] = $targetId;
+                $pdo->prepare('UPDATE users SET ' . implode(', ', $set) . ' WHERE id = ?')->execute($params);
+
                 flash('success', 'User updated.');
                 redirect('/admin/users');
             }
@@ -148,21 +171,27 @@ if ($action === 'edit') {
             'email' => trim($_POST['email'] ?? ''),
             'role' => $_POST['role'] ?? 'media_team',
             'org_unit_id' => (string) ($_POST['org_unit_id'] ?? '') !== '' ? (int) $_POST['org_unit_id'] : null,
+            'phone' => trim((string) ($_POST['phone'] ?? '')),
+            'sms_consent' => isset($_POST['sms_consent']) ? 1 : 0,
         ];
         if ((int) $editUser['id'] === (int) $currentUser['id']) {
             $editUser['role'] = $currentUser['role'];
         }
     } else {
-        $stmt = $pdo->prepare('SELECT id, name, username, email, role, org_unit_id FROM users WHERE id = ?');
+        $stmt = $pdo->prepare('SELECT id, name, username, email, phone, sms_consent, role, org_unit_id FROM users WHERE id = ?');
         $stmt->execute([$id]);
         $editUser = $stmt->fetch() ?: null;
+        if ($editUser !== null && !empty($editUser['phone'])) {
+            // Show the readable form rather than the stored 2348031234567.
+            $editUser['phone'] = Sms::prettyMsisdn((string) $editUser['phone']);
+        }
     }
     if (!$editUser || !isset($editUser['id']) || !$editUser['id']) {
         redirect('/admin/users');
     }
 }
 
-$users = $pdo->query('SELECT id, name, username, email, role, is_suspended, last_login_at, last_login_ip, org_unit_id FROM users ORDER BY id ASC')->fetchAll();
+$users = $pdo->query('SELECT id, name, username, email, phone, sms_consent, role, is_suspended, last_login_at, last_login_ip, org_unit_id FROM users ORDER BY id ASC')->fetchAll();
 
 // Assignable units: any level (province/zone/area/parish) for the super admin;
 // otherwise only units inside the current admin's own subtree.
@@ -195,6 +224,17 @@ require __DIR__ . '/partials/layout-open.php';
       <input type="text" id="username" name="username" required>
       <label for="email">Email</label>
       <input type="email" id="email" name="email" required>
+      <label for="phone">Phone Number <small style="color:var(--ink-faint);">(optional)</small></label>
+      <input type="tel" id="phone" name="phone" inputmode="tel" placeholder="0803 000 0000 or +2348030000000">
+      <div class="checkbox-row" style="align-items:flex-start;margin-bottom:10px;">
+        <input type="checkbox" id="sms_consent" name="sms_consent" value="1">
+        <label for="sms_consent" style="margin:0;line-height:1.5;">
+          Has agreed to receive text messages on this number
+        </label>
+      </div>
+      <small style="color:var(--ink-faint);font-size:12px;display:block;margin-bottom:14px;">
+        Without this tick, the number is kept on the profile but is never added to the SMS address book.
+      </small>
       <label for="password">Password</label>
       <input type="password" id="password" name="password" minlength="10" required>
       <label for="role">Role</label>
@@ -232,6 +272,20 @@ require __DIR__ . '/partials/layout-open.php';
       <input type="text" id="username" name="username" value="<?= e($editUser['username']) ?>" required>
       <label for="email">Email</label>
       <input type="email" id="email" name="email" value="<?= e($editUser['email']) ?>" required>
+      <label for="phone">Phone Number <small style="color:var(--ink-faint);">(optional)</small></label>
+      <input type="tel" id="phone" name="phone" inputmode="tel"
+             value="<?= e((string) ($editUser['phone'] ?? '')) ?>"
+             placeholder="0803 000 0000 or +2348030000000">
+      <div class="checkbox-row" style="align-items:flex-start;margin-bottom:10px;">
+        <input type="checkbox" id="sms_consent" name="sms_consent" value="1"
+               <?= !empty($editUser['sms_consent']) ? 'checked' : '' ?>>
+        <label for="sms_consent" style="margin:0;line-height:1.5;">
+          Has agreed to receive text messages on this number
+        </label>
+      </div>
+      <small style="color:var(--ink-faint);font-size:12px;display:block;margin-bottom:14px;">
+        Untick this and the number stays on the profile but is skipped by every text.
+      </small>
       <label for="password">New Password <small style="color:var(--ink-faint);">(leave blank to keep current)</small></label>
       <input type="password" id="password" name="password" minlength="10">
       <label for="unblock_pin">Security Unblock PIN <small style="color:var(--ink-faint);">(4 to 6 digits, leave blank to keep current)</small></label>
@@ -268,7 +322,7 @@ require __DIR__ . '/partials/layout-open.php';
   <div class="btn-row" style="margin-bottom:20px;"><a class="btn" href="/admin/users?action=create">+ Add Team Account</a></div>
   <div class="card">
     <table>
-      <tr><th>Name</th><th>Username</th><th>Role</th><th>Last Login</th><th>Status</th><th></th></tr>
+      <tr><th>Name</th><th>Username</th><th>Role</th><th>Texts</th><th>Last Login</th><th>Status</th><th></th></tr>
       <?php foreach ($users as $u): ?>
       <?php $protected = ($superAdminId === (int) $u['id'] && !$isSuperAdmin); ?>
       <tr>
@@ -276,6 +330,17 @@ require __DIR__ . '/partials/layout-open.php';
             <br><small style="color:var(--ink-dim);">📍 <?= $u['org_unit_id'] ? e(Unit::label((int) $u['org_unit_id'])) : 'no unit' ?></small></td>
         <td><?= e($u['username']) ?></td>
         <td><span class="badge info"><?= e($u['role']) ?></span></td>
+        <td>
+          <?php if (empty($u['phone'])): ?>
+            <small style="color:var(--ink-faint);">no number</small>
+          <?php elseif (!empty($u['sms_consent'])): ?>
+            <span class="badge ok">can be texted</span>
+            <br><small style="color:var(--ink-dim);"><?= e(Sms::prettyMsisdn((string) $u['phone'])) ?></small>
+          <?php else: ?>
+            <span class="badge warn">no consent</span>
+            <br><small style="color:var(--ink-dim);"><?= e(Sms::prettyMsisdn((string) $u['phone'])) ?></small>
+          <?php endif; ?>
+        </td>
         <td><?= $u['last_login_at'] ? e(timeAgo($u['last_login_at']) . ' from ' . $u['last_login_ip']) : 'never' ?></td>
         <td>
           <?php if ((int) $u['id'] === $currentUser['id']): ?>

@@ -366,21 +366,73 @@ Recipient format: `2348012345678` — country code, **no** leading `0`, **no** `
 > texting members abroad.
 >
 > **Remaining Phase 2 work** (each a coherent next step, in dependency order):
-> - `admin/sms.php` — the nine tabs (§2.6). The compose screen needs `Sms::estimateUnits()`
->   for its live cost counter, `SmsCampaign::queueRecipients()` for the recipient stats
->   (including the `rejected` count), and `Sms::whyInvalid()` for the CSV import dry-run —
->   all already written and tested for exactly those screens.
-> - Wiring the contact sources: a "sync from church data" pass over newcomers, users,
->   subscribers, testimonies, registrations and form-submission phone fields.
-> - A phone field on `admin/account.php` and `admin/users.php` so "send to church team" works.
+> - ~~`admin/sms.php` — the nine tabs (§2.6)~~ — **shipped.**
+> - ~~Wiring the contact sources: a "sync from church data" pass~~ — **shipped** in
+>   `SmsContacts::syncFromChurchData()`.
+> - ~~A phone field on `admin/account.php` and `admin/users.php`~~ — **shipped**, with a
+>   consent flag; see below.
+> - ~~A `cli/sms_maintenance.php` for old log rows and stale claims~~ — **shipped**; see
+>   below.
 > - `admin/notifications.php` still resolves its audience inline; once `Notifier` has been in
 >   use for a release, that screen can delegate its *delivery* to `Notifier::send()` too,
 >   keeping Phase 1.6's tested audience logic and dropping the duplicated insert/push/email.
-> - A `cli/sms_maintenance.php` for old log rows (`sms_log_retention_days`) and stale
->   `sms_campaign_recipients`, which currently accumulate.
+>   **Still open, and deliberately so** — no behavioural gain yet, only less duplication.
 > - Live `balance.php` / `check_senderID.php` checks against the gateway, which need a
 >   **rotated** token (the one pasted during planning was exposed in plaintext and must not
->   be reused).
+>   be reused). **Still open — blocked on the rotation, not on code.**
+>
+> **2026-09-12, Phase 2 close-out — two promises the software was not keeping.**
+>
+> **1. A phone number had nowhere to be entered.** `admin/account.php` and `admin/users.php`
+> had no phone field at all, yet `syncFromChurchData()` reads `users.phone` for its "Church
+> team" source and the composer's *send test to myself* button falls back to it. So a
+> shipped, tested feature was inert: the team sync reported "0 found" and looked like
+> missing data rather than a missing field.
+>
+> Adding the field raised a question the roadmap had not answered — a phone number on a
+> staff profile is a *contact detail*, but permission to text it is a **different thing**,
+> and the two have to be able to disagree. Two churches' teams overlap, people change
+> numbers, and someone can be perfectly reachable by the church without consenting to bulk
+> SMS. So `users.sms_consent` is a separate column (migration `2026_19_user_phone_consent`),
+> the sync gates the team source on it exactly as it already gated newsletter subscribers,
+> and **no source can opt anyone in merely by holding their number.** Both columns are also
+> now in `installer/schema.sql`, so a fresh install gets them without depending on a later
+> migration.
+>
+> Three smaller things fell out of doing this:
+> - The **four near-identical UPDATE statements** in the user edit handler — one per
+>   combination of the optional password and PIN fields — are now one statement assembled
+>   from the parts that were actually filled in. Every new column previously had to be added
+>   to all four, and a miss would have silently dropped a field on one path only.
+> - Numbers are stored **normalised** (`2348031234567`) and displayed through
+>   `Sms::prettyMsisdn()`, so one format is canonical and the user only ever sees the
+>   readable one.
+> - A rejected number is **shown back to the person** with the reason. Losing your typing on
+>   a form that says only "invalid" is how people give up.
+>
+> **2. `sms_log_retention_days` was saved but never enforced.** The Settings tab offered
+> "Keep gateway logs for 30 days" and stored the value; nothing anywhere read it. That is
+> worse than not offering the control, because an admin sets it and stops worrying while the
+> table grows without limit. `cli/sms_maintenance.php` is the part that keeps the promise:
+> it prunes `sms_messages_log` and `sms_wallet_log` past the window, and releases recipient
+> claims abandoned by a worker that died mid-batch.
+>
+> What it deliberately does **not** do: it never deletes a campaign or a recipient row. Those
+> are the record of who was texted and what it cost, and "did we tell Ada about the March
+> meeting?" is a question the church may need answered years later — the same reason
+> `core/Backup.php` exists. Recipient rows go only when an admin deletes the campaign, which
+> cascades. It also **reports** campaign tallies that disagree with their recipient rows
+> rather than silently repairing them, because a wrong count is a symptom of something else;
+> `--fix-counters` does the repair, and only on campaigns that have finished — never one
+> still sending.
+>
+> Verified with **95 assertions** across two harnesses against a scratch database: 75 for the
+> phone field and the maintenance script (including all four edit paths, the consent gate
+> proving an unconsented number does *not* reach the address book, a dry run that changes
+> nothing, a retention of `0` being refused rather than deleting everything, and a fresh
+> claim being left alone while a stale one is released), plus 20 rendering every admin and
+> SMS screen for regressions.
+
 ```
 configured(): bool
 balance(): array                       // ['ok','balance','raw','error']

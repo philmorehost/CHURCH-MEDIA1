@@ -236,7 +236,7 @@ try {
         <label for="sms_log_retention_days">Keep gateway logs for</label>
         <input type="number" id="sms_log_retention_days" name="sms_log_retention_days" min="1" max="3650"
                value="<?= (int) setting('sms_log_retention_days', 30) ?>">
-        <small style="color:var(--ink-faint);font-size:12px;">Days. The logs hold no token, only what was sent and what came back.</small>
+        <small style="color:var(--ink-faint);font-size:12px;">Days. Deleted by the daily housekeeping job below — until that job is on your cron, nothing is pruned. The logs hold no token, only what was sent and what came back.</small>
       </div>
     </div>
 
@@ -281,9 +281,15 @@ try {
 
   <h3 style="font-size:14px;margin:18px 0 8px;">Scheduling the worker</h3>
   <p class="sub" style="font-size:13px;">
-    Nothing sends without the queue worker running. In cPanel → Cron Jobs add these two entries.
+    Nothing sends without the queue worker running. In cPanel → Cron Jobs add these entries.
     Replace the PHP path with the one shown on the main Settings page for your media worker.
   </p>
   <pre style="background:#0f0d1f;border:1px solid var(--border);border-radius:10px;padding:14px;overflow:auto;font-size:12.5px;">* * * * * php <?= e(ROOT_PATH) ?>/cli/sms_worker.php --quiet
-*/15 * * * * php <?= e(ROOT_PATH) ?>/cli/sms_sender_check.php</pre>
+*/15 * * * * php <?= e(ROOT_PATH) ?>/cli/sms_sender_check.php
+15 3 * * * php <?= e(ROOT_PATH) ?>/cli/sms_maintenance.php --quiet</pre>
+  <p class="sub" style="font-size:12.5px;">
+    The third one is what actually enforces the log retention below — without it, gateway and
+    wallet log rows accumulate forever. It also releases claims abandoned by a worker that
+    stopped mid-batch. It never deletes a campaign or a recipient, so your send history is safe.
+  </p>
 </div>

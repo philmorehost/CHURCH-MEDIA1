@@ -1304,6 +1304,19 @@ class Database
                 self::addIndexIfMissing($pdo, 'sms_campaign_recipients', 'idx_scr_claim', 'INDEX `idx_scr_claim` (`campaign_id`, `status`, `claimed_at`)');
                 self::addColumnIfMissing($pdo, 'sms_campaigns', 'paused_reason', 'VARCHAR(255) NULL', 'estimated_units');
             },
+
+            // Consent for text messages, kept separate from the number itself.
+            //
+            // A phone number on a staff profile is a contact detail; permission to text
+            // it is a different thing, and the two have to be able to disagree — someone
+            // can be reachable by the church without consenting to bulk SMS. The team
+            // sync only takes numbers where this flag is 1, the same rule the newsletter
+            // subscribers already obey, so no source can quietly opt anyone in.
+            '2026_19_user_phone_consent' => function (PDO $pdo): void {
+                // Defensive: 2026_17 adds this, but a hand-assembled database may not have it.
+                self::addColumnIfMissing($pdo, 'users', 'phone', 'VARCHAR(32) NULL', 'email');
+                self::addColumnIfMissing($pdo, 'users', 'sms_consent', 'TINYINT(1) NOT NULL DEFAULT 0', 'phone');
+            },
         ];
     }
 

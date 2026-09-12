@@ -536,8 +536,11 @@ final class SmsContacts
         /** @var array<int, array{label:string,sql:string,tag:string}> $sources */
         $sources = [
             [
-                'label' => 'Church team',
-                'sql' => 'SELECT id, name, phone, email, org_unit_id FROM users WHERE phone IS NOT NULL AND phone != \'\'',
+                // Consent gate. A number on a staff profile is a contact detail; permission
+                // to text it is a separate thing, and 2026_19 keeps them apart so that no
+                // source can opt someone into bulk messaging just by holding their number.
+                'label' => 'Church team who agreed to be texted',
+                'sql' => 'SELECT id, name, phone, email, org_unit_id FROM users WHERE phone IS NOT NULL AND phone != \'\' AND sms_consent = 1',
                 'tag' => 'team',
                 'source' => 'team',
             ],

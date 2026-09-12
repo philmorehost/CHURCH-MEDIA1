@@ -253,6 +253,32 @@ final class Sms
     }
 
     /**
+     * Validates a phone number typed into a profile or admin form.
+     *
+     * A blank value is not an error — it means "clear the number", which is a legitimate
+     * thing to want. Anything else has to survive normalisation, and the wording of the
+     * complaint is the same wording the CSV import uses, so a person who fixes their
+     * number in one place recognises the message in the other.
+     *
+     * @return array{ok:bool, msisdn:?string, error:?string}
+     */
+    public static function checkPhone(string $raw, ?string $country = null): array
+    {
+        $raw = trim($raw);
+        if ($raw === '') {
+            return ['ok' => true, 'msisdn' => null, 'error' => null];
+        }
+
+        $country = $country !== null && $country !== '' ? $country : self::defaultCountry();
+        $msisdn = self::normaliseMsisdn($raw, $country);
+        if ($msisdn === null) {
+            return ['ok' => false, 'msisdn' => null, 'error' => self::whyInvalid($raw, $country)];
+        }
+
+        return ['ok' => true, 'msisdn' => $msisdn, 'error' => null];
+    }
+
+    /**
      * Dial codes longest first, so 234 wins over 23 and 27 over 2.
      *
      * The values are cast back to strings because PHP silently turns numeric string
