@@ -269,6 +269,17 @@ foreach (($payload['entry'] ?? []) as $entry) {
             if ($stmt->rowCount() > 0) {
                 $statuses++;
             }
+
+            // Called unconditionally, and deliberately outside the check above. The message row
+            // and the campaign recipient row are different tables, and the status is worth
+            // applying to whichever exists: a campaign message whose message row was never
+            // written (or was already at this status) still needs its recipient updated, or a
+            // broadcast report would show every message as "sent" forever.
+            try {
+                WaCampaign::applyStatus($id, $state, $errorCode, $errorNote);
+            } catch (Throwable $e) {
+                error_log('WhatsApp campaign status update failed: ' . $e->getMessage());
+            }
         }
     }
 }

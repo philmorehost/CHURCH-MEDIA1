@@ -1543,6 +1543,83 @@ class Database
                     INDEX `idx_wa_optin_state` (`is_opted_in`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
             },
+
+            // Broadcasts over WhatsApp.
+            //
+            // Deliberately NOT a copy of the SMS campaign tables. Four things genuinely differ,
+            // and copying the SMS shape would carry rules that do not apply:
+            //
+            //   1. No wallet and no per-message cost. Meta bills per 24-hour *conversation*, so
+            //      there is nothing to debit per recipient and no unit counters to keep.
+            //   2. Consent is opt-IN, not opt-out. WhatsApp requires it, and messaging people who
+            //      never agreed is how a number gets reported and banned. A recipient who is not
+            //      opted in is recorded as skipped with the reason, never silently dropped.
+            //   3. Delivery is asynchronous. Statuses come back by webhook, so a recipient moves
+            //      through sent → delivered → read over time, not once at send.
+            //   4. Rate limits are per-second and unforgiving on a new number, hence the delay
+            //      setting and a daily cap that defaults to Meta's own unverified ceiling.
+            '2026_22_wa_campaigns' => function (PDO $pdo): void {
+                self::addColumnIfMissing($pdo, 'settings', 'wa_daily_message_cap', 'INT NOT NULL DEFAULT 250', 'wa_log_retention_days');
+                self::addColumnIfMissing($pdo, 'settings', 'wa_send_delay_ms', 'INT NOT NULL DEFAULT 250', 'wa_daily_message_cap');
+                self::addColumnIfMissing($pdo, 'settings', 'wa_batch_size', 'INT NOT NULL DEFAULT 50', 'wa_send_delay_ms');
+                self::addColumnIfMissing($pdo, 'settings', 'wa_allow_unit_broadcast', 'TINYINT(1) NOT NULL DEFAULT 1', 'wa_batch_size');
+
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `wa_campaigns` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `tenant_id` INT NULL,
+                    `name` VARCHAR(150) NOT NULL,
+                    `template_name` VARCHAR(120) NOT NULL,
+                    `template_language` VARCHAR(12) NOT NULL DEFAULT 'en',
+                    `org_unit_id` INT NULL,
+                    `status` ENUM('draft','queued','sending','paused','done','cancelled') NOT NULL DEFAULT 'draft',
+                    `pause_reason` VARCHAR(255) NULL,
+                    `total_count` INT NOT NULL DEFAULT 0,
+                    `queued_count` INT NOT NULL DEFAULT 0,
+                    `sent_count` INT NOT NULL DEFAULT 0,
+                    `delivered_count` INT NOT NULL DEFAULT 0,
+                    `read_count` INT NOT NULL DEFAULT 0,
+                    `failed_count` INT NOT NULL DEFAULT 0,
+                    `skipped_count` INT NOT NULL DEFAULT 0,
+                    `created_by` INT NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `started_at` DATETIME NULL,
+                    `finished_at` DATETIME NULL,
+                    INDEX `idx_wa_campaign_status` (`tenant_id`, `status`),
+                    FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL,
+                    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                // `claimed_at` + `lock_token` are what stop an overlapping cron run, or a worker
+                // killed mid-batch, from messaging the same person twice. A duplicate here is not
+                // just an annoyance: it is a person receiving the same message again.
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `wa_campaign_recipients` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `tenant_id` INT NULL,
+                    `campaign_id` INT NOT NULL,
+                    `conversation_id` INT NULL,
+                    `contact_id` INT NULL,
+                    `msisdn` VARCHAR(20) NOT NULL,
+                    `contact_name` VARCHAR(150) NULL,
+                    `params` JSON NULL COMMENT 'The values for this recipient''s template placeholders',
+                    `status` ENUM('queued','sent','delivered','read','failed','skipped') NOT NULL DEFAULT 'queued',
+                    `skip_reason` VARCHAR(120) NULL COMMENT 'Why somebody was left out, so it is visible rather than silent',
+                    `wa_message_id` VARCHAR(190) NULL,
+                    `error_code` VARCHAR(20) NULL,
+                    `error_note` VARCHAR(255) NULL,
+                    `attempts` INT NOT NULL DEFAULT 0,
+                    `claimed_at` DATETIME NULL,
+                    `lock_token` VARCHAR(40) NULL,
+                    `sent_at` DATETIME NULL,
+                    `status_at` DATETIME NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY `uniq_wa_recipient` (`campaign_id`, `msisdn`),
+                    INDEX `idx_wa_recipient_status` (`campaign_id`, `status`),
+                    INDEX `idx_wa_recipient_msg` (`wa_message_id`),
+                    FOREIGN KEY (`campaign_id`) REFERENCES `wa_campaigns`(`id`) ON DELETE CASCADE,
+                    FOREIGN KEY (`conversation_id`) REFERENCES `wa_conversations`(`id`) ON DELETE SET NULL,
+                    FOREIGN KEY (`contact_id`) REFERENCES `sms_contacts`(`id`) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+            },
         ];
     }
 

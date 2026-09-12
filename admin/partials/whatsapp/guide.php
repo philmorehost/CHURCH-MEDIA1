@@ -106,6 +106,55 @@ declare(strict_types=1);
 </div>
 
 <div class="card">
+  <h2 style="margin-top:0;">Broadcasting</h2>
+  <p style="color:var(--ink-dim);font-size:14px;line-height:1.75;">
+    A broadcast sends one approved template to a set of people. It is <strong>queued, not sent</strong>
+    — <code>cli/wa_worker.php</code> does the sending, so a mistake is reviewable before anything
+    leaves the building.
+  </p>
+  <p style="color:var(--ink-dim);font-size:14px;line-height:1.75;">
+    <strong>Only people who have opted in will receive it.</strong> Anyone else is listed in the
+    broadcast report as skipped, with the reason. This is not caution for its own sake: messaging
+    people who never agreed is how a WhatsApp number gets reported and banned.
+  </p>
+  <p style="color:var(--ink-dim);font-size:14px;line-height:1.75;">
+    There is also a <strong>daily cap</strong>, which defaults to 250 — Meta's own limit for a number
+    that is not yet verified for higher throughput. Reaching it pauses the broadcast rather than
+    pressing on, because exceeding it does not fail loudly; it starts silently throttling, which
+    looks exactly like messages not arriving.
+  </p>
+  <table>
+    <tr><th>Status</th><th>Means</th></tr>
+    <tr><td><strong>queued</strong></td><td>Nobody has tried to send it yet.</td></tr>
+    <tr><td><strong>draft</strong></td><td>Created but never queued for sending.</td></tr>
+    <tr><td><strong>sending</strong></td><td>A worker is working through it.</td></tr>
+    <tr><td><strong>paused</strong></td><td>Stopped for a reason you can fix — the cap, or the sending window. It resumes by itself, or when you press Resume.</td></tr>
+    <tr><td><strong>done</strong></td><td>Finished. Some recipients may still be failed or skipped; the report says which.</td></tr>
+    <tr><td><strong>cancelled</strong></td><td>Stopped deliberately. Unsent recipients were dropped, but the record of who was targeted is kept.</td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0;">Keeping it running</h2>
+  <p style="color:var(--ink-dim);font-size:14px;line-height:1.75;">
+    Two scheduled jobs. Without the first, queued broadcasts never send; without the second, message
+    history grows without limit.
+  </p>
+  <pre style="background:#0f0d1f;border:1px solid var(--border);border-radius:10px;padding:14px;overflow:auto;font-size:12.5px;">* * * * * php <?= e(ROOT_PATH) ?>/cli/wa_worker.php --quiet
+15 4 * * * php <?= e(ROOT_PATH) ?>/cli/wa_worker.php --status</pre>
+  <p style="color:var(--ink-dim);font-size:13.5px;line-height:1.75;">
+    The worker is safe to run by hand at any time. <code>--status</code> prints the queue and sends
+    nothing; <code>--dry-run</code> reports what it would send without sending it; <code>--force</code>
+    ignores the sending window but never the daily cap.
+  </p>
+  <p style="color:var(--ink-dim);font-size:13.5px;line-height:1.75;">
+    It is idempotent and resumable. A second run, an overlapping run, or a run killed halfway all
+    pick up safely, because a recipient is claimed before it is sent and the claim is released if
+    the run does not finish.
+  </p>
+</div>
+
+<div class="card">
   <h2 style="margin-top:0;">Privacy and consent</h2>
   <ul style="color:var(--ink-dim);font-size:14px;line-height:2;padding-left:22px;">
     <li>Somebody messaging the church is recorded as having opted in. That is the strongest consent there is.</li>

@@ -848,6 +848,45 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > the window indicator, broadcast composer reusing the Phase 2 contacts/groups, per-church number
 > mapping), `cli/wa_worker.php`, and the optional Node bridge for groups and number harvesting.
 
+> **Status: shipped (4.2–4.3).** `admin/whatsapp.php` with five tabs — dashboard, inbox, broadcast,
+> templates, settings — and a guide. `cli/wa_worker.php` works the broadcast queue.
+>
+> `wa_campaigns` and `wa_campaign_recipients` are **siblings of the SMS tables, not copies of them**,
+> because four things genuinely differ and inheriting the SMS shape would carry rules that do not
+> apply: there is no wallet (Meta bills per 24-hour conversation, not per message); consent is
+> opt-**IN**; delivery is asynchronous and arrives by webhook; and rate limits are per-second with a
+> low daily ceiling on a new number.
+>
+> **Consent is the centre of this.** Somebody who never opted in, or who opted out, is recorded as
+> *skipped with the reason* rather than silently dropped — "I sent it to 400 people" and "it reached
+> 120" must not look the same. A broadcast also cannot use an unapproved template; the composer
+> refuses rather than letting Meta refuse it later.
+>
+> **Verified:** 151 assertions across the two suites (67 for broadcasts, 84 for the admin screens).
+> The ones that carry the weight: nobody un-opted-in is queued and the reason is stored; queueing the
+> same audience twice adds nobody; a second claim on the same batch takes nothing, so a message
+> cannot go twice; an abandoned claim is released rather than stranding a recipient; delivery and
+> read receipts from the webhook update the campaign and a late `delivered` does not downgrade a
+> `read`; `reopenFailures` retries the transient failure and deliberately leaves the window-closed
+> one alone; and a scoped admin cannot see, open, or cancel another church's broadcast — including by
+> posting its id.
+>
+> **Two real bugs the suite caught, both in code I had just written:**
+> - The campaign status update was nested inside the `wa_messages` row-count guard, so a campaign
+>   recipient was never updated when the message row did not change. A broadcast report would have
+>   shown every message as "sent" forever.
+> - Leaving the worker loop early — cap reached, dry run, or a thrown send — released only the
+>   current recipient, leaving the rest of the batch locked for ten minutes. The campaign would sit
+>   looking stuck with nothing for the next cron run to do. A batch sweep now releases anything
+>   claimed but unsent.
+>
+> **Not verified:** still nothing has been sent to or received from a real Meta endpoint. The worker's
+> gates are tested against a real process (channel off, sending window, daily cap, `--dry-run`) and
+> the send path is driven in-process with a stub, but Meta's acceptance of the payloads is untested.
+>
+> **Still to build in this phase:** the optional Node bridge for groups and number harvesting
+> (4.4). Everything else in Phase 4 is done.
+
 ## 7. Phase 5 — Members & daily engagement
 
 - **Member accounts**: `members` table (name, email, phone, password_hash, `org_unit_id`,
