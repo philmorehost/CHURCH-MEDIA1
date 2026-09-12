@@ -86,19 +86,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // --- Live status ---
 $projectId = (string) ($config['project_id'] ?? '');
-$saPath = (string) ($config['service_account'] ?? '');
+
+// Ask the sender where it will look, rather than repeating the rule here. The two used
+// to differ: Pusher falls back to storage/service-account.json when the configured path
+// is missing, but this page did not — so a key could be uploaded successfully and the
+// status still read "Key missing". That is exactly what happens on a site whose config
+// was inherited from another deployment and still names the other server's path.
+$saPath = Pusher::serviceAccountPath();
 $keyOk = false;
 $keyEmail = '';
-if ($saPath === '') {
-    $saPath = $keyFile;
-}
-if (is_file($saPath)) {
+$keyState = 'missing';
+if ($saPath !== '' && is_file($saPath)) {
     $sa = json_decode((string) file_get_contents($saPath), true);
     if (is_array($sa) && !empty($sa['client_email']) && !empty($sa['private_key'])) {
         $keyOk = true;
         $keyEmail = (string) $sa['client_email'];
+    } else {
+        $keyState = 'invalid';
     }
 }
+if ($keyOk) {
+    $keyDetail = 'Service account: <code>' . e($keyEmail) . '</code>';
+} elseif ($keyState === 'invalid') {
+    $keyDetail = 'A file is there at <code>' . e($saPath) . '</code> but it is not a valid '
+        . 'service-account key — it needs <code>client_email</code> and <code>private_key</code>.';
+} else {
+    $keyDetail = 'Nothing at <code>' . e($saPath !== '' ? $saPath : $keyFile) . '</code>. '
+        . 'Upload the key in step 1 below.';
+}
+
 $deviceCount = (int) $pdo->query('SELECT COUNT(*) FROM device_tokens')->fetchColumn();
 $configured = $projectId !== '' && $keyOk;
 
@@ -120,7 +136,7 @@ require __DIR__ . '/partials/layout-open.php';
     </tr>
     <tr>
       <td><?= $keyOk ? '<span class="badge ok">Key OK</span>' : '<span class="badge fail">Key missing</span>' ?></td>
-      <td><?= $keyOk ? 'Service account: <code>' . e($keyEmail) . '</code>' : 'No valid service-account.json yet.' ?></td>
+      <td><?= $keyDetail ?></td>
     </tr>
     <tr>
       <td><?= $deviceCount > 0 ? '<span class="badge ok">' . $deviceCount . '</span>' : '<span class="badge">0 devices</span>' ?></td>

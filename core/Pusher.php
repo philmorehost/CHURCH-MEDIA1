@@ -35,7 +35,20 @@ class Pusher
         return (string) (self::config()['project_id'] ?? '');
     }
 
-    private static function serviceAccountPath(): string
+    /**
+     * Where the service-account key actually is.
+     *
+     * The configured path wins, but when it is not a file we fall back to
+     * `storage/service-account.json` — the exact place the admin panel's upload form
+     * writes to. Without that fallback, a config still pointing at another server's path
+     * (which is what every second-church deployment inherits from git) reports "key
+     * missing" while the key that was just uploaded sits there unused.
+     *
+     * Public on purpose: admin/firebase.php used to re-derive this rule and got it
+     * wrong, so the status page could contradict what sending would do. One source of
+     * truth now.
+     */
+    public static function serviceAccountPath(): string
     {
         $path = (string) (self::config()['service_account'] ?? '');
         if ($path === '' || !is_file($path)) {
