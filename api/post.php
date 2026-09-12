@@ -29,6 +29,17 @@ if (RateLimiter::attemptConfigured('views', $fingerprint)) {
     if ($inserted->rowCount() > 0) {
         $pdo->prepare('UPDATE media_posts SET views_count = views_count + 1 WHERE id = ?')->execute([$post['id']]);
         $post['views_count']++;
+
+        // Mirror the deduped view into analytics so the dashboard can rank
+        // content and break it down by church and device.
+        Analytics::record('post_view', [
+            'org_unit_id' => (int) ($post['org_unit_id'] ?? 0),
+            'entity_type' => 'post',
+            'entity_id' => (int) $post['id'],
+            'device' => ((string) ($_GET['device'] ?? 'web')) === 'app' ? 'app' : 'web',
+            'session_hash' => $fingerprint,
+            'meta' => (string) ($post['post_type'] ?? ''),
+        ]);
     }
 }
 

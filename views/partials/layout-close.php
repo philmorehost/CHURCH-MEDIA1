@@ -158,5 +158,12 @@ $isAppPage = $currentPathForRedirect === '/app';
 
 <script src="<?= asset('js/app-download.js') ?>"></script>
 <script src="<?= asset('js/site.js') ?>"></script>
+<?php if (class_exists('Analytics') && Analytics::enabled()): ?>
+  <?php // Anonymous traffic beacon — fire-and-forget, no personal data, no IP. ?>
+  <script src="<?= asset('js/analytics.js') ?>"
+          data-analytics-endpoint="/api/analytics"
+          data-analytics-enabled="1"
+          defer></script>
+<?php endif; ?>
 </body>
 </html>

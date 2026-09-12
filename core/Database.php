@@ -943,6 +943,49 @@ class Database
                     INDEX `idx_blocklist_kind` (`kind`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
             },
+
+            // Analytics. Raw events are pruned on a retention window; the daily
+            // roll-up is kept indefinitely so long-range trends survive.
+            '2026_12_analytics' => function (PDO $pdo): void {
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `analytics_events` (
+                    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    `tenant_id` INT NOT NULL DEFAULT 0,
+                    `occurred_at` DATETIME NOT NULL,
+                    `event` VARCHAR(60) NOT NULL,
+                    `path` VARCHAR(255) NULL,
+                    `org_unit_id` INT NULL,
+                    `entity_type` VARCHAR(30) NULL,
+                    `entity_id` INT NULL,
+                    `device` VARCHAR(10) NOT NULL DEFAULT 'web',
+                    `session_hash` VARCHAR(64) NULL,
+                    `referrer_host` VARCHAR(120) NULL,
+                    `country` VARCHAR(2) NULL,
+                    `meta` VARCHAR(255) NULL,
+                    INDEX `idx_ae_time` (`occurred_at`),
+                    INDEX `idx_ae_event_time` (`event`, `occurred_at`),
+                    INDEX `idx_ae_tenant_time` (`tenant_id`, `occurred_at`),
+                    INDEX `idx_ae_entity` (`entity_type`, `entity_id`),
+                    INDEX `idx_ae_session` (`session_hash`, `occurred_at`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `analytics_daily` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `tenant_id` INT NOT NULL DEFAULT 0,
+                    `day` DATE NOT NULL,
+                    `event` VARCHAR(60) NOT NULL,
+                    `device` VARCHAR(10) NOT NULL DEFAULT 'web',
+                    `entity_type` VARCHAR(30) NOT NULL DEFAULT '',
+                    `entity_id` INT NOT NULL DEFAULT 0,
+                    `org_unit_id` INT NOT NULL DEFAULT 0,
+                    `hits` INT NOT NULL DEFAULT 0,
+                    UNIQUE KEY `uniq_analytics_day` (`tenant_id`, `day`, `event`, `device`, `entity_type`, `entity_id`, `org_unit_id`),
+                    INDEX `idx_ad_day` (`day`),
+                    INDEX `idx_ad_event_day` (`event`, `day`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                self::addColumnIfMissing($pdo, 'settings', 'analytics_enabled', 'TINYINT(1) NOT NULL DEFAULT 1', 'comments_flag_threshold');
+                self::addColumnIfMissing($pdo, 'settings', 'analytics_retention_days', 'INT NOT NULL DEFAULT 180', 'analytics_enabled');
+            },
         ];
     }
 

@@ -628,6 +628,7 @@ $router->get('/events', function () {
 });
 
 $router->get('/events/{slug}', function (array $params) {
+    Analytics::recordEntityBySlug('event', 'events', (string) $params['slug']);
     render('event-detail', ['slug' => $params['slug']]);
 });
 
@@ -636,6 +637,7 @@ $router->get('/sermons', function () {
 });
 
 $router->get('/sermons/{slug}', function (array $params) {
+    Analytics::recordEntityBySlug('sermon', 'sermons', (string) $params['slug']);
     render('sermon-detail', ['slug' => $params['slug']]);
 });
 

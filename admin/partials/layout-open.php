@@ -8,6 +8,7 @@ $adminUser = Auth::user();
 
 $navItems = [
     ['key' => 'dashboard', 'href' => '/admin', 'label' => 'Dashboard'],
+    ['key' => 'analytics', 'href' => '/admin/analytics', 'label' => 'Analytics', 'super' => true],
     ['key' => 'media', 'href' => '/admin/media', 'label' => 'Media & Reels'],
     ['key' => 'comments', 'href' => '/admin/comments', 'label' => 'Comments'],
     ['key' => 'ads', 'href' => '/admin/ads', 'label' => 'Ads Management'],

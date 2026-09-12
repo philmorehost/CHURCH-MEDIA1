@@ -84,6 +84,8 @@ CREATE TABLE IF NOT EXISTS `settings` (
   `license_key` VARCHAR(120) NULL,
   `comments_moderation` VARCHAR(20) NOT NULL DEFAULT 'off' COMMENT 'off|all|links|words — how much is held for review',
   `comments_flag_threshold` INT NOT NULL DEFAULT 3 COMMENT 'Reader reports before a comment is auto-flagged',
+  `analytics_enabled` TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'Collect anonymous traffic analytics',
+  `analytics_retention_days` INT NOT NULL DEFAULT 180 COMMENT 'Days of raw events kept; daily roll-ups are kept forever',
   `timezone` VARCHAR(64) NOT NULL DEFAULT 'Africa/Lagos',
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY `uniq_settings_tenant` (`tenant_id`),
@@ -738,4 +740,48 @@ CREATE TABLE IF NOT EXISTS `testimonies` (
   `approved_at` TIMESTAMP NULL DEFAULT NULL,
   INDEX `idx_testimony_status` (`status`, `submitted_at`),
   INDEX `idx_testimony_unit` (`unit_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Analytics: raw traffic/interaction events. Deliberately has NO foreign keys so
+-- pruning old rows can never cascade into content, and so events survive even if
+-- a post is later deleted. `session_hash` is a rotating device hash, never an IP.
+-- Counts that already live in their own tables (giving, newcomers, attendance,
+-- likes, saves, comments) are NOT duplicated here.
+CREATE TABLE IF NOT EXISTS `analytics_events` (
+  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NOT NULL DEFAULT 0 COMMENT '0 = not yet attributed',
+  `occurred_at` DATETIME NOT NULL,
+  `event` VARCHAR(60) NOT NULL,
+  `path` VARCHAR(255) NULL,
+  `org_unit_id` INT NULL,
+  `entity_type` VARCHAR(30) NULL,
+  `entity_id` INT NULL,
+  `device` VARCHAR(10) NOT NULL DEFAULT 'web' COMMENT 'web|app',
+  `session_hash` VARCHAR(64) NULL COMMENT 'Rotating device hash - never an IP',
+  `referrer_host` VARCHAR(120) NULL,
+  `country` VARCHAR(2) NULL,
+  `meta` VARCHAR(255) NULL COMMENT 'e.g. the search term, truncated',
+  INDEX `idx_ae_time` (`occurred_at`),
+  INDEX `idx_ae_event_time` (`event`, `occurred_at`),
+  INDEX `idx_ae_tenant_time` (`tenant_id`, `occurred_at`),
+  INDEX `idx_ae_entity` (`entity_type`, `entity_id`),
+  INDEX `idx_ae_session` (`session_hash`, `occurred_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Nightly roll-up, kept indefinitely. Raw events are pruned after
+-- `analytics_retention_days`, so these rows are the long-term history.
+-- Every key column is NOT NULL so the upsert below is deterministic.
+CREATE TABLE IF NOT EXISTS `analytics_daily` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NOT NULL DEFAULT 0,
+  `day` DATE NOT NULL,
+  `event` VARCHAR(60) NOT NULL,
+  `device` VARCHAR(10) NOT NULL DEFAULT 'web',
+  `entity_type` VARCHAR(30) NOT NULL DEFAULT '',
+  `entity_id` INT NOT NULL DEFAULT 0,
+  `org_unit_id` INT NOT NULL DEFAULT 0,
+  `hits` INT NOT NULL DEFAULT 0,
+  UNIQUE KEY `uniq_analytics_day` (`tenant_id`, `day`, `event`, `device`, `entity_type`, `entity_id`, `org_unit_id`),
+  INDEX `idx_ad_day` (`day`),
+  INDEX `idx_ad_event_day` (`event`, `day`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
