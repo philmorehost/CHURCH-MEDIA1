@@ -475,10 +475,26 @@ final class PodcastFeed
         return $types[strtolower((string) pathinfo($path, PATHINFO_EXTENSION))] ?? 'audio/mpeg';
     }
 
-    /** RSS dates are RFC 822, which is not what `date()` gives by default. */
-    private static function rfc822(mixed $datetime): string
+    /**
+     * RSS dates are RFC 822, which is not what `date()` gives by default.
+     *
+     * The parameter is deliberately left untyped. `mixed` is PHP 8 syntax, and
+     * on PHP 7 the engine reads it as a class name instead of a keyword, so
+     * every call with a null date threw a TypeError. A null date is expected
+     * here, so no type hint is the correct answer rather than a wider one.
+     *
+     * @param string|int|null $datetime
+     */
+    private static function rfc822($datetime): string
     {
-        $timestamp = $datetime ? strtotime((string) $datetime) : false;
+        if (is_int($datetime)) {
+            // Already a UNIX timestamp. String casting it before strtotime()
+            // would fail the parse and fall through to "now" below, which would
+            // silently reorder the feed.
+            $timestamp = $datetime;
+        } else {
+            $timestamp = $datetime ? strtotime((string) $datetime) : false;
+        }
         if ($timestamp === false) {
             $timestamp = time();
         }

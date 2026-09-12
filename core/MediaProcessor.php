@@ -438,8 +438,14 @@ class MediaProcessor
         return $storedName ? 'webp/' . $storedName : null;
     }
 
-    /** SVG initial-letter favicon, used when no favicon has been uploaded. */
-    public static function renderDynamicFavicon(string $initial): never
+    /**
+     * SVG initial-letter favicon, used when no favicon has been uploaded.
+     *
+     * Declared `void` rather than `never`: `never` is PHP 8.1 syntax, and on
+     * PHP 7 it is read as a class name. The function writes the image and then
+     * exits, so a void return is accurate on every supported version.
+     */
+    public static function renderDynamicFavicon(string $initial): void
     {
         header('Content-Type: image/svg+xml');
         header('Cache-Control: public, max-age=86400');
