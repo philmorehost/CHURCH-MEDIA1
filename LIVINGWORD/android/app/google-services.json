@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "943747021732",
+    "project_id": "living-word-eeb04",
+    "storage_bucket": "living-word-eeb04.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:943747021732:android:2e1a85691cc951c28b1f31",
+        "android_client_info": {
+          "package_name": "com.livingwordgospelmission.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDG2EBp4sOSzyR6Jcfqx80kYEeLWdqndXc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

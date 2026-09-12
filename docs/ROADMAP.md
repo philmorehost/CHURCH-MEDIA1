@@ -136,7 +136,7 @@ Do this **before** any Phase 1/2 work so nothing has to be retrofitted later.
 > `api/analytics.php` beacon + `public/assets/js/analytics.js`; server-side content views on
 > the sermon/event routes and `api/post.php`; `admin/analytics.php` dashboard with a
 > pure-SVG chart; `cli/analytics_rollup.php` for cron. 45 assertions passing.
-> The Flutter app reports too, via `mobile/lib/services/analytics_beacon.dart`:
+> The Flutter app reports too, via `RCCGLP63/lib/services/analytics_beacon.dart`:
 > `app_open` on launch, content views from the sermon and event screens, and search
 > terms from the app's search. All of it sends `device=app`, which is what puts a hit
 > in the app column instead of showing every visitor as web. The app deliberately never
@@ -911,7 +911,7 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
   public `/devotional` page, app home card, and a scheduled push at a set time.
 - **Bible reading plans**: `reading_plans` + `reading_plan_days` + `member_plan_progress`
   (streak, last completed day), plan catalogue, day-by-day reader on top of the bundled
-  offline KJV in `mobile/assets/bible/kjv.json`, streak counter and reminder notification.
+  offline KJV in `RCCGLP63/assets/bible/kjv.json`, streak counter and reminder notification.
 - **Offline sermon downloads**: cache audio in app storage with a managed download list and
   size/wipe controls.
 - **Verify**: reading progress survives app restart and works offline; devotional push

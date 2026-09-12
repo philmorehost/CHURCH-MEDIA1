@@ -1,9 +1,20 @@
-name: Build APK & AAB
+name: Build Android apps
 
-# Builds the Android app automatically whenever code is pushed to main.
-# Find the run + downloadable artifacts under: Actions → "Build APK & AAB" → latest run → artifacts.
-# - church-media-apk: signed release APK (for direct install / sideload)
-# - church-media-aab: signed release App Bundle (for Google Play Console → App → Release)
+# Builds BOTH church apps whenever code is pushed to main:
+#
+#   RCCGLP63   the Grace & Life / RCCG LP63 YAYA app   (com.churchmedia.app)
+#   LIVINGWORD the Living Word Gospel Mission app      (com.livingwordgospelmission.app)
+#
+# Downloads live under: Actions -> this run -> Artifacts
+#   rccglp63-apk   / rccglp63-aab
+#   livingword-apk / livingword-aab
+#
+# Each app is an independent Flutter project in its own folder, so they are built
+# by two independent jobs and one failing never blocks the other.
+#
+# Signing: every app has its OWN keystore secrets. When a set is missing the build
+# still succeeds using the debug key — good enough to sideload and test, but Play
+# rejects it. Signing keys are per-app in Play, so they are never shared.
 on:
   push:
     branches:
@@ -11,12 +22,12 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: apk-build-${{ github.ref }}
+  group: android-build-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build-apk:
-    name: Build Android APK
+  rccglp63:
+    name: RCCGLP63 (Grace & Life)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -40,47 +51,48 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('mobile/android/**/*.gradle*', 'mobile/android/gradle/wrapper/gradle-wrapper.properties') }}
+          key: gradle-rccglp63-${{ runner.os }}-${{ hashFiles('RCCGLP63/android/**/*.gradle*', 'RCCGLP63/android/gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: |
-            gradle-${{ runner.os }}-
+            gradle-rccglp63-${{ runner.os }}-
 
       - name: Install dependencies
-        working-directory: mobile
+        working-directory: RCCGLP63
         run: flutter pub get
 
       - name: Set up release signing
+        working-directory: RCCGLP63
         env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
-            mkdir -p mobile/android/keystore
-            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > mobile/android/keystore/release.keystore
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            mkdir -p android/keystore
+            echo "$KEYSTORE_BASE64" | base64 --decode > android/keystore/release.keystore
             printf 'storeFile=../keystore/release.keystore\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
-              "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > mobile/android/key.properties
+              "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > android/key.properties
             echo "Release signing configured."
           else
             echo "No keystore secret set - release build will fall back to the debug key."
           fi
 
       - name: Build release APK
-        working-directory: mobile
+        working-directory: RCCGLP63
         run: |
           flutter build apk --release \
             --build-name "1.0.${{ github.run_number }}" \
             --build-number "${{ github.run_number }}"
 
       - name: Build release AAB
-        working-directory: mobile
+        working-directory: RCCGLP63
         run: |
           flutter build appbundle --release \
             --build-name "1.0.${{ github.run_number }}" \
             --build-number "${{ github.run_number }}"
 
       - name: Verify APK signature
-        working-directory: mobile
+        working-directory: RCCGLP63
         run: |
           APKSIGNER=$(ls $ANDROID_HOME/build-tools/*/apksigner 2>/dev/null | tail -1)
           if [ -n "$APKSIGNER" ]; then
@@ -92,18 +104,118 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: church-media-apk
-          path: mobile/build/app/outputs/flutter-apk/app-release.apk
+          name: rccglp63-apk
+          path: RCCGLP63/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
 
       - name: Upload AAB
         uses: actions/upload-artifact@v4
         with:
-          name: church-media-aab
-          path: mobile/build/app/outputs/bundle/release/app-release.aab
+          name: rccglp63-aab
+          path: RCCGLP63/build/app/outputs/bundle/release/app-release.aab
           if-no-files-found: error
 
-      # Publishing to Google Play is done manually: download the
-      # church-media-aab artifact from this run and upload it in
-      # Play Console → App → Production (or another track).
-      # This avoids needing a Play service-account key in CI.
+  livingword:
+    name: LIVINGWORD (Living Word Gospel Mission)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Accept Android SDK licenses
+        run: yes | flutter doctor --android-licenses
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-livingword-${{ runner.os }}-${{ hashFiles('LIVINGWORD/android/**/*.gradle*', 'LIVINGWORD/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-livingword-${{ runner.os }}-
+
+      - name: Install dependencies
+        working-directory: LIVINGWORD
+        run: flutter pub get
+
+      # google-services.json is committed for this app, so this step only exists to
+      # fail with a useful message if someone ever removes it. Without the file the
+      # Google Services Gradle plugin stops the build with a much vaguer error.
+      - name: Confirm Firebase config is present
+        working-directory: LIVINGWORD
+        run: |
+          if [ ! -f android/app/google-services.json ]; then
+            echo "::error::LIVINGWORD/android/app/google-services.json is missing. Firebase Cloud Messaging cannot be set up without it. Re-download it from the Firebase console for project living-word-eeb04 (Project settings -> Your apps -> Android) and commit it."
+            exit 1
+          fi
+          echo "Firebase config present."
+
+      - name: Set up release signing
+        working-directory: LIVINGWORD
+        env:
+          KEYSTORE_BASE64: ${{ secrets.LIVINGWORD_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.LIVINGWORD_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.LIVINGWORD_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.LIVINGWORD_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            mkdir -p android/keystore
+            echo "$KEYSTORE_BASE64" | base64 --decode > android/keystore/release.keystore
+            printf 'storeFile=../keystore/release.keystore\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+              "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > android/key.properties
+            echo "Release signing configured."
+          else
+            echo "No keystore secret set - release build will fall back to the debug key."
+          fi
+
+      - name: Build release APK
+        working-directory: LIVINGWORD
+        run: |
+          flutter build apk --release \
+            --build-name "1.0.${{ github.run_number }}" \
+            --build-number "${{ github.run_number }}"
+
+      - name: Build release AAB
+        working-directory: LIVINGWORD
+        run: |
+          flutter build appbundle --release \
+            --build-name "1.0.${{ github.run_number }}" \
+            --build-number "${{ github.run_number }}"
+
+      - name: Verify APK signature
+        working-directory: LIVINGWORD
+        run: |
+          APKSIGNER=$(ls $ANDROID_HOME/build-tools/*/apksigner 2>/dev/null | tail -1)
+          if [ -n "$APKSIGNER" ]; then
+            "$APKSIGNER" verify --print-certs build/app/outputs/flutter-apk/app-release.apk
+          else
+            echo "apksigner not found; skipping verification"
+          fi
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: livingword-apk
+          path: LIVINGWORD/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+
+      - name: Upload AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: livingword-aab
+          path: LIVINGWORD/build/app/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+
+      # Publishing to Google Play is manual: download livingword-aab from this run
+      # and upload it in Play Console -> App -> Production (or another track).
+      # No Play service-account key is needed in CI.
