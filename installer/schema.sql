@@ -3,8 +3,33 @@
 
 SET NAMES utf8mb4;
 
+-- SaaS tenants. A tenant is one church organisation; the installer seeds a
+-- single default tenant, so a single-church install behaves exactly as before.
+-- Tables added from the SaaS work onward carry `tenant_id`; the older content
+-- tables are still single-tenant and are migrated in the Phase 7 rollout.
+CREATE TABLE IF NOT EXISTS `tenants` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `name` VARCHAR(150) NOT NULL,
+  `slug` VARCHAR(80) NOT NULL,
+  `domain` VARCHAR(190) NULL COMMENT 'Full host match, e.g. yaya.example.org',
+  `subdomain` VARCHAR(80) NULL COMMENT 'Leading label match, e.g. yaya',
+  `logo_path` VARCHAR(255) NULL,
+  `primary_colour` VARCHAR(20) NULL,
+  `plan` VARCHAR(40) NOT NULL DEFAULT 'standard',
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `is_default` TINYINT(1) NOT NULL DEFAULT 0,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_tenant_slug` (`slug`),
+  UNIQUE KEY `uniq_tenant_domain` (`domain`),
+  UNIQUE KEY `uniq_tenant_subdomain` (`subdomain`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO `tenants` (`id`, `name`, `slug`, `is_default`)
+VALUES (1, 'Default Church', 'default', 1);
+
 CREATE TABLE IF NOT EXISTS `settings` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NULL COMMENT 'NULL = shared defaults; otherwise this row overrides them for one tenant',
   `site_title` VARCHAR(255) NOT NULL DEFAULT 'Grace & Life Church',
   `site_tagline` VARCHAR(255) NULL,
   `logo_path` VARCHAR(255) NULL,
@@ -58,7 +83,9 @@ CREATE TABLE IF NOT EXISTS `settings` (
   `email_default_quota` INT NOT NULL DEFAULT 500 COMMENT 'MB',
   `license_key` VARCHAR(120) NULL,
   `timezone` VARCHAR(64) NOT NULL DEFAULT 'Africa/Lagos',
-  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_settings_tenant` (`tenant_id`),
+  FOREIGN KEY (`tenant_id`) REFERENCES `tenants`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Configurable hierarchy levels. `type` is the stable key stored in

@@ -81,6 +81,13 @@ screen they add.
 
 Do this **before** any Phase 1/2 work so nothing has to be retrofitted later.
 
+> **Status: core shipped.** `tenants` table (migration + schema), `core/Tenant.php`
+> (resolution, host matching, onboarding, authorised session switching), tenant-aware
+> `settings()`, bootstrap resolution, and a super-admin switcher in the admin sidebar.
+> Verified with 25 assertions plus an upgrade simulation against a legacy database.
+> Remaining for Phase 7: per-tenant upload/cache namespacing, branding UI, plan limits,
+> self-service provisioning, and moving the older content tables onto `tenant_id`.
+
 - **DB**: `tenants` (`id`, `name`, `slug` UNIQUE, `domain` NULL, `subdomain` NULL,
   `logo`, `primary_colour`, `is_active`, `plan`, `created_at`). `settings` gains `tenant_id`
   (NULL = global/default). Every table added from Phase 1 onward carries

@@ -68,6 +68,27 @@ $navItemsSystem = [
       <?php endforeach; ?>
     </nav>
     <div class="foot">
+      <?php
+      // SaaS: the super admin can hop between churches. Rendered only when there
+      // is somewhere to hop to, so a single-church install shows nothing extra.
+      $tenants = ($adminUser && !empty($adminUser['is_super_admin']) && class_exists('Tenant')) ? Tenant::all() : [];
+      $currentTenant = $tenants ? Tenant::current() : null;
+      ?>
+      <?php if (count($tenants) > 1): ?>
+        <form method="post" action="/admin/tenant-switch" style="margin-bottom:12px;">
+          <?= Csrf::field() ?>
+          <input type="hidden" name="return" value="<?= e($_SERVER['REQUEST_URI'] ?? '/admin') ?>">
+          <label for="tenant_id" style="font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-faint);">Church</label>
+          <select id="tenant_id" name="tenant_id" style="width:100%;margin-top:4px;font-size:12px;padding:6px 8px;">
+            <?php foreach ($tenants as $t): ?>
+              <option value="<?= (int) $t['id'] ?>" <?= $currentTenant && (int) $currentTenant['id'] === (int) $t['id'] ? 'selected' : '' ?>>
+                <?= e($t['name']) ?>
+              </option>
+            <?php endforeach; ?>
+          </select>
+          <button class="btn secondary sm" type="submit" style="width:100%;margin-top:6px;">Switch Church</button>
+        </form>
+      <?php endif; ?>
       <a href="/" target="_blank" style="color:var(--ink-dim);">↗ View Website</a><br><br>
       <a href="/admin/logout" style="color:var(--danger);">Log Out</a>
     </div>

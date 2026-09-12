@@ -228,22 +228,50 @@ function strongEnoughPassword(string $pw): bool
     return cpanelPasswordScore($pw) >= 65;
 }
 
-/** Lazily loads the single settings row and caches it for the request. */
+/**
+ * Lazily loads settings for the current tenant and caches them for the request.
+ *
+ * Resolution order, each layer overriding the last: config/site.php defaults →
+ * the shared `settings` row (tenant_id IS NULL) → this tenant's own row. A
+ * single-church install keeps one shared row and behaves exactly as before; a
+ * tenant only stores the handful of values that differ (site title, branding,
+ * SMS credentials, …).
+ */
 function settings(): array
 {
     static $cache = null;
-    if ($cache !== null) {
+    static $cacheTenant = 'unset';
+
+    $tenantId = class_exists('Tenant') ? Tenant::id() : null;
+    if ($cache !== null && $cacheTenant === $tenantId) {
         return $cache;
     }
+    $cacheTenant = $tenantId;
+
     $defaults = require CONFIG_PATH . '/site.php';
     if (!defined('APP_IS_INSTALLED') || !APP_IS_INSTALLED) {
         return $cache = $defaults;
     }
+
     try {
-        $row = Database::getInstance()->getConnection()
-            ->query('SELECT * FROM settings ORDER BY id ASC LIMIT 1')
-            ->fetch();
-        $cache = $row ? array_merge($defaults, array_filter($row, fn ($v) => $v !== null)) : $defaults;
+        $pdo = Database::getInstance()->getConnection();
+        $merged = $defaults;
+
+        $shared = $pdo->query('SELECT * FROM settings WHERE tenant_id IS NULL ORDER BY id ASC LIMIT 1')->fetch();
+        if ($shared) {
+            $merged = array_merge($merged, array_filter($shared, fn ($v) => $v !== null));
+        }
+
+        if ($tenantId !== null) {
+            $stmt = $pdo->prepare('SELECT * FROM settings WHERE tenant_id = ? ORDER BY id ASC LIMIT 1');
+            $stmt->execute([$tenantId]);
+            $own = $stmt->fetch();
+            if ($own) {
+                $merged = array_merge($merged, array_filter($own, fn ($v) => $v !== null));
+            }
+        }
+
+        $cache = $merged;
     } catch (Throwable $e) {
         $cache = $defaults;
     }

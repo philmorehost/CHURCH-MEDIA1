@@ -865,6 +865,47 @@ class Database
                     self::addColumnIfMissing($pdo, 'pending_registrations', 'unit_path', 'TEXT NULL', 'parish_id');
                 }
             },
+
+            // Phase 0 of the SaaS roadmap: tenants. The first tenant is seeded
+            // from the current settings row so a single-church install keeps
+            // working untouched — `settings.tenant_id` stays NULL there, which
+            // still means "shared defaults for everyone".
+            '2026_10_tenants' => function (PDO $pdo): void {
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `tenants` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `name` VARCHAR(150) NOT NULL,
+                    `slug` VARCHAR(80) NOT NULL,
+                    `domain` VARCHAR(190) NULL,
+                    `subdomain` VARCHAR(80) NULL,
+                    `logo_path` VARCHAR(255) NULL,
+                    `primary_colour` VARCHAR(20) NULL,
+                    `plan` VARCHAR(40) NOT NULL DEFAULT 'standard',
+                    `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+                    `is_default` TINYINT(1) NOT NULL DEFAULT 0,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY `uniq_tenant_slug` (`slug`),
+                    UNIQUE KEY `uniq_tenant_domain` (`domain`),
+                    UNIQUE KEY `uniq_tenant_subdomain` (`subdomain`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                self::addColumnIfMissing($pdo, 'settings', 'tenant_id', 'INT NULL', 'id');
+                self::addIndexIfMissing($pdo, 'settings', 'uniq_settings_tenant', 'UNIQUE KEY `uniq_settings_tenant` (`tenant_id`)');
+
+                // A tenant must always exist so Tenant::current() can resolve.
+                if ((int) $pdo->query('SELECT COUNT(*) FROM tenants')->fetchColumn() === 0) {
+                    $title = 'Default Church';
+                    try {
+                        $existing = $pdo->query('SELECT site_title FROM settings WHERE tenant_id IS NULL ORDER BY id ASC LIMIT 1')->fetchColumn();
+                        if (is_string($existing) && $existing !== '') {
+                            $title = $existing;
+                        }
+                    } catch (Throwable $e) {
+                        // Fresh install with an empty settings table — keep the fallback.
+                    }
+                    $pdo->prepare('INSERT INTO tenants (name, slug, is_default) VALUES (?, ?, 1)')
+                        ->execute([$title, 'default']);
+                }
+            },
         ];
     }
 
@@ -880,6 +921,17 @@ class Database
             $sql .= ' AFTER `' . $after . '`';
         }
         $pdo->exec($sql);
+    }
+
+    /** Adds an index (or unique key) when no index of that name already exists. */
+    private static function addIndexIfMissing(PDO $pdo, string $table, string $indexName, string $definition): void
+    {
+        $check = $pdo->prepare('SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?');
+        $check->execute([$table, $indexName]);
+        if ((int) $check->fetchColumn() > 0) {
+            return;
+        }
+        $pdo->exec('ALTER TABLE `' . $table . '` ADD ' . $definition);
     }
 
     private static function addForeignKeyIfMissing(PDO $pdo, string $table, string $constraint, string $column, string $refTable, string $refColumn, string $onDelete): void

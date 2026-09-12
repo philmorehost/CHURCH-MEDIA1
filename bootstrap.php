@@ -85,6 +85,17 @@ if (APP_IS_INSTALLED) {
     Database::migrate();
 }
 
+// SaaS: work out which tenant is serving this request. On a single-church
+// install this always resolves to the seeded default tenant, so nothing about
+// the existing behaviour changes; the migration back-fills it automatically.
+if (APP_IS_INSTALLED) {
+    try {
+        Tenant::current();
+    } catch (Throwable $e) {
+        error_log('Tenant resolution skipped: ' . $e->getMessage());
+    }
+}
+
 // Site-wide IP/country gate — runs before any route handles the request.
 // Fails open (logs and continues) if the DB isn't reachable, rather than
 // taking the whole site down on a transient connection issue.
