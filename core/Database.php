@@ -1073,6 +1073,227 @@ class Database
                 self::addColumnIfMissing($pdo, 'settings', 'backup_retention_days', 'INT NOT NULL DEFAULT 14', 'analytics_retention_days');
                 self::addColumnIfMissing($pdo, 'settings', 'backup_offsite_path', 'VARCHAR(255) NULL', 'backup_retention_days');
             },
+
+            // SMS messaging hub, foundation. Additive only: phone columns are nullable
+            // so every existing row keeps working, and the settings columns are left at
+            // their defaults so nothing sends until an admin connects a gateway.
+            '2026_17_sms_foundation' => function (PDO $pdo): void {
+                // Contact sources that already hold a phone number somewhere else.
+                self::addColumnIfMissing($pdo, 'users', 'phone', 'VARCHAR(32) NULL', 'email');
+                self::addColumnIfMissing($pdo, 'newsletter_subscribers', 'phone', 'VARCHAR(32) NULL', 'email');
+                self::addColumnIfMissing($pdo, 'newsletter_subscribers', 'sms_consent', 'TINYINT(1) NOT NULL DEFAULT 0', 'phone');
+                self::addColumnIfMissing($pdo, 'device_tokens', 'phone', 'VARCHAR(32) NULL', 'org_unit_id');
+
+                // Gateway settings. The token is stored encrypted and never rendered
+                // in full; `sms_default_country` drives number normalisation.
+                self::addColumnIfMissing($pdo, 'settings', 'sms_token', 'TEXT NULL', 'backup_offsite_path');
+                self::addColumnIfMissing($pdo, 'settings', 'sms_default_country', "VARCHAR(4) NOT NULL DEFAULT '234'", 'sms_token');
+                self::addColumnIfMissing($pdo, 'settings', 'sms_default_sender_id', 'VARCHAR(11) NULL', 'sms_default_country');
+                self::addColumnIfMissing($pdo, 'settings', 'sms_sender_display_name', 'VARCHAR(60) NULL', 'sms_default_sender_id');
+                self::addColumnIfMissing($pdo, 'settings', 'sms_quiet_start', 'TINYINT NOT NULL DEFAULT 7', 'sms_sender_display_name');
+                self::addColumnIfMissing($pdo, 'settings', 'sms_quiet_end', 'TINYINT NOT NULL DEFAULT 20', 'sms_quiet_start');
+                self::addColumnIfMissing($pdo, 'settings', 'sms_daily_unit_cap', 'INT NOT NULL DEFAULT 0', 'sms_quiet_end');
+                self::addColumnIfMissing($pdo, 'settings', 'sms_sender_cap', 'INT NOT NULL DEFAULT 0', 'sms_daily_unit_cap');
+                self::addColumnIfMissing($pdo, 'settings', 'sms_batch_size', 'INT NOT NULL DEFAULT 100', 'sms_sender_cap');
+                self::addColumnIfMissing($pdo, 'settings', 'sms_allow_unit_sending', 'TINYINT(1) NOT NULL DEFAULT 1', 'sms_batch_size');
+                self::addColumnIfMissing($pdo, 'settings', 'sms_optout_footer', "VARCHAR(160) NOT NULL DEFAULT 'Reply STOP to opt out.'", 'sms_allow_unit_sending');
+                self::addColumnIfMissing($pdo, 'settings', 'sms_log_retention_days', 'INT NOT NULL DEFAULT 30', 'sms_optout_footer');
+
+                // Country rules, so a number is validated against its own country rather
+                // than silently mangled. Seeded with the markets this is likely to serve.
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `sms_countries` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `dial_code` VARCHAR(4) NOT NULL,
+                    `name` VARCHAR(80) NOT NULL,
+                    `national_length` INT NOT NULL COMMENT 'Digits after the dial code for a national number',
+                    `trunk_prefix` VARCHAR(2) NOT NULL DEFAULT '0' COMMENT 'National prefix stripped before the dial code is applied',
+                    `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+                    UNIQUE KEY `uniq_sms_country` (`dial_code`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                $countries = [
+                    ['234', 'Nigeria', 10, '0'],
+                    ['233', 'Ghana', 9, '0'],
+                    ['254', 'Kenya', 9, '0'],
+                    ['256', 'Uganda', 9, '0'],
+                    ['255', 'Tanzania', 9, '0'],
+                    ['27', 'South Africa', 9, '0'],
+                    ['263', 'Zimbabwe', 9, '0'],
+                    ['251', 'Ethiopia', 9, '0'],
+                    ['250', 'Rwanda', 9, '0'],
+                    ['231', 'Liberia', 8, '0'],
+                    ['232', 'Sierra Leone', 8, '0'],
+                    ['220', 'Gambia', 7, '0'],
+                    ['1', 'United States / Canada', 10, '1'],
+                    ['44', 'United Kingdom', 10, '0'],
+                    ['353', 'Ireland', 9, '0'],
+                    ['61', 'Australia', 9, '0'],
+                    ['971', 'United Arab Emirates', 9, '0'],
+                    ['91', 'India', 10, '0'],
+                ];
+                $seedCountry = $pdo->prepare('INSERT IGNORE INTO sms_countries (dial_code, name, national_length, trunk_prefix) VALUES (?, ?, ?, ?)');
+                foreach ($countries as $country) {
+                    $seedCountry->execute($country);
+                }
+
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `sms_senders` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `tenant_id` INT NULL,
+                    `sender_id` VARCHAR(11) NOT NULL,
+                    `status` ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+                    `status_source` ENUM('gateway','manual') NOT NULL DEFAULT 'gateway',
+                    `sample_message` VARCHAR(160) NULL,
+                    `is_default` TINYINT(1) NOT NULL DEFAULT 0,
+                    `org_unit_id` INT NULL,
+                    `submitted_by` INT NULL,
+                    `last_checked_at` DATETIME NULL,
+                    `last_check_note` VARCHAR(255) NULL,
+                    `approved_at` DATETIME NULL,
+                    `rejection_note` VARCHAR(255) NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY `uniq_sms_sender_tenant` (`tenant_id`, `sender_id`),
+                    INDEX `idx_sms_sender_status` (`status`),
+                    FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL,
+                    FOREIGN KEY (`submitted_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `sms_contacts` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `tenant_id` INT NULL,
+                    `name` VARCHAR(150) NULL,
+                    `msisdn` VARCHAR(20) NOT NULL COMMENT 'Normalised: dial code + national number, no plus',
+                    `country_code` VARCHAR(4) NOT NULL DEFAULT '234',
+                    `email` VARCHAR(190) NULL,
+                    `org_unit_id` INT NULL,
+                    `source` ENUM('manual','newcomer','subscriber','team','testimony','registration','form','app','import','member') NOT NULL DEFAULT 'manual',
+                    `source_ref_id` INT NULL,
+                    `tags` VARCHAR(255) NULL,
+                    `is_opted_out` TINYINT(1) NOT NULL DEFAULT 0,
+                    `opt_out_at` DATETIME NULL,
+                    `notes` VARCHAR(500) NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY `uniq_sms_contact` (`tenant_id`, `msisdn`),
+                    INDEX `idx_sms_contact_unit` (`org_unit_id`),
+                    INDEX `idx_sms_contact_source` (`source`),
+                    INDEX `idx_sms_contact_optout` (`is_opted_out`),
+                    FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `sms_groups` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `tenant_id` INT NULL,
+                    `name` VARCHAR(150) NOT NULL,
+                    `slug` VARCHAR(170) NOT NULL,
+                    `kind` ENUM('static','dynamic') NOT NULL DEFAULT 'static',
+                    `rule` JSON NULL COMMENT 'Dynamic segments: the rule rows that build the audience',
+                    `org_unit_id` INT NULL,
+                    `created_by` INT NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY `uniq_sms_group_slug` (`tenant_id`, `slug`),
+                    FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL,
+                    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                // PK on the pair, so adding the same contact twice is a no-op.
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `sms_group_members` (
+                    `group_id` INT NOT NULL,
+                    `contact_id` INT NOT NULL,
+                    `added_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (`group_id`, `contact_id`),
+                    INDEX `idx_sgm_contact` (`contact_id`),
+                    FOREIGN KEY (`group_id`) REFERENCES `sms_groups`(`id`) ON DELETE CASCADE,
+                    FOREIGN KEY (`contact_id`) REFERENCES `sms_contacts`(`id`) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `sms_templates` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `tenant_id` INT NULL,
+                    `name` VARCHAR(150) NOT NULL,
+                    `body` TEXT NOT NULL,
+                    `org_unit_id` INT NULL,
+                    `created_by` INT NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL,
+                    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `sms_campaigns` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `tenant_id` INT NULL,
+                    `title` VARCHAR(200) NOT NULL,
+                    `message` TEXT NOT NULL,
+                    `sender_id` VARCHAR(11) NULL,
+                    `group_id` INT NULL,
+                    `status` ENUM('draft','scheduled','queued','sending','sent','partial','failed','cancelled') NOT NULL DEFAULT 'draft',
+                    `scheduled_at` DATETIME NULL,
+                    `started_at` DATETIME NULL,
+                    `finished_at` DATETIME NULL,
+                    `total_recipients` INT NOT NULL DEFAULT 0,
+                    `sent_count` INT NOT NULL DEFAULT 0,
+                    `failed_count` INT NOT NULL DEFAULT 0,
+                    `skipped_count` INT NOT NULL DEFAULT 0,
+                    `units_charged` INT NOT NULL DEFAULT 0,
+                    `estimated_units` INT NOT NULL DEFAULT 0,
+                    `created_by` INT NULL,
+                    `org_unit_id` INT NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    INDEX `idx_sms_campaign_status` (`status`, `scheduled_at`),
+                    FOREIGN KEY (`group_id`) REFERENCES `sms_groups`(`id`) ON DELETE SET NULL,
+                    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+                    FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                // Unique on (campaign, msisdn) so a retry after a crash can never send
+                // the same message to the same person twice.
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `sms_campaign_recipients` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `campaign_id` INT NOT NULL,
+                    `contact_id` INT NULL,
+                    `msisdn` VARCHAR(20) NOT NULL,
+                    `name` VARCHAR(150) NULL,
+                    `status` ENUM('pending','sent','failed','skipped') NOT NULL DEFAULT 'pending',
+                    `units` INT NOT NULL DEFAULT 0,
+                    `error_code` VARCHAR(10) NULL,
+                    `error_note` VARCHAR(255) NULL,
+                    `attempts` INT NOT NULL DEFAULT 0,
+                    `sent_at` DATETIME NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY `uniq_sms_recipient` (`campaign_id`, `msisdn`),
+                    INDEX `idx_scr_status` (`campaign_id`, `status`),
+                    FOREIGN KEY (`campaign_id`) REFERENCES `sms_campaigns`(`id`) ON DELETE CASCADE,
+                    FOREIGN KEY (`contact_id`) REFERENCES `sms_contacts`(`id`) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                // Every gateway call. The token is deliberately absent from this table.
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `sms_messages_log` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `tenant_id` INT NULL,
+                    `campaign_id` INT NULL,
+                    `endpoint` VARCHAR(40) NOT NULL,
+                    `recipient_count` INT NOT NULL DEFAULT 0,
+                    `recipient_sample` VARCHAR(255) NULL COMMENT 'First few numbers only, never the whole list',
+                    `sender_id` VARCHAR(11) NULL,
+                    `request_summary` VARCHAR(500) NULL COMMENT 'Never the token',
+                    `error_code` VARCHAR(10) NULL,
+                    `error_note` VARCHAR(255) NULL,
+                    `http_status` INT NULL,
+                    `duration_ms` INT NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    INDEX `idx_sml_created` (`created_at`),
+                    INDEX `idx_sml_endpoint` (`endpoint`, `created_at`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `sms_wallet_log` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `tenant_id` INT NULL,
+                    `balance` DECIMAL(12,2) NULL,
+                    `error_code` VARCHAR(10) NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    INDEX `idx_swl_created` (`created_at`),
+                    INDEX `idx_swl_tenant` (`tenant_id`, `created_at`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+            },
         ];
     }
 

@@ -336,6 +336,49 @@ correctly).
 Recipient format: `2348012345678` — country code, **no** leading `0`, **no** `+`.
 
 ### 2.1 Core service — `core/Sms.php`
+> **Status: shipped (Phase 2.0 — foundation).** `core/Sms.php` is complete: the six
+> gateway calls, `normaliseMsisdn()` across eight countries, GSM-7 vs UCS-2 segment
+> counting, `estimateUnits()`, `prepareRecipients()`, `senderIdProblem()`,
+> `errorMessage()` and `errorMessage`/`isFatalCode()` classification. The whole schema
+> is in place too — `sms_senders`, `sms_contacts`, `sms_groups`, `sms_group_members`,
+> `sms_templates`, `sms_campaigns`, `sms_campaign_recipients`, `sms_messages_log`,
+> `sms_wallet_log`, `sms_countries` — plus the phone columns on `users`,
+> `newsletter_subscribers` and `device_tokens`, and every gateway setting.
+> **304 assertions** (149 fresh, 155 upgrading a pre-Phase-2 database).
+>
+> **Cost correctness is the point.** A single `₦` or emoji drops the entire message from
+> GSM-7 to UCS-2, which cuts a segment from 160 characters to 70 — so 160 characters of
+> plain text costs 1 unit but the same length with one emoji costs 3. `segmentsFor()` is
+> asserted on exactly that boundary, on the GSM-7 extended characters (`€` and friends)
+> that occupy two septets each, and on emoji outside the basic multilingual plane, which
+> take two UTF-16 units. Getting this wrong over- or under-charges every campaign.
+> **Nothing sends until an admin connects a gateway**, and with no token every path fails
+> cleanly with a reason rather than throwing or half-sending.
+> **The token is encrypted at rest, masked in the UI, and allow-listed out of the log** —
+> asserted by dumping every log row and checking the plaintext token and its ciphertext
+> are both absent.
+> **2026-09-12 corrections applied:** the sender-ID rule is ≤ 11 **alphanumeric** characters
+> (letters and digits only), and numbers default to Nigeria (`234`).
+> **Two bugs found by the tests:** PHP silently casts numeric string array keys to
+> integers, so `array_keys()` on the country map returned `int 234` and `str_starts_with()`
+> threw a `TypeError` on every number; and an explicitly international number (`+44…`)
+> was rejected whenever it was not the default country, which would have stopped a church
+> texting members abroad.
+>
+> **Remaining Phase 2 work** (each a coherent next step, in dependency order):
+> - `cli/sms_worker.php` — claim a batch of `pending` recipients, send, record per-recipient
+>   results, update counters, respect quiet hours and the daily cap, pause as `partial` when
+>   the wallet is short. The unique key on `(campaign_id, msisdn)` already makes retries safe.
+> - `cli/sms_sender_check.php` — poll `check_senderID.php` every 15 minutes, back off to
+>   hourly past a day, stop on a final status, and notify the submitting church on approval.
+> - `admin/sms.php` — the nine tabs (§2.6). Contact import/export with a dry-run needs
+>   `Sms::whyInvalid()`, which is already written and tested for exactly that screen.
+> - Wiring the contact sources: a "sync from church data" pass over newcomers, users,
+>   subscribers, testimonies, registrations and form-submission phone fields.
+> - A phone field on `admin/account.php` and `admin/users.php` so "send to church team" works.
+> - Live `balance.php` / `check_senderID.php` checks against the gateway, which need a
+>   **rotated** token (the one pasted during planning was exposed in plaintext and must not
+>   be reused).
 ```
 configured(): bool
 balance(): array                       // ['ok','balance','raw','error']
