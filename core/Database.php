@@ -1019,6 +1019,42 @@ class Database
                     FOREIGN KEY (`event_id`) REFERENCES `events`(`id`) ON DELETE CASCADE
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
             },
+
+            // Prayer wall. `is_anonymous` is the only thing the public wall trusts
+            // — never the absence of a name — so a request that asked to stay
+            // anonymous keeps its name for the pastoral team but is never shown.
+            '2026_14_prayer_wall' => function (PDO $pdo): void {
+                self::addColumnIfMissing($pdo, 'prayer_requests', 'tenant_id', 'INT NULL', 'id');
+                self::addColumnIfMissing($pdo, 'prayer_requests', 'increment_count', 'INT NOT NULL DEFAULT 0', 'is_public');
+                self::addColumnIfMissing($pdo, 'prayer_requests', 'is_anonymous', 'TINYINT(1) NOT NULL DEFAULT 0', 'increment_count');
+                self::addColumnIfMissing($pdo, 'prayer_requests', 'is_featured', 'TINYINT(1) NOT NULL DEFAULT 0', 'is_anonymous');
+                self::addColumnIfMissing($pdo, 'prayer_requests', 'answered_at', 'DATETIME NULL', 'is_featured');
+                self::addColumnIfMissing($pdo, 'prayer_requests', 'answer_note', 'TEXT NULL', 'answered_at');
+                self::addIndexIfMissing($pdo, 'prayer_requests', 'idx_prayer_wall', 'INDEX `idx_prayer_wall` (`tenant_id`, `is_public`, `status`, `created_at`)');
+                self::addIndexIfMissing($pdo, 'prayer_requests', 'idx_prayer_answered', 'INDEX `idx_prayer_answered` (`tenant_id`, `answered_at`)');
+
+                // Requests that predate tenancy belong to the default church, so a
+                // plain `tenant_id = ?` read never has to special-case NULL.
+                try {
+                    $defaultTenant = (int) $pdo->query('SELECT id FROM tenants WHERE is_default = 1 ORDER BY id ASC LIMIT 1')->fetchColumn();
+                    if ($defaultTenant > 0) {
+                        $pdo->prepare('UPDATE prayer_requests SET tenant_id = ? WHERE tenant_id IS NULL')->execute([$defaultTenant]);
+                    }
+                } catch (Throwable $e) {
+                    // No tenants table yet — nothing to attribute the rows to.
+                }
+
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `prayer_participants` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `tenant_id` INT NULL,
+                    `request_id` INT NOT NULL,
+                    `session_hash` VARCHAR(64) NOT NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY `uniq_prayer_participant` (`request_id`, `session_hash`),
+                    INDEX `idx_pp_request` (`request_id`),
+                    FOREIGN KEY (`request_id`) REFERENCES `prayer_requests`(`id`) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+            },
         ];
     }
 

@@ -102,4 +102,57 @@
         });
     });
   });
+
+  // Prayer wall: "I prayed for this".
+  // Usage: <button data-pray data-request-id="12"><span data-pray-count>3</span></button>
+  // One prayer per person is counted; the server is the authority on that, so the
+  // button trusts whatever count comes back rather than incrementing locally.
+  document.querySelectorAll('[data-pray]').forEach(function (button) {
+    button.addEventListener('click', function () {
+      var requestId = parseInt(button.getAttribute('data-request-id'), 10);
+      if (!requestId) { return; }
+      var counter = button.querySelector('[data-pray-count]');
+      var label = button.querySelector('.pray-label');
+      var original = label ? label.textContent : '';
+
+      button.disabled = true;
+
+      fetch('/api/prayer?action=pray', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ request_id: requestId }),
+      })
+        .then(function (res) { return res.json().then(function (data) { return { ok: res.ok, data: data }; }); })
+        .then(function (result) {
+          if (!result.ok || result.data.status !== 'success') {
+            // Leave it clickable so a failed request is not silently swallowed.
+            if (label) { label.textContent = original; }
+            button.disabled = false;
+            return;
+          }
+          if (counter) { counter.textContent = Number(result.data.prayer_count).toLocaleString(); }
+          if (label) { label.textContent = 'You prayed'; }
+          button.setAttribute('data-prayed', '1');
+        })
+        .catch(function () {
+          if (label) { label.textContent = original; }
+          button.disabled = false;
+        });
+    });
+  });
+
+  // Prayer wall: ticking "keep me anonymous" dims the name box and says who the
+  // name is still shared with. The value is deliberately NOT cleared and the field
+  // is NOT disabled — the pastoral team still needs to know who asked.
+  document.querySelectorAll('[data-anonymous-toggle]').forEach(function (checkbox) {
+    var nameInput = document.querySelector('[data-prayer-name]');
+    var hint = document.querySelector('[data-anonymous-hint]');
+    if (!nameInput) { return; }
+    var sync = function () {
+      nameInput.style.opacity = checkbox.checked ? '0.45' : '';
+      if (hint) { hint.hidden = !checkbox.checked; }
+    };
+    checkbox.addEventListener('change', sync);
+    sync();
+  });
 })();

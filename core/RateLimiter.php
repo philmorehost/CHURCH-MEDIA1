@@ -54,4 +54,55 @@ class RateLimiter
         $rule = $config['rate_limits'][$action] ?? ['limit' => 30, 'window' => 60];
         return self::attempt($action, $key, $rule['limit'], $rule['window']);
     }
+
+    /**
+     * Enforces a limit for a page route, stopping the request with a styled 429 when
+     * the visitor has been too busy.
+     *
+     * This is the page-side counterpart to the `if (!attempt(...))` checks the JSON
+     * endpoints do — a page cannot answer with a JSON error body.
+     */
+    public static function require(string $action, int $limit, int $windowSeconds, ?string $key = null): void
+    {
+        if (self::attempt($action, $key ?? self::subject(), $limit, $windowSeconds)) {
+            return;
+        }
+        self::deny($windowSeconds);
+    }
+
+    /** The visitor a page-level limit is counted against. */
+    private static function subject(): string
+    {
+        if (class_exists('Fingerprint')) {
+            return Fingerprint::hash();
+        }
+        return function_exists('clientIp') ? clientIp() : 'anonymous';
+    }
+
+    /** Ends the request with a 429, rendering the themed page when it is available. */
+    private static function deny(int $retryAfter): void
+    {
+        if (!headers_sent()) {
+            http_response_code(429);
+            header('Retry-After: ' . max(1, $retryAfter));
+            header('Content-Type: text/html; charset=utf-8');
+        }
+
+        // In an API or CLI context there is no layout to render into, so keep a
+        // dependency-free fallback rather than risking a second failure.
+        if (function_exists('render') && defined('VIEWS_PATH') && is_file(VIEWS_PATH . '/429.php')) {
+            render('429', ['metaTitle' => 'Please slow down']);
+        } else {
+            echo '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+                . '<meta name="viewport" content="width=device-width,initial-scale=1">'
+                . '<title>Please slow down</title></head>'
+                . '<body style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a0912;color:#fff;padding:64px 24px;text-align:center;">'
+                . '<h1 style="font-size:24px;margin:0 0 12px;">Please slow down</h1>'
+                . '<p style="color:#c9c4de;max-width:420px;margin:0 auto 24px;">You have made a lot of requests in a short time. '
+                . 'Please wait a minute and try again.</p>'
+                . '<p><a href="/" style="color:#e8b95f;text-decoration:none;">Back to the home page</a></p>'
+                . '</body></html>';
+        }
+        exit;
+    }
 }

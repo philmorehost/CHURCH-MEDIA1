@@ -200,6 +200,39 @@ Do this **before** any Phase 1/2 work so nothing has to be retrofitted later.
 - **Verify**: each type renders, cache hit/miss, fallback when GD fonts are missing.
 
 ### 1.5 Prayer wall depth
+> **Status: shipped.** `prayer_requests` gained `tenant_id`, `increment_count`,
+> `is_anonymous`, `is_featured`, `answered_at` and `answer_note`, plus the
+> `prayer_participants` table. `core/PrayerWall.php` owns every rule about what a
+> visitor may see; `views/prayer.php` is now three sections — the wall, a featured
+> strip, and an **Answered Prayers** wall showing the team's answer note; and
+> `admin/prayer.php` can mark a request answered with a note, reopen it, feature it,
+> and correct a mistaken anonymity flag.
+> **A prayer is counted once per visitor, ever.** The de-duplication is a unique key on
+> `(request_id, session_hash)` with an `INSERT IGNORE`, not a read-then-write, so two
+> clicks racing each other cannot double-count. The button renders already-pressed when
+> the visitor has prayed before, and the count comes back from the server.
+> **Privacy is the point of the class.** `is_anonymous` is the only flag the public
+> shape trusts — a blank name also counts as anonymous — and `email`, `ip_address` and
+> the raw `name` never leave `PrayerWall` on a public read, so the leak cannot be
+> introduced by a careless edit to a view. The name is still stored and still shown to
+> the pastoral team.
+> A plain `POST /prayer` handles the form with JavaScript off, CSRF-protected and
+> rate-limited; the page's remote form and the app both use `POST /api/prayer`.
+> 75 assertions on a fresh install, 88 on an upgrade from a pre-1.5 database, plus an
+> end-to-end HTTP pass over the API, the counter and the no-JS form.
+>
+> **Two bugs fixed along the way, both shipped and both serious:**
+> 1. `RateLimiter::require()` did not exist, but three page routes called it — RSVP
+>    (`/events/{slug}`), testimonies (`/testimonies`) and the new prayer form. Any
+>    visitor without JavaScript submitting an RSVP, a testimony or a prayer request hit
+>    a **fatal error** and lost what they had typed. The method now exists and renders a
+>    themed `views/429.php` when a limit is tripped. Verified on all three real forms.
+> 2. `recordPrayer()` was not tenant-scoped, so one church could bump another church's
+>    counter by guessing a request id. Found by the multi-tenant assertions.
+>
+> **Also hardened:** a JSON body containing an array (`{"request_id":[15,14]}`) was
+> silently coerced by PHP into the integer `1`, acting on an unrelated request. The API
+> now rejects non-scalar input instead of coercing it.
 - **DB**: `prayer_requests` gains `increment_count`, `is_anonymous`, `answered_at`,
   `answer_note`, `is_featured`. New `prayer_participants` (request_id, session_hash, created_at)
   so one person counts once.

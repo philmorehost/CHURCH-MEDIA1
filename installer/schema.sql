@@ -443,15 +443,36 @@ CREATE TABLE IF NOT EXISTS `team_members` (
 
 CREATE TABLE IF NOT EXISTS `prayer_requests` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NULL,
   `name` VARCHAR(150) NULL,
   `email` VARCHAR(150) NULL,
   `message` TEXT NOT NULL,
   `is_public` TINYINT(1) NOT NULL DEFAULT 0,
+  `increment_count` INT NOT NULL DEFAULT 0,
+  `is_anonymous` TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Hides the name on the public wall, never from the pastoral team',
+  `is_featured` TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Floats the request to the top of the wall',
+  `answered_at` DATETIME NULL COMMENT 'NULL while the request is still open',
+  `answer_note` TEXT NULL COMMENT 'Shown publicly on the Answered Prayers wall',
   `status` ENUM('new','prayed','archived') NOT NULL DEFAULT 'new',
   `ip_address` VARCHAR(45) NULL,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `org_unit_id` INT NULL,
+  INDEX `idx_prayer_wall` (`tenant_id`, `is_public`, `status`, `created_at`),
+  INDEX `idx_prayer_answered` (`tenant_id`, `answered_at`),
   FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- One row per person per request, so the "I prayed for this" counter can never
+-- count the same visitor twice. The unique key does the de-duplication.
+CREATE TABLE IF NOT EXISTS `prayer_participants` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NULL,
+  `request_id` INT NOT NULL,
+  `session_hash` VARCHAR(64) NOT NULL COMMENT 'Rotating device hash - never an IP',
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_prayer_participant` (`request_id`, `session_hash`),
+  INDEX `idx_pp_request` (`request_id`),
+  FOREIGN KEY (`request_id`) REFERENCES `prayer_requests`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `newsletter_subscribers` (

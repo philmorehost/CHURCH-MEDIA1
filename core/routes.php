@@ -853,6 +853,37 @@ $router->get('/prayer', function () {
     render('prayer');
 });
 
+// A prayer request taken on the page itself, so it is not lost when JavaScript
+// fails. The app and the page's remote form both use POST /api/prayer, which
+// shares PrayerWall::submit() with this handler.
+$router->post('/prayer', function () {
+    Csrf::requireValid();
+    RateLimiter::require('prayer', 10, 300);
+
+    // Honeypot: a real visitor never fills the hidden field.
+    if (trim((string) ($_POST['website'] ?? '')) !== '') {
+        redirect('/prayer');
+    }
+
+    $result = PrayerWall::submit(
+        (string) ($_POST['name'] ?? ''),
+        (string) ($_POST['email'] ?? ''),
+        (string) ($_POST['message'] ?? ''),
+        !empty($_POST['is_public']),
+        !empty($_POST['is_anonymous'])
+    );
+
+    if (isset($result['errors'])) {
+        keepFormOld($_POST);
+        flash('prayer_error', (string) ($result['errors'][0] ?? 'Please check the form.'));
+    } else {
+        clearFormOld();
+        flash('prayer_ok', 'Your prayer request has been received. Our team is praying with you.');
+    }
+
+    redirect('/prayer');
+});
+
 $router->get('/bible', function () {
     render('bible', [
         'metaTitle' => 'Holy Bible',
