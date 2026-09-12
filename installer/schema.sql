@@ -426,15 +426,38 @@ CREATE TABLE IF NOT EXISTS `event_rsvps` (
   FOREIGN KEY (`event_id`) REFERENCES `events`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- A named run of sermons. Defined before `sermons` because that table points at it.
+CREATE TABLE IF NOT EXISTS `sermon_series` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NULL,
+  `title` VARCHAR(150) NOT NULL,
+  `slug` VARCHAR(170) NOT NULL,
+  `description` TEXT NULL,
+  `cover_image` VARCHAR(255) NULL,
+  `org_unit_id` INT NULL,
+  `is_published` TINYINT(1) NOT NULL DEFAULT 1,
+  `sort_order` INT NOT NULL DEFAULT 0,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_sermon_series_slug` (`slug`),
+  INDEX `idx_sermon_series_unit` (`org_unit_id`, `is_published`),
+  FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS `sermons` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `title` VARCHAR(200) NOT NULL,
   `slug` VARCHAR(220) NOT NULL UNIQUE,
   `speaker` VARCHAR(150) NULL,
-  `series` VARCHAR(150) NULL,
+  `series` VARCHAR(150) NULL COMMENT 'Legacy free text. Kept in step with series_id so older code keeps working.',
+  `series_id` INT NULL,
+  `series_position` INT NULL COMMENT 'Episode number within the series',
   `scripture_ref` VARCHAR(150) NULL,
   `description` TEXT NULL,
-  `audio_path` VARCHAR(255) NULL,
+  `audio_path` VARCHAR(255) NULL COMMENT 'Uploaded audio, relative to /uploads',
+  `audio_url` VARCHAR(500) NULL COMMENT 'External audio, e.g. a podcast host. Wins over audio_path when set.',
+  `duration_seconds` INT NULL,
+  `episode_guid` VARCHAR(190) NULL COMMENT 'Stable podcast episode id. Never change it once published.',
+  `is_explicit` TINYINT(1) NOT NULL DEFAULT 0,
   `video_embed_url` VARCHAR(500) NULL,
   `cover_image` VARCHAR(255) NULL,
   `is_published` TINYINT(1) NOT NULL DEFAULT 1,
@@ -442,6 +465,8 @@ CREATE TABLE IF NOT EXISTS `sermons` (
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `org_unit_id` INT NULL,
   INDEX `idx_published_at` (`is_published`, `published_at`),
+  INDEX `idx_sermon_series` (`series_id`, `series_position`),
+  UNIQUE KEY `uniq_sermon_episode_guid` (`episode_guid`),
   FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

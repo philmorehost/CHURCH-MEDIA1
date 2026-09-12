@@ -1317,6 +1317,104 @@ class Database
                 self::addColumnIfMissing($pdo, 'users', 'phone', 'VARCHAR(32) NULL', 'email');
                 self::addColumnIfMissing($pdo, 'users', 'sms_consent', 'TINYINT(1) NOT NULL DEFAULT 0', 'phone');
             },
+
+            // Sermon series become real records, and the sermons gain what a podcast feed needs.
+            //
+            // Until now a series was free text on the sermon (`sermons.series`). That works for
+            // a filter chip but not for anything else: you cannot give a series a description or
+            // artwork, you cannot order the episodes inside it, and renaming it means rewriting
+            // every sermon by hand. This adds the table the roadmap asked for — and, importantly,
+            // **carries the existing text across** rather than leaving it stranded. A church that
+            // has been tagging sermons for two years should not have to start again.
+            //
+            // `sermons.series` is deliberately kept and kept in step, so anything still reading
+            // the old column (the current API, the Flutter app) keeps working through the change.
+            '2026_20_sermon_series' => function (PDO $pdo): void {
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `sermon_series` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `tenant_id` INT NULL,
+                    `title` VARCHAR(150) NOT NULL,
+                    `slug` VARCHAR(170) NOT NULL,
+                    `description` TEXT NULL,
+                    `cover_image` VARCHAR(255) NULL,
+                    `org_unit_id` INT NULL,
+                    `is_published` TINYINT(1) NOT NULL DEFAULT 1,
+                    `sort_order` INT NOT NULL DEFAULT 0,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY `uniq_sermon_series_slug` (`slug`),
+                    INDEX `idx_sermon_series_unit` (`org_unit_id`, `is_published`),
+                    FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                self::addColumnIfMissing($pdo, 'sermons', 'series_id', 'INT NULL', 'series');
+                self::addColumnIfMissing($pdo, 'sermons', 'series_position', 'INT NULL', 'series_id');
+                self::addColumnIfMissing($pdo, 'sermons', 'audio_url', 'VARCHAR(500) NULL', 'audio_path');
+                self::addColumnIfMissing($pdo, 'sermons', 'duration_seconds', 'INT NULL', 'audio_url');
+                self::addColumnIfMissing($pdo, 'sermons', 'episode_guid', 'VARCHAR(190) NULL', 'duration_seconds');
+                self::addColumnIfMissing($pdo, 'sermons', 'is_explicit', 'TINYINT(1) NOT NULL DEFAULT 0', 'episode_guid');
+                self::addIndexIfMissing($pdo, 'sermons', 'idx_sermon_series', 'INDEX `idx_sermon_series` (`series_id`, `series_position`)');
+                self::addIndexIfMissing($pdo, 'sermons', 'uniq_sermon_episode_guid', 'UNIQUE KEY `uniq_sermon_episode_guid` (`episode_guid`)');
+
+                // A stable episode id. Podcast clients key on this: change it and every
+                // subscriber is sent the episode again as if it were new.
+                $missing = $pdo->query("SELECT id FROM sermons WHERE episode_guid IS NULL OR episode_guid = ''")->fetchAll(PDO::FETCH_COLUMN);
+                if ($missing) {
+                    $setGuid = $pdo->prepare('UPDATE sermons SET episode_guid = ? WHERE id = ?');
+                    foreach ($missing as $sermonId) {
+                        $setGuid->execute(['sermon-' . (int) $sermonId, (int) $sermonId]);
+                    }
+                }
+
+                // Carry the existing free-text series across.
+                //
+                // One row per (title, church) rather than per title, because two churches in a
+                // multi-tenant install can legitimately both have a "Faith Foundations" series
+                // and merging them would put one church's sermons on the other's page.
+                $existing = $pdo->query(
+                    "SELECT DISTINCT series, org_unit_id FROM sermons
+                     WHERE series IS NOT NULL AND series != '' ORDER BY series ASC"
+                )->fetchAll();
+
+                if (!$existing) {
+                    return;
+                }
+
+                $slugTaken = static function (PDO $pdo, string $slug, int $ignoreId = 0): bool {
+                    $stmt = $pdo->prepare('SELECT COUNT(*) FROM sermon_series WHERE slug = ? AND id <> ?');
+                    $stmt->execute([$slug, $ignoreId]);
+                    return (int) $stmt->fetchColumn() > 0;
+                };
+
+                $find = $pdo->prepare('SELECT id FROM sermon_series WHERE title = ? AND org_unit_id <=> ? LIMIT 1');
+                $insert = $pdo->prepare('INSERT INTO sermon_series (tenant_id, title, slug, org_unit_id, sort_order) VALUES (?, ?, ?, ?, ?)');
+                $link = $pdo->prepare('UPDATE sermons SET series_id = ? WHERE series = ? AND org_unit_id <=> ?');
+
+                $sort = 0;
+                foreach ($existing as $row) {
+                    $title = trim((string) $row['series']);
+                    if ($title === '') {
+                        continue;
+                    }
+                    $unitId = $row['org_unit_id'] !== null ? (int) $row['org_unit_id'] : null;
+
+                    $find->execute([$title, $unitId]);
+                    $seriesId = (int) $find->fetchColumn();
+
+                    if ($seriesId === 0) {
+                        $base = slugify($title);
+                        $slug = $base;
+                        $suffix = 2;
+                        while ($slugTaken($pdo, $slug)) {
+                            $slug = $base . '-' . $suffix;
+                            $suffix++;
+                        }
+                        $insert->execute([null, mb_substr($title, 0, 150), $slug, $unitId, ++$sort]);
+                        $seriesId = (int) $pdo->lastInsertId();
+                    }
+
+                    $link->execute([$seriesId, $title, $unitId]);
+                }
+            },
         ];
     }
 
