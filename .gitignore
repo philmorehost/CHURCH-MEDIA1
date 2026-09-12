@@ -21,14 +21,3 @@
 
 # Office lock files, created beside a document while it is open.
 ~$*
-
-# WhatsApp bridge (unofficial, Phase 4.4).
-#
-# The paired session under storage/wa-bridge/ is the important one: those files are a live login
-# for that WhatsApp number. The .htaccess that denies HTTP access to them IS tracked, so the deny
-# rule ships with the code rather than being something each host has to remember.
-/bridge/node_modules/
-/bridge/auth/
-/storage/wa-bridge/*
-!/storage/wa-bridge/.htaccess
-!/storage/wa-bridge/.gitkeep

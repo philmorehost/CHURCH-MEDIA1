@@ -145,14 +145,6 @@ $recentConversations = $recent->fetchAll();
         </div>
       </td>
     </tr>
-    <tr>
-      <th>Unofficial bridge</th>
-      <td>
-        <?= WhatsApp::bridgeEnabled()
-            ? '<span class="badge warn">on</span> <span style="font-size:12.5px;color:var(--ink-dim);">group features only — never member messaging</span>'
-            : '<span class="badge ok">off</span>' ?>
-      </td>
-    </tr>
   </table>
 </div>
 

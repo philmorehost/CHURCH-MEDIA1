@@ -82,38 +82,6 @@ declare(strict_types=1);
 </div>
 
 <div class="card">
-  <h2 style="margin-top:0;">The unofficial bridge — read before switching it on</h2>
-  <p style="color:var(--ink-dim);font-size:14px;line-height:1.75;">
-    The official API cannot read the members of a WhatsApp group, and cannot post into one. That is
-    a deliberate restriction. Reading groups is done instead by a separate small service
-    (<code>bridge/</code> — a Node process that pairs a number the way WhatsApp Web does). Its
-    screen is the <strong>Groups</strong> tab, and nothing there works until a super admin switches
-    the bridge on and starts that service.
-  </p>
-  <p style="color:var(--ink-dim);font-size:14px;line-height:1.75;">
-    <strong>Importing members</strong> only writes contacts. Every one of them arrives
-    <strong>opted out</strong>, and somebody who is already opted in is left opted in — sharing a
-    group with the youth leader is not consent to be messaged. <strong>Posting into a group</strong>
-    is super-admin only, goes out the instant it is submitted, and reaches everyone in the group.
-  </p>
-  <p style="color:var(--ink-dim);font-size:14px;line-height:1.75;">
-    <strong>This violates WhatsApp's terms of service.</strong> The number can be banned
-    permanently, with no appeal and no warning, and the bridge breaks whenever WhatsApp changes its
-    internals. Because of that it is off by default and must obey three rules:
-  </p>
-  <ul style="color:var(--ink-dim);font-size:14px;line-height:2;padding-left:22px;">
-    <li>It runs on a <strong>separate, disposable SIM</strong> — never the church's main number.</li>
-    <li>It is used <strong>only</strong> for reading group participants and posting into groups. It must never message the congregation.</li>
-    <li>It is bound to <code>127.0.0.1</code> and is never reachable from the internet.</li>
-  </ul>
-  <p style="color:var(--ink-dim);font-size:14px;line-height:1.75;">
-    If that number is banned, the church must lose nothing. Numbers imported from a group start
-    <strong>opted out</strong> and are not messaged until they opt in — a group list is people who
-    joined a group, not people who agreed to receive messages.
-  </p>
-</div>
-
-<div class="card">
   <h2 style="margin-top:0;">Broadcasting</h2>
   <p style="color:var(--ink-dim);font-size:14px;line-height:1.75;">
     A broadcast sends one approved template to a set of people. It is <strong>queued, not sent</strong>

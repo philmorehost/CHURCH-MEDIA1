@@ -39,9 +39,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 /* ---- date range ---- */
-$presets = ['7' => 'Last 7 days', '30' => 'Last 30 days', '90' => 'Last 90 days'];
+/*
+ * Pairs rather than a value => label map, on purpose. PHP silently converts array keys that look
+ * like integers into integers, so `['7' => 'Last 7 days']` gave the loop an int key — which made
+ * `e($key)` fatal under strict_types (the whole page rendered empty) and made `$range === $key`
+ * compare a string against an int, so the active range button never highlighted either.
+ */
+$presets = [['7', 'Last 7 days'], ['30', 'Last 30 days'], ['90', 'Last 90 days']];
 $range = (string) ($_GET['range'] ?? '30');
-if (!array_key_exists($range, $presets) && $range !== 'custom') {
+if (!in_array($range, array_column($presets, 0), true) && $range !== 'custom') {
     $range = '30';
 }
 
@@ -187,8 +193,8 @@ require __DIR__ . '/partials/layout-open.php';
 <?php endif; ?>
 
 <div class="btn-row" style="margin-bottom:18px;flex-wrap:wrap;">
-  <?php foreach ($presets as $key => $label): ?>
-    <a class="btn <?= $range === $key ? '' : 'secondary' ?> sm" href="/admin/analytics?range=<?= e($key) ?>"><?= e($label) ?></a>
+  <?php foreach ($presets as [$presetValue, $presetLabel]): ?>
+    <a class="btn <?= $range === $presetValue ? '' : 'secondary' ?> sm" href="/admin/analytics?range=<?= e($presetValue) ?>"><?= e($presetLabel) ?></a>
   <?php endforeach; ?>
   <form method="get" action="/admin/analytics" style="display:flex;gap:8px;align-items:flex-end;">
     <input type="hidden" name="range" value="custom">

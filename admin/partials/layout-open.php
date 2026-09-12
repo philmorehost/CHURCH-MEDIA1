@@ -103,6 +103,7 @@ $navGroups = [
             ['key' => 'security', 'href' => '/admin/security', 'label' => 'Security'],
             ['key' => 'backup', 'href' => '/admin/backup', 'label' => 'Backups', 'super' => true],
             ['key' => 'settings', 'href' => '/admin/settings', 'label' => 'Settings', 'super' => true],
+            ['key' => 'ads-settings', 'href' => '/admin/ads?action=settings', 'label' => 'Payment Gateway', 'super' => true],
             ['key' => 'firebase', 'href' => '/admin/firebase', 'label' => 'Firebase', 'super' => true],
             ['key' => 'guide', 'href' => '/admin/guide', 'label' => 'Guide'],
         ],

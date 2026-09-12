@@ -25,9 +25,29 @@ if (!function_exists('str_ends_with')) {
     }
 }
 
-function e(?string $value): string
+/**
+ * HTML-escapes a value for output.
+ *
+ * This accepts the scalars a template actually holds, numbers included, because
+ * `declare(strict_types=1)` is on everywhere and a `?string` parameter turns `e(42)` into a
+ * TypeError. A page whose only sin is printing a count should not die.
+ *
+ * It also defuses a PHP trap that did exactly that: array keys which look like integers *are*
+ * integers, so `['7' => 'Last 7 days']` hands a foreach an `int`, and `e($key)` took the whole
+ * analytics dashboard down with it.
+ *
+ * Arrays and objects still fail, and loudly. Rendering the word "Array" would hide the mistake
+ * rather than surface it.
+ */
+function e($value): string
 {
-    return htmlspecialchars($value ?? '', ENT_QUOTES, 'UTF-8');
+    if ($value === null) {
+        return '';
+    }
+    if (!is_scalar($value)) {
+        throw new InvalidArgumentException('e() expects a scalar or null; ' . gettype($value) . ' given.');
+    }
+    return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
 }
 
 function clientIp(): string

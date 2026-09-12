@@ -761,16 +761,22 @@ newcomer and newsletter forms (opt-in checkbox wording added to the privacy poli
 | **WhatsApp Business app** (manual) | Broadcast lists (up to 256), quick replies, catalogue — human-driven | None; no automation | ✅ Fine as a stopgap, zero build |
 | **Unofficial bridge** (whatsapp-web.js / Baileys / WPPConnect) | Free-form messages, no template approval, no per-message cost, group posting | **Violates WhatsApp's Terms of Service**; the number can be banned permanently at any time with no appeal; breaks whenever WhatsApp changes internals; you must keep a Node process + session store alive | ⚠️ Only ever on a **spare, disposable** number, never the ministry's main line, and never on a critical path |
 
-### Decision — CONFIRMED: build both
-**Both** are in scope. The arrangement:
-- **Official Cloud API** = all *member-facing* and *business-critical* messaging: welcome
-  messages, event reminders, giving receipts, follow-ups. Compliant, auditable, deliverable.
-- **Unofficial bridge** = a small Node sidecar on a **separate sacrificial SIM**, for what the
-  Cloud API simply cannot do — **reading group participants and posting into groups**.
-  Feature-flagged (`wa_unofficial_enabled`, default **off**), bound to `127.0.0.1`, with a
-  documented kill-switch and a health check.
-- **Never** mix them on the same number, and never let an unofficial path message the
-  congregation. If the bridge's number is banned, the church must lose nothing.
+### Decision — REVERSED: official channel only
+The bridge was built, and then removed before it ever paired a number. The official Cloud API is
+the whole of the WhatsApp channel.
+
+- **Official Cloud API** = all messaging, member-facing and business-critical: welcome messages,
+  event reminders, giving receipts, follow-ups. Compliant, auditable, deliverable.
+- **Unofficial bridge — dropped.** It is the only way to read group participants or post into a
+  group, which the Cloud API deliberately cannot do. But the ban is triggered by the *client*
+  speaking to WhatsApp unofficially, not by message volume — keeping traffic low reduces the chance
+  of a person *reporting* the number and does nothing about WhatsApp's own detection. The number at
+  risk is the one the church communicates on, and losing it is worse than not having group tools.
+- Removed in `2026_24_drop_wa_bridge`, which also drops the `wa_unofficial_enabled`,
+  `wa_bridge_url` and `wa_bridge_token` settings and the stored bridge token. The `bridge/` service,
+  the `Groups` admin tab and `core/WaBridge.php` are gone.
+- If group tooling is ever wanted again, treat it as a **fresh decision** and re-read the risk
+  column above. It is not unfinished work.
 
 ### Build outline (official first)
 - **DB**: `wa_templates` (name, language, category, components JSON, status),

@@ -26,15 +26,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'wa_default_language' => trim((string) ($_POST['wa_default_language'] ?? 'en')) ?: 'en',
             'wa_verify_token' => trim((string) ($_POST['wa_verify_token'] ?? '')),
             'wa_log_retention_days' => max(1, min(3650, (int) ($_POST['wa_log_retention_days'] ?? 60))),
-            'wa_unofficial_enabled' => isset($_POST['wa_unofficial_enabled']) ? 1 : 0,
-            'wa_bridge_url' => trim((string) ($_POST['wa_bridge_url'] ?? '')) ?: 'http://127.0.0.1:8787',
         ]);
 
         // Blanks mean "keep what is stored". Only a typed value replaces a secret.
         $secrets = [
             'wa_access_token' => 'wa_access_token',
             'wa_app_secret' => 'wa_app_secret',
-            'wa_bridge_token' => 'wa_bridge_token',
         ];
         $secretValues = [];
         foreach ($secrets as $field => $settingKey) {
@@ -55,7 +52,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // A separate, explicit act. Clearing a secret by accidentally saving an empty field would
         // silently stop all sending.
         $which = (string) ($_POST['which'] ?? '');
-        $allowed = ['wa_access_token', 'wa_app_secret', 'wa_bridge_token'];
+        $allowed = ['wa_access_token', 'wa_app_secret'];
         if (in_array($which, $allowed, true)) {
             settingSave([$which => '']);
             flash('success', 'That credential was cleared.');
@@ -67,7 +64,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $tokenSet = WhatsApp::accessToken() !== '';
 $secretSet = WhatsApp::appSecret() !== '';
 $verifySet = WhatsApp::verifyToken() !== '';
-$bridgeTokenSet = WhatsApp::bridgeToken() !== '';
 ?>
 
 <div class="card" style="max-width:760px;">
@@ -189,48 +185,7 @@ $bridgeTokenSet = WhatsApp::bridgeToken() !== '';
   </p>
 </div>
 
-<div class="card" style="max-width:760px;">
-  <h2 style="margin-top:0;">Unofficial bridge</h2>
-  <div class="alert error" style="font-size:13px;">
-    This connects a separate, disposable number through an unofficial library. It is for reading
-    WhatsApp group participants, which the official API cannot do at all. It <strong>violates
-    WhatsApp's terms</strong>, the number can be banned without appeal, and it must never be used
-    for member messaging. Leave it off unless you have read the guide.
-  </div>
-
-  <form method="post" action="/admin/whatsapp?tab=settings">
-    <?= Csrf::field() ?>
-    <input type="hidden" name="action" value="save">
-
-    <div class="checkbox-row">
-      <input type="checkbox" id="wa_unofficial_enabled" name="wa_unofficial_enabled"
-             <?= WhatsApp::bridgeEnabled() ? 'checked' : '' ?>>
-      <label for="wa_unofficial_enabled" style="margin:0;">Bridge enabled</label>
-    </div>
-
-    <div class="row two">
-      <div>
-        <label for="wa_bridge_url">Bridge address</label>
-        <input type="text" id="wa_bridge_url" name="wa_bridge_url" maxlength="255"
-               value="<?= e(WhatsApp::bridgeUrl()) ?>">
-        <p class="hint" style="margin-top:6px;font-size:12px;color:var(--ink-dim);">
-          Keep it on <code>127.0.0.1</code>. It must never be reachable from the internet.
-        </p>
-      </div>
-      <div>
-        <label for="wa_bridge_token">Bridge token <?= $bridgeTokenSet ? '<span class="badge ok">configured</span>' : '' ?></label>
-        <input type="password" id="wa_bridge_token" name="wa_bridge_token" autocomplete="new-password"
-               placeholder="<?= $bridgeTokenSet ? 'stored — leave blank to keep' : 'shared secret for the sidecar' ?>">
-      </div>
-    </div>
-
-    <div class="btn-row">
-      <button class="btn" type="submit">Save</button>
-    </div>
-  </form>
-</div>
-
-<?php if ($tokenSet || $secretSet || $bridgeTokenSet): ?>
+<?php if ($tokenSet || $secretSet): ?>
   <div class="card" style="max-width:760px;">
     <h2 style="margin-top:0;">Clear a credential</h2>
     <p style="color:var(--ink-dim);font-size:13.5px;margin-top:-4px;">
@@ -242,7 +197,6 @@ $bridgeTokenSet = WhatsApp::bridgeToken() !== '';
         $clearable = [
             'wa_access_token' => ['label' => 'access token', 'set' => $tokenSet],
             'wa_app_secret' => ['label' => 'app secret', 'set' => $secretSet],
-            'wa_bridge_token' => ['label' => 'bridge token', 'set' => $bridgeTokenSet],
         ];
       ?>
       <?php foreach ($clearable as $key => $meta): ?>

@@ -179,7 +179,9 @@ $stmt->execute($params);
 $adsList = $stmt->fetchAll();
 
 $pageTitle = 'Ads Management';
-$activeNav = 'ads';
+// The payments screen carries its own nav key. Sharing 'ads' would open Content — where Ads
+// Management lives — while the reader is actually on a System screen, and highlight the wrong item.
+$activeNav = ($action === 'settings' || $action === 'durations') ? 'ads-settings' : 'ads';
 require __DIR__ . '/partials/layout-open.php';
 ?>
 

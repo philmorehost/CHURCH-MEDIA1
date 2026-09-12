@@ -36,7 +36,6 @@ $tabs = [
     'dashboard' => ['label' => 'Dashboard', 'icon' => '📊'],
     'inbox'     => ['label' => 'Inbox', 'icon' => '💬'],
     'broadcast' => ['label' => 'Broadcast', 'icon' => '📤'],
-    'groups'    => ['label' => 'Groups', 'icon' => '👥'],
     'templates' => ['label' => 'Templates', 'icon' => '📝'],
     'settings'  => ['label' => 'Settings', 'icon' => '⚙️', 'super' => true],
     'guide'     => ['label' => 'Guide', 'icon' => '📖'],

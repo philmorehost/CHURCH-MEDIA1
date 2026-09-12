@@ -113,24 +113,6 @@ final class WhatsApp
         return trim((string) setting('wa_display_name', ''));
     }
 
-    /** The unofficial bridge is a separate, quarantined thing. Off unless asked for. */
-    public static function bridgeEnabled(): bool
-    {
-        return (bool) setting('wa_unofficial_enabled', 0);
-    }
-
-    public static function bridgeUrl(): string
-    {
-        $url = trim((string) setting('wa_bridge_url', 'http://127.0.0.1:8787'));
-        return $url !== '' ? rtrim($url, '/') : 'http://127.0.0.1:8787';
-    }
-
-    public static function bridgeToken(): string
-    {
-        $stored = (string) setting('wa_bridge_token', '');
-        return $stored === '' ? '' : (decryptSecret($stored) ?? '');
-    }
-
     /** Everything the send path needs. Missing any of it means nothing can be sent. */
     public static function configured(): bool
     {

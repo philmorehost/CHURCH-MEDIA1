@@ -1434,13 +1434,6 @@ class Database
                 self::addColumnIfMissing($pdo, 'settings', 'wa_default_language', "VARCHAR(12) NOT NULL DEFAULT 'en'", 'wa_display_name');
                 self::addColumnIfMissing($pdo, 'settings', 'wa_log_retention_days', 'INT NOT NULL DEFAULT 60', 'wa_default_language');
 
-                // The unofficial bridge. Off by default, bound to loopback, and never used for
-                // anything member-facing — see the roadmap. It exists only for reading group
-                // participants, which the Cloud API cannot do at all.
-                self::addColumnIfMissing($pdo, 'settings', 'wa_unofficial_enabled', 'TINYINT(1) NOT NULL DEFAULT 0', 'wa_log_retention_days');
-                self::addColumnIfMissing($pdo, 'settings', 'wa_bridge_url', "VARCHAR(255) NOT NULL DEFAULT 'http://127.0.0.1:8787'", 'wa_unofficial_enabled');
-                self::addColumnIfMissing($pdo, 'settings', 'wa_bridge_token', 'TEXT NULL', 'wa_bridge_url');
-
                 // Approved message templates. A template has to be approved by Meta before it
                 // can be sent, and it can only be sent by name and language — so this is a cache
                 // of what has been approved, refreshed from the API, not the source of truth.
@@ -1634,6 +1627,21 @@ class Database
                     ENUM('manual','newcomer','subscriber','team','testimony','registration','rsvp','form','app','import','member','group')
                     NOT NULL DEFAULT 'manual'");
             },
+
+            // The unofficial WhatsApp bridge was removed before it ever paired a number.
+            //
+            // It existed to read WhatsApp group members, which the official Cloud API cannot do,
+            // but the only way to do it is to speak to WhatsApp through an unofficial library —
+            // and that can get the number banned permanently, without warning or appeal. The
+            // church's WhatsApp number is worth more than the feature, so it is gone.
+            //
+            // Dropping the columns also removes the stored bridge token, which was a credential
+            // for something that no longer exists.
+            '2026_24_drop_wa_bridge' => function (PDO $pdo): void {
+                self::dropColumnIfExists($pdo, 'settings', 'wa_unofficial_enabled');
+                self::dropColumnIfExists($pdo, 'settings', 'wa_bridge_url');
+                self::dropColumnIfExists($pdo, 'settings', 'wa_bridge_token');
+            },
         ];
     }
 
@@ -1649,6 +1657,23 @@ class Database
             $sql .= ' AFTER `' . $after . '`';
         }
         $pdo->exec($sql);
+    }
+
+    /**
+     * Drops a column, but only when it is actually there.
+     *
+     * Migrations run on every bootstrap, so an unguarded ALTER TABLE would take the whole site
+     * down the second time it ran. Same reasoning as addColumnIfMissing, and the guard is what
+     * makes a destructive step safe to leave in place forever.
+     */
+    private static function dropColumnIfExists(PDO $pdo, string $table, string $column): void
+    {
+        $check = $pdo->prepare('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
+        $check->execute([$table, $column]);
+        if ((int) $check->fetchColumn() === 0) {
+            return;
+        }
+        $pdo->exec('ALTER TABLE `' . $table . '` DROP COLUMN `' . $column . '`');
     }
 
     /** Adds an index (or unique key) when no index of that name already exists. */
