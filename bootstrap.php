@@ -37,7 +37,16 @@ if (PHP_SAPI !== 'cli') {
     header('Referrer-Policy: strict-origin-when-cross-origin');
     header('Permissions-Policy: geolocation=(), microphone=(), camera=()');
     if (!$isLocal) {
-        header('Content-Security-Policy: default-src \'self\'; img-src \'self\' data: https:; media-src \'self\' https:; style-src \'self\' \'unsafe-inline\'; script-src \'self\'; frame-src https:; connect-src \'self\'');
+        // The admin pages rely on their own inline <script> blocks and inline
+        // handlers throughout, and `script-src 'self'` silently blocks all of
+        // them — which left the sidebar toggle, pickers and tab controls dead in
+        // production. The public site keeps the strict policy; the logged-in,
+        // CSRF-protected admin area is allowed inline script so its controls
+        // actually work. TODO(Phase 7): move the admin JS into assets/js/*.js and
+        // switch this to a nonce so 'unsafe-inline' can be dropped again.
+        $isAdminRequest = str_starts_with((string) ($_SERVER['REQUEST_URI'] ?? ''), '/admin');
+        $scriptSrc = $isAdminRequest ? "script-src 'self' 'unsafe-inline'" : "script-src 'self'";
+        header('Content-Security-Policy: default-src \'self\'; img-src \'self\' data: https:; media-src \'self\' https:; style-src \'self\' \'unsafe-inline\'; ' . $scriptSrc . '; frame-src https:; connect-src \'self\'');
     }
 }
 

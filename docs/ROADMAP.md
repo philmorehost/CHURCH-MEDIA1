@@ -109,6 +109,15 @@ Do this **before** any Phase 1/2 work so nothing has to be retrofitted later.
 ### Phase 1 — Quick wins, no new vendors
 
 ### 1.1 Comments moderation queue
+> **Status: shipped.** `post_comments` gained status/moderation/report columns and
+> `comment_reports` + `comment_blocklist` tables; `core/CommentModeration.php` holds the
+> rules; `admin/comments.php` is the queue (filters, search, flagged-first ordering, bulk
+> approve/reject/spam/delete, word lists, mode switch); `api/comments.php` filters the public
+> feed to approved comments, screens new ones and accepts reader reports. Moderation ships
+> **off**, so nothing changed for the live site until it is switched on.
+> Verified with 35 assertions plus an upgrade simulation. Still open: the reader-facing
+> Report button in the feed UI, and a guide entry.
+
 - **DB**: `post_comments` gains `status` ENUM('pending','approved','rejected','spam')
   DEFAULT `approved` (so existing comments are unaffected), `moderated_by`, `moderated_at`,
   `report_count`, `is_flagged`. New `comment_reports` table (comment_id, ip, reason, created_at).

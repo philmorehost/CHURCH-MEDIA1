@@ -82,6 +82,8 @@ CREATE TABLE IF NOT EXISTS `settings` (
   `email_domain` VARCHAR(190) NULL COMMENT 'Domain used for auto-created church admin emails',
   `email_default_quota` INT NOT NULL DEFAULT 500 COMMENT 'MB',
   `license_key` VARCHAR(120) NULL,
+  `comments_moderation` VARCHAR(20) NOT NULL DEFAULT 'off' COMMENT 'off|all|links|words — how much is held for review',
+  `comments_flag_threshold` INT NOT NULL DEFAULT 3 COMMENT 'Reader reports before a comment is auto-flagged',
   `timezone` VARCHAR(64) NOT NULL DEFAULT 'Africa/Lagos',
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY `uniq_settings_tenant` (`tenant_id`),
@@ -281,11 +283,20 @@ CREATE TABLE IF NOT EXISTS `post_comments` (
   `likes_count` INT NOT NULL DEFAULT 0,
   `fingerprint_hash` VARCHAR(64) NULL,
   `is_published` TINYINT(1) NOT NULL DEFAULT 1,
+  `status` ENUM('approved','pending','rejected','spam') NOT NULL DEFAULT 'approved' COMMENT 'Moderation state; existing rows stay visible', 
+  `moderated_by` INT NULL,
+  `moderated_at` DATETIME NULL,
+  `moderator_note` VARCHAR(255) NULL,
+  `report_count` INT NOT NULL DEFAULT 0,
+  `is_flagged` TINYINT(1) NOT NULL DEFAULT 0,
+  `held_reason` VARCHAR(255) NULL COMMENT 'Why the screener held it, shown in the queue',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (`media_post_id`) REFERENCES `media_posts`(`id`) ON DELETE CASCADE,
   FOREIGN KEY (`parent_id`) REFERENCES `post_comments`(`id`) ON DELETE CASCADE,
   INDEX `idx_comment_post` (`media_post_id`, `created_at`),
-  INDEX `idx_comment_parent` (`parent_id`)
+  INDEX `idx_comment_parent` (`parent_id`),
+  INDEX `idx_comment_status` (`status`, `created_at`),
+  INDEX `idx_comment_flagged` (`is_flagged`, `report_count`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `post_comment_likes` (
@@ -295,6 +306,30 @@ CREATE TABLE IF NOT EXISTS `post_comment_likes` (
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY `uniq_comment_like` (`comment_id`, `fingerprint_hash`),
   FOREIGN KEY (`comment_id`) REFERENCES `post_comments`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Reader reports on a comment. One report per fingerprint per comment, so a
+-- single person cannot pile on and force a comment off the site.
+CREATE TABLE IF NOT EXISTS `comment_reports` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `comment_id` INT NOT NULL,
+  `fingerprint_hash` VARCHAR(64) NULL,
+  `reason` VARCHAR(255) NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_comment_report` (`comment_id`, `fingerprint_hash`),
+  FOREIGN KEY (`comment_id`) REFERENCES `post_comments`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Admin-managed word lists. kind='block' holds a comment for review, kind='spam'
+-- sends it straight to the spam queue. `tenant_id` keeps them per church.
+CREATE TABLE IF NOT EXISTS `comment_blocklist` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NULL,
+  `kind` ENUM('block','spam') NOT NULL DEFAULT 'block',
+  `word` VARCHAR(100) NOT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_blocklist_word` (`tenant_id`, `kind`, `word`),
+  INDEX `idx_blocklist_kind` (`kind`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `media_post_categories` (

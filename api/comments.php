@@ -9,6 +9,13 @@ declare(strict_types=1);
  *   {post_id, parent_id?, name?, message?, image? (multipart file)}
  *
  * POST /api/comments {action: 'like', comment_id} — toggle a comment like.
+ *
+ * POST /api/comments {action: 'report', comment_id, reason?} — flag a comment for
+ *   a leader to review. Repeat reports from the same device only count once.
+ *
+ * New comments are screened by CommentModeration: normally they publish straight
+ * away (moderation ships off), but a held comment comes back with `visible: false`
+ * and a `notice` explaining that it is awaiting review.
  */
 
 $pdo = Database::getInstance()->getConnection();
@@ -22,10 +29,10 @@ if ($method === 'GET') {
     $fp = Fingerprint::hash();
     $stmt = $pdo->prepare('
         SELECT c.id, c.name, c.message, c.image_path, c.likes_count, c.created_at,
-               (SELECT COUNT(*) FROM post_comments r WHERE r.parent_id = c.id AND r.is_published = 1) AS reply_count,
+               (SELECT COUNT(*) FROM post_comments r WHERE r.parent_id = c.id AND r.is_published = 1 AND r.status = \'approved\') AS reply_count,
                EXISTS(SELECT 1 FROM post_comment_likes l WHERE l.comment_id = c.id AND l.fingerprint_hash = ?) AS liked
         FROM post_comments c
-        WHERE c.media_post_id = ? AND c.is_published = 1 AND c.parent_id IS NULL
+        WHERE c.media_post_id = ? AND c.is_published = 1 AND c.status = \'approved\' AND c.parent_id IS NULL
         ORDER BY c.created_at DESC LIMIT 100');
     $stmt->execute([$fp, $postId]);
     $comments = $stmt->fetchAll();
@@ -34,7 +41,7 @@ if ($method === 'GET') {
         SELECT c.id, c.name, c.message, c.image_path, c.likes_count, c.created_at, 0 AS reply_count,
                EXISTS(SELECT 1 FROM post_comment_likes l WHERE l.comment_id = c.id AND l.fingerprint_hash = ?) AS liked
         FROM post_comments c
-        WHERE c.media_post_id = ? AND c.is_published = 1 AND c.parent_id = ?
+        WHERE c.media_post_id = ? AND c.is_published = 1 AND c.status = \'approved\' AND c.parent_id = ?
         ORDER BY c.created_at ASC LIMIT 50');
     foreach ($comments as &$c) {
         $replyStmt->execute([$fp, $postId, (int) $c['id']]);
@@ -70,7 +77,7 @@ if ($method === 'POST') {
         if ($commentId <= 0) {
             jsonResponse(['status' => 'error', 'message' => 'comment_id is required.'], 400);
         }
-        $stmt = $pdo->prepare('SELECT id FROM post_comments WHERE id = ? AND is_published = 1');
+        $stmt = $pdo->prepare("SELECT id FROM post_comments WHERE id = ? AND is_published = 1 AND status = 'approved'");
         $stmt->execute([$commentId]);
         if (!$stmt->fetchColumn()) {
             jsonResponse(['status' => 'error', 'message' => 'Comment not found.'], 404);
@@ -87,6 +94,15 @@ if ($method === 'POST') {
         }
         $count = (int) $pdo->query('SELECT likes_count FROM post_comments WHERE id = ' . $commentId)->fetchColumn();
         jsonResponse(['status' => 'success', 'data' => ['comment_id' => $commentId, 'liked' => $liked, 'likes_count' => $count]]);
+    }
+
+    // Flag a comment for review.
+    if ($action === 'report') {
+        $result = CommentModeration::report((int) ($input['comment_id'] ?? 0), $input['reason'] ?? null);
+        jsonResponse(
+            ['status' => $result['ok'] ? 'success' : 'error', 'message' => $result['message'], 'data' => ['report_count' => $result['report_count']]],
+            $result['ok'] ? 200 : 404
+        );
     }
 
     // Add a comment or reply.
@@ -135,8 +151,13 @@ if ($method === 'POST') {
         $imagePath = 'webp/' . $filename;
     }
 
-    $stmt = $pdo->prepare('INSERT INTO post_comments (media_post_id, parent_id, name, message, image_path, fingerprint_hash) VALUES (?, ?, ?, ?, ?, ?)');
-    $stmt->execute([$postId, $parentId > 0 ? $parentId : null, $name !== '' ? $name : null, $message, $imagePath, $fingerprint]);
+    // Screen it before storing. Moderation ships off, so this is normally an
+    // instant approve; when a comment is held it is stored but not shown.
+    $verdict = CommentModeration::screen($name, $message);
+    $visible = $verdict['status'] === 'approved';
+
+    $stmt = $pdo->prepare('INSERT INTO post_comments (media_post_id, parent_id, name, message, image_path, fingerprint_hash, status, held_reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    $stmt->execute([$postId, $parentId > 0 ? $parentId : null, $name !== '' ? $name : null, $message, $imagePath, $fingerprint, $verdict['status'], $verdict['reason']]);
     $commentId = (int) $pdo->lastInsertId();
 
     jsonResponse(['status' => 'success', 'data' => [
@@ -149,6 +170,9 @@ if ($method === 'POST') {
         'liked' => false,
         'reply_count' => 0,
         'created_at' => date('Y-m-d H:i:s'),
+        'status' => $verdict['status'],
+        'visible' => $visible,
+        'notice' => $visible ? null : 'Thank you! Your comment has been received and will appear once a leader has reviewed it.',
     ]]);
 }
 

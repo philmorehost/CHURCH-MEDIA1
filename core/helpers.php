@@ -239,18 +239,16 @@ function strongEnoughPassword(string $pw): bool
  */
 function settings(): array
 {
-    static $cache = null;
-    static $cacheTenant = 'unset';
-
     $tenantId = class_exists('Tenant') ? Tenant::id() : null;
-    if ($cache !== null && $cacheTenant === $tenantId) {
-        return $cache;
+
+    if (isset($GLOBALS['__settings_cache']) && ($GLOBALS['__settings_cache_tenant'] ?? 'unset') === $tenantId) {
+        return $GLOBALS['__settings_cache'];
     }
-    $cacheTenant = $tenantId;
+    $GLOBALS['__settings_cache_tenant'] = $tenantId;
 
     $defaults = require CONFIG_PATH . '/site.php';
     if (!defined('APP_IS_INSTALLED') || !APP_IS_INSTALLED) {
-        return $cache = $defaults;
+        return $GLOBALS['__settings_cache'] = $defaults;
     }
 
     try {
@@ -271,16 +269,69 @@ function settings(): array
             }
         }
 
-        $cache = $merged;
+        $GLOBALS['__settings_cache'] = $merged;
     } catch (Throwable $e) {
-        $cache = $defaults;
+        $GLOBALS['__settings_cache'] = $defaults;
     }
-    return $cache;
+    return $GLOBALS['__settings_cache'];
+}
+
+/** Drops the cached settings so a read after a write in the same request is accurate. */
+function settingsForget(): void
+{
+    unset($GLOBALS['__settings_cache'], $GLOBALS['__settings_cache_tenant']);
 }
 
 function setting(string $key, $default = null)
 {
     return settings()[$key] ?? $default;
+}
+
+/**
+ * Writes settings for the current tenant.
+ *
+ * Creates the tenant's own `settings` row on first write and updates it after
+ * that, so a tenant only ever stores the values that differ from the shared
+ * defaults row. Column names come from our own code, never from request input.
+ *
+ * Note: the older settings screens still write to the shared row directly —
+ * they move onto this helper during the Phase 7 tenant-aware settings pass, and
+ * on a single-church install both paths are equivalent.
+ */
+function settingSave(array $values): bool
+{
+    $values = array_filter($values, static fn ($key): bool => is_string($key), ARRAY_FILTER_USE_KEY);
+    if (!$values) {
+        return false;
+    }
+
+    $pdo = Database::getInstance()->getConnection();
+    $tenantId = class_exists('Tenant') ? Tenant::id() : null;
+
+    if ($tenantId === null) {
+        $row = $pdo->query('SELECT id FROM settings WHERE tenant_id IS NULL ORDER BY id ASC LIMIT 1')->fetch();
+    } else {
+        $lookup = $pdo->prepare('SELECT id FROM settings WHERE tenant_id = ? ORDER BY id ASC LIMIT 1');
+        $lookup->execute([$tenantId]);
+        $row = $lookup->fetch();
+    }
+
+    $columns = array_keys($values);
+    $params = array_values($values);
+
+    if ($row) {
+        $set = implode(', ', array_map(static fn (string $c): string => '`' . $c . '` = ?', $columns));
+        $params[] = (int) $row['id'];
+        $pdo->prepare('UPDATE settings SET ' . $set . ' WHERE id = ?')->execute($params);
+    } else {
+        $cols = implode(', ', array_map(static fn (string $c): string => '`' . $c . '`', $columns));
+        $marks = implode(', ', array_fill(0, count($columns), '?'));
+        $pdo->prepare('INSERT INTO settings (tenant_id, ' . $cols . ') VALUES (?, ' . $marks . ')')
+            ->execute(array_merge([$tenantId], $params));
+    }
+
+    settingsForget();
+    return true;
 }
 
 function flash(string $key, ?string $message = null): ?string

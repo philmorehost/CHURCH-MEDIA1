@@ -906,6 +906,43 @@ class Database
                         ->execute([$title, 'default']);
                 }
             },
+
+            // Comment moderation. Existing comments default to 'approved' so
+            // nothing already published disappears when this lands.
+            '2026_11_comment_moderation' => function (PDO $pdo): void {
+                self::addColumnIfMissing($pdo, 'post_comments', 'status', "ENUM('approved','pending','rejected','spam') NOT NULL DEFAULT 'approved'", 'is_published');
+                self::addColumnIfMissing($pdo, 'post_comments', 'moderated_by', 'INT NULL', 'status');
+                self::addColumnIfMissing($pdo, 'post_comments', 'moderated_at', 'DATETIME NULL', 'moderated_by');
+                self::addColumnIfMissing($pdo, 'post_comments', 'moderator_note', 'VARCHAR(255) NULL', 'moderated_at');
+                self::addColumnIfMissing($pdo, 'post_comments', 'report_count', 'INT NOT NULL DEFAULT 0', 'moderator_note');
+                self::addColumnIfMissing($pdo, 'post_comments', 'is_flagged', 'TINYINT(1) NOT NULL DEFAULT 0', 'report_count');
+                self::addColumnIfMissing($pdo, 'post_comments', 'held_reason', 'VARCHAR(255) NULL', 'is_flagged');
+                self::addIndexIfMissing($pdo, 'post_comments', 'idx_comment_status', 'INDEX `idx_comment_status` (`status`, `created_at`)');
+                self::addIndexIfMissing($pdo, 'post_comments', 'idx_comment_flagged', 'INDEX `idx_comment_flagged` (`is_flagged`, `report_count`)');
+
+                self::addColumnIfMissing($pdo, 'settings', 'comments_moderation', "VARCHAR(20) NOT NULL DEFAULT 'off'", 'license_key');
+                self::addColumnIfMissing($pdo, 'settings', 'comments_flag_threshold', 'INT NOT NULL DEFAULT 3', 'comments_moderation');
+
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `comment_reports` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `comment_id` INT NOT NULL,
+                    `fingerprint_hash` VARCHAR(64) NULL,
+                    `reason` VARCHAR(255) NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY `uniq_comment_report` (`comment_id`, `fingerprint_hash`),
+                    FOREIGN KEY (`comment_id`) REFERENCES `post_comments`(`id`) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `comment_blocklist` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `tenant_id` INT NULL,
+                    `kind` ENUM('block','spam') NOT NULL DEFAULT 'block',
+                    `word` VARCHAR(100) NOT NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY `uniq_blocklist_word` (`tenant_id`, `kind`, `word`),
+                    INDEX `idx_blocklist_kind` (`kind`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+            },
         ];
     }
 
