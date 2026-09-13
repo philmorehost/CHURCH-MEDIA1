@@ -64,6 +64,7 @@ $parentLabels = array_map(static fn (array $l): string => $l['label'], $parentLe
       <form method="post" action="/register" id="registerForm"
             data-units='<?= e($unitsJson) ?>'
             data-old='<?= e($oldJson) ?>'<?= $pwFocus ? ' data-focus-password="1"' : '' ?>>
+        <?= Csrf::field() ?>
         <input type="text" name="company" value="" class="honeypot" tabindex="-1" autocomplete="off" aria-hidden="true">
 
         <div class="form-field">

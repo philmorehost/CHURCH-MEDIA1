@@ -478,6 +478,11 @@ $router->get('/register', function () {
 });
 
 $router->post('/register', function () {
+    // Every other public POST handler validates CSRF; this one did not, while the
+    // small church-name-flag form further down the page did. That is the wrong way
+    // round, so the check now covers both forms.
+    Csrf::requireValid();
+
     $pdo = Database::getInstance()->getConnection();
 
     // Church name correction flag (small second form on the register page).
@@ -1155,6 +1160,245 @@ $router->get('/search', function () {
 
 $router->get('/sitemap.xml', function () {
     require VIEWS_PATH . '/sitemap.php';
+});
+
+// ---------------------------------------------------------------------------
+// Member accounts — the first visitor-facing logins in this project.
+//
+// Deliberately not /admin: a member session can never satisfy Auth::check(), and
+// every lookup here is tenant-scoped, so a member of one church cannot sign in on
+// another church's site. See core/MemberAuth.php for why the two are kept apart.
+// ---------------------------------------------------------------------------
+
+$router->get('/member/register', function () {
+    if (MemberAuth::check()) {
+        redirect('/member');
+    }
+    render('member/register', [
+        'metaTitle' => 'Create your account',
+        'metaRobots' => 'noindex, nofollow',
+    ]);
+});
+
+$router->post('/member/register', function () {
+    Csrf::requireValid();
+
+    // Honeypot: bots fill hidden fields, humans never see them.
+    if (trim((string) ($_POST['company'] ?? '')) !== '') {
+        redirect('/member/register?sent=1');
+    }
+
+    if (!RateLimiter::attempt('member_register', clientIp(), 5, 900)) {
+        keepFormOld($_POST);
+        flash('member_error', 'Too many attempts — please wait a few minutes and try again.');
+        redirect('/member/register');
+    }
+
+    $name = trim((string) ($_POST['name'] ?? ''));
+    $email = (string) ($_POST['email'] ?? '');
+    $phone = (string) ($_POST['phone'] ?? '');
+    $password = (string) ($_POST['password'] ?? '');
+    $confirm = (string) ($_POST['password_confirm'] ?? '');
+
+    $errors = Member::validateRegistration($name, $email, $password, $confirm);
+    if (!$errors) {
+        $result = Member::register($name, $email, $phone, $password);
+        if (!empty($result['errors'])) {
+            $errors = $result['errors'];
+        }
+    }
+
+    if ($errors) {
+        keepFormOld($_POST);
+        flash('member_error', implode(' ', $errors));
+        redirect('/member/register');
+    }
+
+    $mailSent = Member::sendVerification(Member::normaliseEmail($email), $name, (string) $result['token']);
+
+    // Sign them in rather than making them wait on an email to use what they just
+    // created — and because a broken SMTP setting would otherwise strand them.
+    MemberAuth::login((int) $result['id']);
+
+    flash('member_notice', $mailSent
+        ? 'Welcome! We have emailed you a link to confirm your address.'
+        : 'Welcome! We could not send the confirmation email — please ask an admin to check the mail settings.');
+    redirect('/member');
+});
+
+$router->get('/member/login', function () {
+    if (MemberAuth::check()) {
+        redirect('/member');
+    }
+    render('member/login', [
+        'metaTitle' => 'Sign in',
+        'metaRobots' => 'noindex, nofollow',
+    ]);
+});
+
+$router->post('/member/login', function () {
+    Csrf::requireValid();
+
+    if (!RateLimiter::attempt('member_login', clientIp(), 10, 900)) {
+        flash('member_error', 'Too many attempts — please wait a few minutes and try again.');
+        redirect('/member/login');
+    }
+
+    $email = (string) ($_POST['email'] ?? '');
+    $password = (string) ($_POST['password'] ?? '');
+
+    if (!MemberAuth::attempt($email, $password)) {
+        keepFormOld(['email' => $email]);
+        flash('member_error', 'Those details did not match an account.');
+        redirect('/member/login');
+    }
+
+    // Where they were headed, remembered by MemberAuth::requireLogin(). Only
+    // /member paths are honoured, so a tampered session value cannot turn this
+    // into an open redirect off-site.
+    $intended = (string) ($_SESSION['member_intended'] ?? '');
+    unset($_SESSION['member_intended']);
+    redirect(($intended !== '' && str_starts_with($intended, '/member')) ? $intended : '/member');
+});
+
+$router->post('/member/logout', function () {
+    Csrf::requireValid();
+    MemberAuth::logout();
+    flash('member_notice', 'You have been signed out.');
+    redirect('/');
+});
+
+$router->get('/member/verify', function () {
+    $memberId = Member::verify((string) ($_GET['token'] ?? ''));
+    if ($memberId === null) {
+        flash('member_error', 'That confirmation link is no longer valid. Sign in and we will send a fresh one.');
+        redirect('/member/login');
+    }
+    MemberAuth::login($memberId);
+    flash('member_notice', 'Your email address is confirmed. Welcome!');
+    redirect('/member');
+});
+
+$router->get('/member/forgot-password', function () {
+    render('member/forgot-password', [
+        'metaTitle' => 'Reset your password',
+        'metaRobots' => 'noindex, nofollow',
+    ]);
+});
+
+$router->post('/member/forgot-password', function () {
+    Csrf::requireValid();
+
+    if (!RateLimiter::attempt('member_forgot', clientIp(), 5, 900)) {
+        flash('member_error', 'Too many attempts — please wait a few minutes and try again.');
+        redirect('/member/forgot-password');
+    }
+
+    $email = (string) ($_POST['email'] ?? '');
+    $token = Member::issueReset($email);
+
+    if ($token !== null) {
+        $member = Member::findByEmail($email);
+        if ($member !== null) {
+            Member::sendReset(Member::normaliseEmail($email), (string) $member['name'], $token);
+        }
+    }
+
+    // The same answer whether or not the address exists: which emails are registered
+    // is not something an anonymous visitor gets to ask.
+    flash('member_notice', 'If that address has an account, a reset link is on its way.');
+    redirect('/member/forgot-password?sent=1');
+});
+
+$router->get('/member/reset-password', function () {
+    $token = (string) ($_GET['token'] ?? '');
+    render('member/reset-password', [
+        'metaTitle' => 'Choose a new password',
+        'metaRobots' => 'noindex, nofollow',
+        'token' => $token,
+        'tokenValid' => Member::tokenLooksValid($token),
+    ]);
+});
+
+$router->post('/member/reset-password', function () {
+    Csrf::requireValid();
+
+    $token = (string) ($_POST['token'] ?? '');
+    $password = (string) ($_POST['password'] ?? '');
+    $confirm = (string) ($_POST['password_confirm'] ?? '');
+
+    if (strlen($password) < 8 || $password !== $confirm) {
+        flash('member_error', 'Choose a password of at least 8 characters, and make sure both boxes match.');
+        redirect('/member/reset-password?token=' . urlencode($token));
+    }
+
+    $memberId = Member::resetPassword($token, $password);
+    if ($memberId === null) {
+        flash('member_error', 'That reset link has expired or was already used. Please request a new one.');
+        redirect('/member/forgot-password');
+    }
+
+    MemberAuth::login($memberId);
+    flash('member_notice', 'Your password has been changed.');
+    redirect('/member');
+});
+
+$router->get('/member', function () {
+    MemberAuth::requireLogin();
+    $member = MemberAuth::member();
+    if ($member === null) {
+        // Session outlived the row, or the tenant changed underneath it.
+        MemberAuth::logout();
+        redirect('/member/login');
+    }
+    render('member/dashboard', [
+        'metaTitle' => 'My account',
+        'metaRobots' => 'noindex, nofollow',
+        'member' => $member,
+        'prefs' => Member::preferences($member),
+    ]);
+});
+
+$router->post('/member', function () {
+    Csrf::requireValid();
+    MemberAuth::requireLogin();
+
+    $member = MemberAuth::member();
+    if ($member === null) {
+        MemberAuth::logout();
+        redirect('/member/login');
+    }
+
+    $memberId = (int) $member['id'];
+
+    switch ((string) ($_POST['do'] ?? '')) {
+        case 'profile':
+            Member::updateProfile(
+                $memberId,
+                (string) ($_POST['name'] ?? $member['name']),
+                (string) ($_POST['phone'] ?? ''),
+                !empty($_POST['sms_consent']),
+                !empty($_POST['whatsapp_consent'])
+            );
+            flash('member_notice', 'Your details are saved.');
+            break;
+
+        case 'prefs':
+            Member::savePreferences($memberId, (array) ($_POST['prefs'] ?? []));
+            flash('member_notice', 'Your notification choices are saved.');
+            break;
+
+        case 'resend':
+            $token = Member::reissueVerification($memberId);
+            $sent = $token !== null
+                && Member::sendVerification((string) $member['email'], (string) $member['name'], $token);
+            flash($sent ? 'member_notice' : 'member_error', $sent
+                ? 'A fresh confirmation link is on its way.'
+                : 'We could not send that email — please ask an admin to check the mail settings.');
+            break;
+    }
+
+    redirect('/member');
 });
 
 // The site icon. A route rather than a file on disk on purpose: a real

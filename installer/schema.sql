@@ -882,3 +882,36 @@ CREATE TABLE IF NOT EXISTS `analytics_daily` (
   INDEX `idx_ad_day` (`day`),
   INDEX `idx_ad_event_day` (`event`, `day`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Member accounts — the first visitor-facing logins in this project. Kept separate
+-- from `users`, which is staff. `tenant_id` is NOT NULL DEFAULT 0 rather than NULL
+-- because MySQL treats every NULL as distinct, which would let the same email
+-- register twice on the default church and defeat `uniq_member_email`.
+CREATE TABLE IF NOT EXISTS `members` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NOT NULL DEFAULT 0 COMMENT '0 = no tenant resolved; otherwise Tenant::id()',
+  `org_unit_id` INT NULL COMMENT 'Home church, once the member tells us or an admin sets it',
+  `name` VARCHAR(150) NOT NULL,
+  `email` VARCHAR(190) NOT NULL,
+  `phone` VARCHAR(32) NULL COMMENT 'Normalised dial code + national number, e.g. 2348031234567',
+  `sms_consent` TINYINT(1) NOT NULL DEFAULT 0,
+  `whatsapp_consent` TINYINT(1) NOT NULL DEFAULT 0,
+  `password_hash` VARCHAR(255) NOT NULL,
+  `is_verified` TINYINT(1) NOT NULL DEFAULT 0,
+  `verify_token_hash` CHAR(64) NULL COMMENT 'SHA-256 of the emailed token; the token itself is never stored',
+  `verify_expires_at` DATETIME NULL,
+  `reset_token_hash` CHAR(64) NULL,
+  `reset_expires_at` DATETIME NULL,
+  `notification_prefs` TEXT NULL COMMENT 'JSON: devotional, events, prayer, giving, reading_plan',
+  `reading_plan_id` INT NULL,
+  `last_read_day` DATE NULL,
+  `streak` INT NOT NULL DEFAULT 0,
+  `is_suspended` TINYINT(1) NOT NULL DEFAULT 0,
+  `last_seen_at` TIMESTAMP NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_member_email` (`tenant_id`, `email`),
+  INDEX `idx_member_unit` (`org_unit_id`),
+  INDEX `idx_member_verify` (`verify_token_hash`),
+  INDEX `idx_member_reset` (`reset_token_hash`),
+  FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
