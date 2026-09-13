@@ -56,16 +56,16 @@
 
 ## 2. Phase overview
 
-| Phase | Theme | Ships | Effort | Cost |
-|---|---|---|---|---|
-| **0** | **Tenancy foundation** — SaaS confirmed | `tenants` table, host/subdomain resolution in `bootstrap.php`, `tenant_id` on `settings` and **every new table from here on**, default-tenant backfill, per-tenant storage namespacing | 2–3 sessions | None |
-| **1** | Quick wins, no new vendors | Comments moderation, analytics dashboard, real RSVP + `.ics`, share cards, prayer wall depth, level-aware push targeting, backups & data export | 6–8 sessions | None |
-| **2** | **Messaging Hub — SMS** (explicit request) | Contacts address book, groups/segments, sender-ID management, compose + scheduling, templates, campaigns/history, wallet, worker, full guide | 8–10 sessions | Per-SMS (wallet) |
-| **3** | Sermons: series + podcast | Sermon series, series pages, podcast RSS feed + Spotify/Apple submission | 3–4 sessions | None |
-| **4** | WhatsApp channel | Official Cloud API integration (templates, 24-h window, webhooks); optional quarantined unofficial bridge behind a flag | 5–7 sessions | Per-conversation |
-| **5** | Members & daily engagement | Member accounts, daily devotional, Bible reading plans + streaks, offline sermon downloads | 10–12 sessions | None |
-| **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None |
-| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None |
+| Phase | Theme | Ships | Effort | Cost | Status |
+|---|---|---|---|---|---|
+| **0** | **Tenancy foundation** — SaaS confirmed | `tenants` table, host/subdomain resolution in `bootstrap.php`, `tenant_id` on `settings` and **every new table from here on**, default-tenant backfill, per-tenant storage namespacing | 2–3 sessions | None | ✅ core shipped |
+| **1** | Quick wins, no new vendors | Comments moderation, analytics dashboard, real RSVP + `.ics`, share cards, prayer wall depth, level-aware push targeting, backups & data export | 6–8 sessions | None | ✅ shipped (1.1–1.7) |
+| **2** | **Messaging Hub — SMS** (explicit request) | Contacts address book, groups/segments, sender-ID management, compose + scheduling, templates, campaigns/history, wallet, worker, full guide | 8–10 sessions | Per-SMS (wallet) | ✅ shipped |
+| **3** | Sermons: series + podcast | Sermon series, series pages, podcast RSS feed + Spotify/Apple submission | 3–4 sessions | None | ✅ shipped (3.1–3.6) |
+| **4** | WhatsApp channel | Official Cloud API integration (templates, 24-h window, webhooks) | 5–7 sessions | Per-conversation | ✅ closed (4.1–4.3; 4.4 rejected) |
+| **5** | Members & daily engagement | Member accounts, daily devotional, Bible reading plans + streaks, offline sermon downloads | 10–12 sessions | None | ⬜ **next** |
+| **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ⬜ |
+| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ partly advanced — the second church's app is built |
 
 **Confirmed 2026-09-12:** multi-tenant **SaaS is a real goal**. That is why **Phase 0
 (tenancy foundation) runs before everything else** — the SMS token, sender IDs, country
@@ -492,7 +492,8 @@ Every table below carries `tenant_id INT NOT NULL` (Phase 0) unless noted.
 > the submitting church is told in-app, by email and by push, `media_team` included; if no
 > sender ID is configured as default yet, the newly approved one becomes it, so a church can
 > send without hunting through settings.
-> Still to build: the Sender IDs tab itself, where a church submits one.
+> **The Sender IDs tab is shipped too** — `admin/sms.php` carries a `sender-ids` tab (§2.6), so a
+> church submits and tracks its own ID from the admin rather than from the CLI.
 **Confirmed requirement:** church admins / editors / media team submit their own sender
 ID; the system pushes it to the gateway, tracks the result, and flips it to approved
 automatically — with a manual override for the super admin.
@@ -852,12 +853,8 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > **Not verified, and it cannot be from here:** nothing has been sent to a real Meta endpoint. The
 > transport is a stub, so the Graph API payload *shapes* are asserted but their acceptance by Meta
 > is not. The app has to be created, the business verified, a number registered, and the webhook
-> URL subscribed before any of that is testable. There is also no admin UI yet — templates,
-> conversations and the composer are 4.2.
->
-> **Still to build in this phase:** `admin/whatsapp.php` (template manager, conversation inbox with
-> the window indicator, broadcast composer reusing the Phase 2 contacts/groups, per-church number
-> mapping), `cli/wa_worker.php`, and the optional Node bridge for groups and number harvesting.
+> URL subscribed before any of that is testable. The admin UI this note deferred to 4.2 is now
+> built — see the 4.2–4.3 status below.
 
 > **Status: shipped (4.2–4.3).** `admin/whatsapp.php` with five tabs — dashboard, inbox, broadcast,
 > templates, settings — and a guide. `cli/wa_worker.php` works the broadcast queue.
@@ -895,8 +892,10 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > gates are tested against a real process (channel off, sending window, daily cap, `--dry-run`) and
 > the send path is driven in-process with a stub, but Meta's acceptance of the payloads is untested.
 >
-> **Still to build in this phase:** the optional Node bridge for groups and number harvesting
-> (4.4). Everything else in Phase 4 is done.
+> **Phase 4 is closed.** The optional Node bridge (4.4) was built and then removed, before it ever
+> paired a number, at the project owner's direction: low volume is not the same as low risk, and a
+> banned number is a banned church. Groups and number harvesting are therefore **out of scope
+> permanently, not pending**. See "Decision — REVERSED" above.
 
 ## 7. Phase 5 — Members & daily engagement
 
@@ -970,7 +969,7 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 
 | # | Decision | Answer | Effect on the plan |
 |---|---|---|---|
-| 1 | WhatsApp | **Both** — official Cloud API + quarantined unofficial bridge | Phase 4 builds both; the bridge is flag-gated (default off) on a spare SIM and owns groups + number harvesting only |
+| 1 | WhatsApp | **Official Cloud API only** — *superseded, see §6* | The unofficial bridge was built, then removed before it paired a number. Phase 4 ships the official channel; groups and number harvesting are permanently out of scope |
 | 2 | Sender IDs | **Self-service.** Admin / editor / media team submit one (≤ 11 alphanumeric); it is pushed to the gateway automatically; the system polls and auto-approves; the super admin can also force a status | New §2.3 + `cli/sms_sender_check.php` + approval notification |
 | 3 | Numbers | **Nigeria (`234`) default, other countries supported** for churches that buy the script | New §2.4 + `sms_countries` lookup and a per-tenant default country |
 | 4 | Multi-tenant | **Yes — building it as SaaS** | **Phase 0 (tenancy foundation) runs first**; `tenant_id` on every new table |
