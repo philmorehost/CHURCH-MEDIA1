@@ -624,6 +624,37 @@ SELECT 'About Us', 'about', 'Our Story',
   (SELECT COUNT(*) FROM `pages` WHERE `slug` = 'about')
 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `pages` WHERE `slug` = 'about');
 
+-- Giving campaigns: a named project with a target, and the gifts that count towards it.
+--
+-- Created before `donations` because `donations.campaign_id` points at it, and this file is a
+-- one-shot script: a foreign key needs its target to exist already.
+--
+-- **The raised total always comes from `donations`, never from `giving_pledges`.** A pledge is a
+-- promise. A church that adds promises to the amount raised is reporting money it does not have, so
+-- the two figures are shown side by side and never summed.
+CREATE TABLE IF NOT EXISTS `giving_campaigns` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NOT NULL DEFAULT 0 COMMENT '0 = no tenant resolved; otherwise Tenant::id()',
+  `org_unit_id` INT NULL COMMENT 'The church this campaign belongs to',
+  `title` VARCHAR(180) NOT NULL,
+  `slug` VARCHAR(190) NOT NULL COMMENT 'Used in the public URL; unique per tenant',
+  `summary` VARCHAR(255) NULL COMMENT 'One line under the title',
+  `description` TEXT NULL,
+  `goal_amount` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  `currency` VARCHAR(10) NOT NULL DEFAULT 'NGN' COMMENT 'The currency the goal is expressed in',
+  `starts_on` DATE NULL,
+  `ends_on` DATE NULL COMMENT 'After this date the campaign stops accepting gifts',
+  `image_path` VARCHAR(255) NULL,
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `sort_order` INT NOT NULL DEFAULT 0,
+  `created_by` INT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_campaign_slug` (`tenant_id`, `slug`),
+  INDEX `idx_campaign_unit` (`org_unit_id`, `is_active`),
+  FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Donations table for online giving, tithes, offerings, and manual bank transfers
 CREATE TABLE IF NOT EXISTS `donations` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
@@ -639,13 +670,42 @@ CREATE TABLE IF NOT EXISTS `donations` (
   `payment_status` ENUM('pending', 'completed', 'failed') NOT NULL DEFAULT 'pending',
   `payment_reference` VARCHAR(100) NULL,
   `receipt_path` VARCHAR(255) NULL,
+  `campaign_id` INT NULL COMMENT 'The giving campaign this gift counts towards, if any',
   `org_unit_id` INT NULL,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX `idx_donation_status` (`payment_status`, `payment_method`),
   INDEX `idx_donation_category` (`category`),
   INDEX `idx_donation_member` (`member_id`, `payment_status`),
+  INDEX `idx_donation_campaign` (`campaign_id`, `payment_status`),
+  FOREIGN KEY (`campaign_id`) REFERENCES `giving_campaigns`(`id`) ON DELETE SET NULL,
   FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Promises to give, kept apart from money that has actually arrived.
+--
+-- `status` separates a promise from a gift that was honoured, and `recorded_donation_id` is what stops
+-- a pledge being turned into a donation twice — the fact is recorded in a column rather than checked
+-- in PHP, so a double click cannot double the total.
+CREATE TABLE IF NOT EXISTS `giving_pledges` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NOT NULL DEFAULT 0,
+  `campaign_id` INT NOT NULL,
+  `donor_name` VARCHAR(150) NOT NULL,
+  `donor_email` VARCHAR(190) NULL,
+  `donor_phone` VARCHAR(32) NULL,
+  `amount` DECIMAL(12,2) NOT NULL,
+  `currency` VARCHAR(10) NOT NULL DEFAULT 'NGN',
+  `promised_on` DATE NULL COMMENT 'The date they said they would give it',
+  `note` VARCHAR(255) NULL,
+  `status` ENUM('pledged','received','cancelled') NOT NULL DEFAULT 'pledged',
+  `received_at` DATETIME NULL,
+  `recorded_donation_id` INT NULL COMMENT 'Set when the pledge was recorded as a real gift, so it cannot be counted twice',
+  `created_by` INT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_pledge_campaign` (`campaign_id`, `status`),
+  FOREIGN KEY (`campaign_id`) REFERENCES `giving_campaigns`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`recorded_donation_id`) REFERENCES `donations`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Seed the Privacy Policy page so it appears in admin/pages and renders at /page/privacy-policy

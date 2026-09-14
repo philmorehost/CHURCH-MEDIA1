@@ -83,6 +83,7 @@ $navGroups = [
             ['key' => 'newsletter', 'href' => '/admin/newsletter', 'label' => 'Newsletter'],
             ['key' => 'notifications', 'href' => '/admin/notifications', 'label' => 'Notifications'],
             ['key' => 'donations', 'href' => '/admin/donations', 'label' => 'Donations & Giving'],
+            ['key' => 'campaigns', 'href' => '/admin/campaigns', 'label' => 'Giving Campaigns'],
         ],
     ],
     [

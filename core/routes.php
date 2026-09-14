@@ -266,7 +266,17 @@ $router->get('/payment/payhub/callback', function () {
 
             $amtStr = $don ? ' ₦' . number_format((float) $don['amount']) : '';
             flash('give_success', 'Thank you for your generosity!' . $amtStr . ' online giving has been processed successfully.');
-            redirect('/give');
+
+            // Send them back to the campaign they gave to, if they gave to one, so the progress bar
+            // they were looking at has moved by the time they return.
+            $backTo = '/give';
+            if ($don && !empty($don['campaign_id'])) {
+                $campaign = GivingCampaign::find((int) $don['campaign_id']);
+                if ($campaign !== null) {
+                    $backTo = '/give/c/' . $campaign['slug'];
+                }
+            }
+            redirect($backTo);
         } else {
             $stmt = $pdo->prepare('UPDATE ads SET payment_status = "paid" WHERE payment_reference = ?');
             $stmt->execute([$reference]);
@@ -813,6 +823,56 @@ $router->get('/give', function () {
     render('give');
 });
 
+// A single campaign. Renders the same giving page in campaign mode rather than a second view, so the
+// payment flow, the forms and the validation cannot drift apart between "give" and "give to this".
+$router->get('/give/c/{slug}', function (array $params) {
+    $campaign = GivingCampaign::findBySlug((string) $params['slug']);
+    if ($campaign === null) {
+        http_response_code(404);
+        render('404');
+        return;
+    }
+    render('give', array('campaign' => $campaign));
+});
+
+// A pledge is taken on the campaign's own address rather than /give, because a promise has to be a
+// promise *about* something. The money forms still post to /give with a campaign_id, so there is one
+// payment path and only one place where a gift is recorded.
+$router->post('/give/c/{slug}', function (array $params) {
+    Csrf::requireValid();
+
+    $campaign = GivingCampaign::findBySlug((string) $params['slug']);
+    if ($campaign === null) {
+        http_response_code(404);
+        render('404');
+        return;
+    }
+
+    if (empty($_POST['pledge'])) {
+        redirect('/give/c/' . $campaign['slug']);
+    }
+
+    // Rate limited like the other public forms: a pledge creates a row somebody has to read, so an
+    // open endpoint is an invitation to fill the church's list with rubbish.
+    RateLimiter::require('pledge', 10, 600);
+
+    $result = GivingCampaign::pledge((int) $campaign['id'], array(
+        'donor_name' => (string) ($_POST['donor_name'] ?? ''),
+        'donor_email' => (string) ($_POST['donor_email'] ?? ''),
+        'donor_phone' => (string) ($_POST['donor_phone'] ?? ''),
+        'amount' => (string) ($_POST['amount'] ?? ''),
+        'promised_on' => (string) ($_POST['promised_on'] ?? ''),
+        'note' => (string) ($_POST['note'] ?? ''),
+    ));
+
+    if (empty($result['ok'])) {
+        flash('pledge_error', (string) ($result['errors'][0] ?? 'Please check the pledge form.'));
+    } else {
+        flash('pledge_ok', 'Thank you — your pledge has been recorded. It is not counted as money received; the church will see it as something promised.');
+    }
+    redirect('/give/c/' . $campaign['slug']);
+});
+
 $router->post('/give', function () {
     Csrf::requireValid();
     $pdo = Database::getInstance()->getConnection();
@@ -825,20 +885,32 @@ $router->post('/give', function () {
     $donorPhone = trim((string) ($_POST['donor_phone'] ?? ''));
     $description = trim((string) ($_POST['description'] ?? ''));
 
+    // A gift offered to a campaign is only accepted while that campaign is taking gifts. Silently
+    // recording it as general giving instead would leave the donor believing they gave to a project
+    // and the treasurer unable to tell them otherwise.
+    $campaignId = (int) ($_POST['campaign_id'] ?? 0);
+    $campaign = $campaignId > 0 ? GivingCampaign::find($campaignId) : null;
+    if ($campaignId > 0 && ($campaign === null || !GivingCampaign::acceptsGifts($campaign))) {
+        flash('give_error', $campaign === null
+            ? 'That campaign is no longer available.'
+            : 'Giving to "' . $campaign['title'] . '" has closed, so nothing was taken.');
+        redirect($campaign !== null ? '/give/c/' . $campaign['slug'] : '/give');
+    }
+
     if ($amount < 100) {
         flash('give_error', 'Giving amount must be at least ₦100.');
-        redirect('/give');
+        redirect($campaign !== null ? '/give/c/' . $campaign['slug'] : '/give');
     }
     if ($donorEmail === '' || !filter_var($donorEmail, FILTER_VALIDATE_EMAIL)) {
         flash('give_error', 'Please provide a valid email address.');
-        redirect('/give');
+        redirect($campaign !== null ? '/give/c/' . $campaign['slug'] : '/give');
     }
 
     if ($paymentMethod === 'manual_bank') {
         $fileUpload = $_FILES['receipt_file'] ?? null;
         if (!$fileUpload || empty($fileUpload['tmp_name']) || ($fileUpload['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
             flash('give_error', 'Please upload a bank transfer receipt image or PDF proof.');
-            redirect('/give');
+            redirect($campaign !== null ? '/give/c/' . $campaign['slug'] : '/give');
         }
 
         $receiptDir = UPLOADS_PATH . '/donations';
@@ -849,27 +921,27 @@ $router->post('/give', function () {
         $ext = strtolower(pathinfo($fileUpload['name'], PATHINFO_EXTENSION));
         if (!in_array($ext, ['jpg', 'jpeg', 'png', 'webp', 'pdf'], true)) {
             flash('give_error', 'Invalid file type. Upload JPG, PNG, WebP or PDF receipt.');
-            redirect('/give');
+            redirect($campaign !== null ? '/give/c/' . $campaign['slug'] : '/give');
         }
 
         $fileName = 'receipt_' . time() . '_' . bin2hex(random_bytes(6)) . '.' . $ext;
         if (!move_uploaded_file($fileUpload['tmp_name'], $receiptDir . '/' . $fileName)) {
             flash('give_error', 'Failed to save receipt file. Please try again.');
-            redirect('/give');
+            redirect($campaign !== null ? '/give/c/' . $campaign['slug'] : '/give');
         }
 
         $ref = 'GIVE_MANUAL_' . strtoupper(bin2hex(random_bytes(6)));
-        $stmt = $pdo->prepare('INSERT INTO donations (donor_name, donor_email, donor_phone, category, amount, currency, description, payment_method, payment_status, payment_reference, receipt_path) VALUES (?, ?, ?, ?, ?, "NGN", ?, "manual_bank", "pending", ?, ?)');
-        $stmt->execute([$donorName ?: 'Anonymous Giver', $donorEmail, $donorPhone ?: null, $category, $amount, $description ?: null, $ref, 'donations/' . $fileName]);
+        $stmt = $pdo->prepare('INSERT INTO donations (donor_name, donor_email, donor_phone, category, amount, currency, description, payment_method, payment_status, payment_reference, receipt_path, campaign_id) VALUES (?, ?, ?, ?, ?, "NGN", ?, "manual_bank", "pending", ?, ?, ?)');
+        $stmt->execute([$donorName ?: 'Anonymous Giver', $donorEmail, $donorPhone ?: null, $category, $amount, $description ?: null, $ref, 'donations/' . $fileName, $campaign !== null ? (int) $campaign['id'] : null]);
 
         flash('give_success', 'Thank you! Your bank transfer receipt of ₦' . number_format($amount) . ' for ' . $category . ' has been submitted and is pending verification by our finance team.');
-        redirect('/give');
+        redirect($campaign !== null ? '/give/c/' . $campaign['slug'] : '/give');
     }
 
     // Online Payment Gateway (Payhub)
     $ref = 'GIVE_' . strtoupper(bin2hex(random_bytes(8)));
-    $stmt = $pdo->prepare('INSERT INTO donations (donor_name, donor_email, donor_phone, category, amount, currency, description, payment_method, payment_status, payment_reference) VALUES (?, ?, ?, ?, ?, "NGN", ?, "online", "pending", ?)');
-    $stmt->execute([$donorName ?: 'Anonymous Giver', $donorEmail, $donorPhone ?: null, $category, $amount, $description ?: null, $ref]);
+    $stmt = $pdo->prepare('INSERT INTO donations (donor_name, donor_email, donor_phone, category, amount, currency, description, payment_method, payment_status, payment_reference, campaign_id) VALUES (?, ?, ?, ?, ?, "NGN", ?, "online", "pending", ?, ?)');
+    $stmt->execute([$donorName ?: 'Anonymous Giver', $donorEmail, $donorPhone ?: null, $category, $amount, $description ?: null, $ref, $campaign !== null ? (int) $campaign['id'] : null]);
 
     $apiKey = (string) setting('payhub_api_key');
     $secKey = (string) setting('payhub_secret_key');
@@ -913,7 +985,7 @@ $router->post('/give', function () {
     // Sandbox / fallback mode
     $pdo->prepare('UPDATE donations SET payment_status = "completed" WHERE payment_reference = ?')->execute([$ref]);
     flash('give_success', 'Thank you for your cheerful giving of ₦' . number_format($amount) . ' towards ' . $category . '! Your online donation has been recorded.');
-    redirect('/give');
+    redirect($campaign !== null ? '/give/c/' . $campaign['slug'] : '/give');
 });
 
 $router->get('/live', function () {

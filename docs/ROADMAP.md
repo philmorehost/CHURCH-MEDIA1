@@ -64,7 +64,7 @@
 | **3** | Sermons: series + podcast | Sermon series, series pages, podcast RSS feed + Spotify/Apple submission | 3–4 sessions | None | ✅ shipped (3.1–3.6) |
 | **4** | WhatsApp channel | Official Cloud API integration (templates, 24-h window, webhooks) | 5–7 sessions | Per-conversation | ✅ closed (4.1–4.3; 4.4 rejected) |
 | **5** | Members & daily engagement | Member accounts, daily devotional, Bible reading plans + streaks, offline sermon downloads | 10–12 sessions | None | ✅ shipped (S1–S6) |
-| **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ⬜ **next** — 6a–6f shipped |
+| **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ✅ **complete** — 6a–6g shipped |
 | **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ partly advanced — the second church's app is built |
 
 **Confirmed 2026-09-12:** multi-tenant **SaaS is a real goal**. That is why **Phase 0
@@ -1081,8 +1081,57 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > **Not verified:** no email has been delivered — there is no SMTP configured here, and the worker's
 > own status line says so rather than pretending otherwise.
 >
-> **Not built yet in Phase 6:** giving campaigns. SMS/WhatsApp for rota and follow-up messages is also
-> still open, deliberately, for the cost reason above.
+> **6g shipped — giving campaigns. This completes Phase 6.** `giving_campaigns` + `giving_pledges`,
+> `donations.campaign_id`, `core/GivingCampaign.php`, `admin/campaigns.php`, campaign mode on the public
+> giving page (`/give/c/{slug}`), campaign-aware gifts, and a Campaign column and filter on the
+> donations report.
+>
+> **The raised figure always comes from `donations`; a pledge never adds to it.** A pledge is a promise,
+> and a church that adds promises to the amount raised is reporting money it does not have. The two are
+> shown side by side, the bar moves on confirmed gifts alone, and a pledge becomes money one way only —
+> `recordPledge()` writes a real completed donation and stamps the pledge with its id.
+>
+> **That stamp is the whole double-count defence.** The pledge is claimed with a conditional UPDATE
+> *before* the donation is written, so two clicks cannot produce two gifts — the same shape as the claim
+> in the follow-up worker, and for the same reason: a fact recorded in a column survives an edit that a
+> PHP check would not.
+>
+> **A closing date closes a campaign by itself.** `acceptsGifts()` is a date calculation rather than a
+> switch the admin has to remember, because passing the deadline is what "closed" means to the person
+> reading the page. A gift offered to a finished campaign is refused with a message rather than quietly
+> recorded as general giving — the donor would otherwise believe they gave to a project, and the
+> treasurer would have no way to tell them otherwise. The admin list flags a campaign that has ended but
+> is still switched on, so it surfaces rather than sits.
+>
+> **Pending gifts are not counted.** A bank transfer with a receipt uploaded but not yet verified is
+> money somebody has *claimed*, so it is reported separately. Same principle as the pledge.
+>
+> **The bar never rounds up to 100%.** `percent()` floors to one decimal, so 99.6% reads as 99.9% and
+> not as fully funded — 100% is the moment a church stops asking and starts spending.
+>
+> **A bug caught before shipping: campaigns were not tenant-scoped.** The unique key is
+> `(tenant_id, slug)`, so two churches on one database can both have a `building-fund` — and a lookup
+> by slug alone would have served the wrong church's page, while an unfiltered list would have put
+> another church's appeal on this church's giving page. `Devotional` filters `tenant_id` on every read
+> and this now does the same. Worth noting how it was found: an assertion that a *different church's*
+> campaign was absent from `/give` failed, and the honest reading was that the code was wrong rather
+> than the test.
+>
+> **Two currencies are never added together**, which is the same mistake as counting pledges as income:
+> the goal is in the campaign's currency and anything received in another is reported on its own line.
+>
+> **Verified:** 106 domain assertions against the real database — validation, slug generation and
+> collision, the goal bound, the raised/pending/failed/multi-currency split, distinct donors, the pledge
+> lifecycle including the double-record guard, cancel and delete rules, open/upcoming/closed/off status
+> and day counting, the 100% floor, and that every total reconciles with a direct query over
+> `donations`. Plus 69 HTTP assertions through real admin logins and a real public session: creating and
+> editing a campaign, the campaign page and its progress bar at 7.5% and then 20%, giving towards it,
+> a gift refused because the campaign closed, a pledge that leaves the bar untouched, recording it and
+> watching the total move, the second press doing nothing, the donations report naming and filtering by
+> campaign, deletion refused once gifts exist, a 404 for an unknown slug, and a scoped admin turned away
+> from another branch's campaign. Both harnesses removed afterwards and the database restored.
+> **Not verified:** no real payment has been taken. Payhub is unconfigured here, so every gift in these
+> tests went through the gateway's sandbox fallback and was marked completed without a transaction.
 
 > **6f shipped — newcomer follow-up automation.** `follow_up_sequences` + `follow_up_steps` +
 > `follow_up_enrolments` + `follow_up_actions`, `core/FollowUp.php`, `core/FollowUpRunner.php`,

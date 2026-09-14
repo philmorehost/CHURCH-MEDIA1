@@ -2081,6 +2081,71 @@ class Database
                     FOREIGN KEY (`step_id`) REFERENCES `follow_up_steps`(`id`) ON DELETE CASCADE
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
             },
+
+            // Giving campaigns: a named project with a target, and the gifts that count towards it.
+            //
+            // **The money total is always `donations`, never `giving_pledges`.** A pledge is a promise;
+            // a church that adds promises to the amount raised is reporting money it does not have. The
+            // two figures are shown side by side and never summed, and the progress bar moves on
+            // received gifts alone.
+            //
+            // **A pledge becomes real money by being recorded as a donation**, one click, at most once.
+            // `giving_pledges.recorded_donation_id` is what stops it being counted twice — the same
+            // shape as the claim in the follow-up worker: a column that records the fact rather than a
+            // check that a later edit could remove.
+            //
+            // `donations.campaign_id` is ON DELETE SET NULL because a gift is money that was actually
+            // received and must survive its campaign being tidied away. (The admin screen refuses to
+            // delete a campaign that has gifts — this is the backstop, not the plan.)
+            '2026_37_giving_campaigns' => function (PDO $pdo): void {
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `giving_campaigns` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `tenant_id` INT NOT NULL DEFAULT 0 COMMENT '0 = no tenant resolved; otherwise Tenant::id()',
+                    `org_unit_id` INT NULL COMMENT 'The church this campaign belongs to',
+                    `title` VARCHAR(180) NOT NULL,
+                    `slug` VARCHAR(190) NOT NULL COMMENT 'Used in the public URL; unique per tenant',
+                    `summary` VARCHAR(255) NULL COMMENT 'One line under the title',
+                    `description` TEXT NULL,
+                    `goal_amount` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+                    `currency` VARCHAR(10) NOT NULL DEFAULT 'NGN' COMMENT 'The currency the goal is expressed in',
+                    `starts_on` DATE NULL,
+                    `ends_on` DATE NULL COMMENT 'After this date the campaign stops accepting gifts',
+                    `image_path` VARCHAR(255) NULL,
+                    `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+                    `sort_order` INT NOT NULL DEFAULT 0,
+                    `created_by` INT NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY `uniq_campaign_slug` (`tenant_id`, `slug`),
+                    INDEX `idx_campaign_unit` (`org_unit_id`, `is_active`),
+                    FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                self::addColumnIfMissing($pdo, 'donations', 'campaign_id', 'INT NULL', 'description');
+                self::addIndexIfMissing($pdo, 'donations', 'idx_donation_campaign', 'INDEX `idx_donation_campaign` (`campaign_id`, `payment_status`)');
+                self::addForeignKeyIfMissing($pdo, 'donations', 'fk_donation_campaign', 'campaign_id', 'giving_campaigns', 'id', 'SET NULL');
+
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `giving_pledges` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `tenant_id` INT NOT NULL DEFAULT 0,
+                    `campaign_id` INT NOT NULL,
+                    `donor_name` VARCHAR(150) NOT NULL,
+                    `donor_email` VARCHAR(190) NULL,
+                    `donor_phone` VARCHAR(32) NULL,
+                    `amount` DECIMAL(12,2) NOT NULL,
+                    `currency` VARCHAR(10) NOT NULL DEFAULT 'NGN',
+                    `promised_on` DATE NULL COMMENT 'The date they said they would give it',
+                    `note` VARCHAR(255) NULL,
+                    `status` ENUM('pledged','received','cancelled') NOT NULL DEFAULT 'pledged',
+                    `received_at` DATETIME NULL,
+                    `recorded_donation_id` INT NULL COMMENT 'Set when the pledge was recorded as a real gift, so it cannot be counted twice',
+                    `created_by` INT NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    INDEX `idx_pledge_campaign` (`campaign_id`, `status`),
+                    FOREIGN KEY (`campaign_id`) REFERENCES `giving_campaigns`(`id`) ON DELETE CASCADE,
+                    FOREIGN KEY (`recorded_donation_id`) REFERENCES `donations`(`id`) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+            },
         ];
     }
 

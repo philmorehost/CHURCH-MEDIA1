@@ -32,6 +32,7 @@ require __DIR__ . '/partials/layout-open.php';
     <a href="#analytics">Analytics</a>
     <a href="#ads">Ads Management</a>
     <a href="#donations">Donations &amp; Giving</a>
+    <a href="#campaigns">Giving Campaigns</a>
     <a href="#media">Media &amp; Reels</a>
     <a href="#pinned">Pinned Reels</a>
     <a href="#comments">Comments</a>
@@ -116,6 +117,22 @@ require __DIR__ . '/partials/layout-open.php';
       <li><strong>Bank Transfer Receipt Verification:</strong> Review uploaded bank transfer receipt images/PDFs and verify or mark transfers as completed or failed.</li>
       <li><strong>CSV Export:</strong> Download full CSV reports of all giving transactions for financial auditing.</li>
     </ul>
+    <p>A gift given on a campaign page carries a <strong>Campaign</strong> column in this list, so you can filter by project and see exactly what has come in for it.</p>
+  </div>
+
+  <div class="card" style="margin-bottom:18px;">
+    <h2 id="campaigns">Giving Campaigns (<code>/admin/campaigns</code>) <span class="pill admin">ADMIN</span></h2>
+    <p>A campaign is a project with a target — a new roof, a vehicle, a mission fund — and the gifts that count towards it. Each one gets its own public page at <code>/give/c/&lt;name&gt;</code>, and the open ones are listed on <code>/give</code>.</p>
+    <p><strong>Pledges are not money, and the two are never added together.</strong> A pledge is a promise to give later, shown beside the progress bar and clearly labelled. It appears in the total <em>only</em> when somebody has actually received the gift — at which point <strong>Mark received</strong> records it as a real donation and the bar moves. That is deliberate: a church that reports promises as income is reporting money it does not have.</p>
+    <ul>
+      <li><strong>The bar moves on confirmed gifts only.</strong> A bank transfer whose receipt is still waiting to be verified is reported separately as <em>awaiting verification</em>, because somebody has claimed the money but the church has not confirmed it arrived.</li>
+      <li><strong>A closing date closes the campaign.</strong> Once <em>Closes on</em> has passed it stops taking gifts by itself — a gift offered to a finished campaign is refused with a message rather than quietly recorded as general giving. The list shows a campaign that has ended but is still switched on, so you can see it needs attention.</li>
+      <li><strong>Two currencies are never added together.</strong> The target is in the campaign's own currency; anything received in another is reported on its own line.</li>
+      <li><strong>A campaign that has received gifts cannot be deleted</strong>, nor can a pledge that has been turned into a gift. Switch the campaign off instead — that stops the appeal and keeps the record.</li>
+      <li><strong>A pledge can only be recorded once.</strong> Pressing <em>Mark received</em> twice does not double the total; the second press is refused.</li>
+      <li><strong>Record a pledge</strong> is for a promise made in person or on the phone — which is how most pledges actually arrive. Donors can also pledge themselves from the campaign page.</li>
+    </ul>
+    <p>If a church runs several branches on one installation, campaigns belong to a branch for editing but appear on the one public giving page: the website belongs to the whole church.</p>
   </div>
 
   <div class="card" style="margin-bottom:18px;">
