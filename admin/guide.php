@@ -36,6 +36,7 @@ require __DIR__ . '/partials/layout-open.php';
     <a href="#pinned">Pinned Reels</a>
     <a href="#comments">Comments</a>
     <a href="#events">Events</a>
+    <a href="#roster">Duty Roster</a>
     <a href="#sermons">Sermons</a>
     <a href="#series">Series &amp; Podcast</a>
     <a href="#devotionals">Daily Devotionals</a>
@@ -293,6 +294,20 @@ require __DIR__ . '/partials/layout-open.php';
   <div class="card" style="margin-bottom:18px;">
     <h2 id="notifications">Notifications (<code>/admin/notifications</code>)</h2>
     <p>Provinces can broadcast announcements to <strong>all churches, one church, or selected churches</strong>. Recipients see them on their admin dashboard and receive an email (via the SMTP configured in Settings). <span class="pill super">SUPER</span> admins can reach the whole organisation; other admins can only notify within their own unit.</p>
+  </div>
+
+  <div class="card" style="margin-bottom:18px;">
+    <h2 id="roster">Duty Roster (<code>/admin/roster</code>) <span class="pill role">ADMIN/EDITOR</span></h2>
+    <p>Who is serving, and <strong>what still needs filling</strong>. Add a service, add the roles it needs, then put people in them.</p>
+    <ul>
+      <li><strong>A service is not an event.</strong> A Sunday service is an operational occasion — somebody has to be on the door — while an event is something you publicise. They are kept apart so you can arrange a rota without publishing anything.</li>
+      <li><strong>Roles carry the count</strong> — “Ushering ×4”, “Choir ×2” — because that is how you would say it out loud. The people go in separately.</li>
+      <li><strong>Add anybody, member or not.</strong> Pick from your member list, or just type a name and number. Ushers and choir members are frequently not registered members, and making them sign up before they can be rostered would stop you using this at all.</li>
+      <li><strong>Record the answer.</strong> Each person is <em>Invited</em>, <em>Accepted</em> or <em>Declined</em>. Nothing advances on its own — a decline is kept on the page in red so you can see who said no and go and ask somebody else.</li>
+    </ul>
+    <p><strong>An invitation is not counted as covered.</strong> “Still to find” counts people who have accepted, and anyone still to reply is shown separately. A number that treated <em>invited</em> as <em>filled</em> would let you stop looking before anyone had actually agreed — and discover it on the morning.</p>
+    <p>A role with somebody still on it cannot be deleted; you are asked to move those people first, because removing the role would drop them silently. Tick <strong>This service is cancelled</strong> to keep the record but take it off the serving view.</p>
+    <p>Church Admins and Editors can use this. A church admin only ever sees their own church's rosters, and that is enforced on every change, not just on what is displayed.</p>
   </div>
 
   <div class="card" style="margin-bottom:18px;">

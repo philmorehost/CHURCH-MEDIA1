@@ -124,7 +124,7 @@ $metaDescription = $totalListed > 0
 
           <?php if ($phone !== ''): ?>
             <p class="cell-contact">
-              <a href="tel:<?= e($phone) ?>"><?= e(HomeCell::displayPhone($phone)) ?></a>
+              <a href="tel:<?= e($phone) ?>"><?= e(Phone::display($phone)) ?></a>
               <a class="cell-wa" href="https://wa.me/<?= e($phone) ?>" target="_blank" rel="noopener">WhatsApp</a>
             </p>
           <?php endif; ?>

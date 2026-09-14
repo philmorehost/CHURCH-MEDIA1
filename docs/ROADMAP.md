@@ -64,7 +64,7 @@
 | **3** | Sermons: series + podcast | Sermon series, series pages, podcast RSS feed + Spotify/Apple submission | 3–4 sessions | None | ✅ shipped (3.1–3.6) |
 | **4** | WhatsApp channel | Official Cloud API integration (templates, 24-h window, webhooks) | 5–7 sessions | Per-conversation | ✅ closed (4.1–4.3; 4.4 rejected) |
 | **5** | Members & daily engagement | Member accounts, daily devotional, Bible reading plans + streaks, offline sermon downloads | 10–12 sessions | None | ✅ shipped (S1–S6) |
-| **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ⬜ **next** — 6a/6b shipped |
+| **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ⬜ **next** — 6a/6b/6c shipped |
 | **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ partly advanced — the second church's app is built |
 
 **Confirmed 2026-09-12:** multi-tenant **SaaS is a real goal**. That is why **Phase 0
@@ -999,8 +999,41 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > `HomeCellInfo.fromJson` reads, and the `path_label` separator was checked to be the middle dot the
 > app splits on. Nine assertions, all passing, on a real fixture that was then restored.
 >
-> **Not built yet in Phase 6:** duty roster / service planning, newcomer follow-up automation and
-> giving campaigns.
+> **6c shipped — duty roster (the arranging half).** `service_plans` + `service_roles` +
+> `service_assignments`, `core/ServiceRoster.php`, and `admin/roster.php`: add a service, add the
+> roles it needs with a count, put people in them, and record who has answered. The list shows what
+> is still to find per service, and the roster page shows it per role.
+>
+> **A person does not have to be a member.** Ushers and choir members frequently are not registered,
+> so an assignment takes either a member or a typed name and number. Requiring sign-up before somebody
+> can be put on a rota would make this unusable in an ordinary church. When a member *is* chosen their
+> name and number are copied onto the row rather than joined at read time, so the roster still reads
+> correctly after that member closes their account and the foreign key goes NULL — a roster is
+> history, not a join table.
+>
+> **An invitation is not counted as covered.** “Still to find” counts confirmed people; anyone still
+> to reply is shown separately. A number that read *invited* as *filled* would let a planner stop
+> looking before anybody had agreed, and find out on the morning.
+>
+> **A decline is kept, not deleted.** The row stays on the page marked declined so the planner can see
+> who said no and ask somebody else — which is the actual next action. A role that still has people on
+> it cannot be deleted either; the planner is asked to move them first, because a cascade would drop
+> them silently.
+>
+> **`Phone` was extracted to `core/Phone.php`** while doing this. Two unrelated features now collect a
+> person's number, and a second copy of the normalisation is how the same number ends up stored two
+> different ways — which only shows up later, when the SMS or WhatsApp feature fails to reach it.
+>
+> **Verified:** 72 domain assertions and 29 over HTTP driving a real admin login through the real
+> forms — creating a service, adding a role, adding a person, accepting on their behalf, being refused
+> when removing a role that still has somebody on it, and being blocked from another church's roster
+> by guessing the id. Every fixture that sets up state now asserts the write actually landed, which is
+> the fix for the mistake made twice earlier in this phase.
+>
+> **Not built yet in Phase 6:** the automatic SMS/WhatsApp reminder 24 h before a service, newcomer
+> follow-up automation, and giving campaigns. Member-facing accept/decline is also still to come —
+> the status field and the response path exist and are tested, but only an admin can record an answer
+> so far.
 >
 > **A finding worth carrying forward:** the first HTTP run showed the number leaking on three checks,
 > and the cause was the test harness — a fixture helper called with a missing argument fatally errored

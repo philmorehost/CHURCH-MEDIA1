@@ -251,7 +251,7 @@ require __DIR__ . '/partials/layout-open.php';
                 <?= e((string) $cell['leader_name']) ?>
                 <?php if (trim((string) ($cell['leader_phone'] ?? '')) !== ''): ?>
                   <div style="font-size:12.5px;color:var(--muted,#8b87a8);">
-                    <?= e(HomeCell::displayPhone((string) $cell['leader_phone'])) ?>
+                    <?= e(Phone::display((string) $cell['leader_phone'])) ?>
                     <?php if (empty($cell['leader_phone_public'])): ?>
                       <em>· not public</em>
                     <?php endif; ?>

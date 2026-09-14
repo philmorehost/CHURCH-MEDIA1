@@ -56,6 +56,7 @@ $navGroups = [
         'label' => 'Events & Community',
         'items' => [
             ['key' => 'events', 'href' => '/admin/events', 'label' => 'Events'],
+            ['key' => 'roster', 'href' => '/admin/roster', 'label' => 'Duty Roster'],
             ['key' => 'prayer', 'href' => '/admin/prayer', 'label' => 'Prayer Wall'],
             ['key' => 'testimonies', 'href' => '/admin/testimonies', 'label' => 'Testimonies'],
             ['key' => 'newcomers', 'href' => '/admin/newcomers', 'label' => 'Newcomers'],

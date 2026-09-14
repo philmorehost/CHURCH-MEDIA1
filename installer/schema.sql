@@ -941,12 +941,85 @@ CREATE TABLE IF NOT EXISTS `device_tokens` (
   FOREIGN KEY (`member_id`) REFERENCES `members`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Duty roster: one row per service, with the roles that need filling.
+--
+-- A service is its own thing rather than an `events` row. A Sunday service is an operational
+-- occasion — somebody has to be on the door — while an event is something the church publicises.
+-- Tying the two together would mean publishing a roster before the event is ready.
+--
+-- There is deliberately no UNIQUE key over (tenant_id, org_unit_id, service_date, title). Two
+-- services on one day is normal ("1st Service", "2nd Service"), and the title is what tells them
+-- apart. It also sidesteps the trap the `devotionals` table needed NOT NULL DEFAULT 0 for: a unique
+-- key over a nullable column lets MySQL treat every NULL as distinct, so it would not have enforced
+-- anything anyway.
+CREATE TABLE IF NOT EXISTS `service_plans` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NOT NULL DEFAULT 0 COMMENT '0 = no tenant resolved; otherwise Tenant::id()',
+  `org_unit_id` INT NULL COMMENT 'The church whose roster this is',
+  `title` VARCHAR(150) NOT NULL COMMENT 'e.g. "Sunday 1st Service"',
+  `service_date` DATE NOT NULL,
+  `service_time` VARCHAR(40) NULL COMMENT 'Free text, e.g. "8:00 AM" — a label, not a clock value',
+  `location` VARCHAR(200) NULL,
+  `notes` TEXT NULL,
+  `is_cancelled` TINYINT(1) NOT NULL DEFAULT 0,
+  `created_by` INT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_service_date` (`service_date`),
+  INDEX `idx_service_unit` (`org_unit_id`),
+  FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- The slots within one service: "Ushering ×4", "Choir ×2".
+--
+-- One row per role with a count, rather than one row per person, because that is how a church says
+-- it out loud and it keeps the grid readable. The people are `service_assignments` rows.
+CREATE TABLE IF NOT EXISTS `service_roles` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `plan_id` INT NOT NULL,
+  `name` VARCHAR(80) NOT NULL COMMENT 'Ushering, Choir, Media, Children — free text',
+  `slots_needed` INT NOT NULL DEFAULT 1,
+  `sort_order` INT NOT NULL DEFAULT 0,
+  `notes` VARCHAR(255) NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_role_plan` (`plan_id`),
+  FOREIGN KEY (`plan_id`) REFERENCES `service_plans`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- One person in one slot.
+--
+-- `person_name` is always filled in, even when `member_id` is set. The roster is a record of who
+-- served on a day, and it has to still read correctly if that member later closes their account and
+-- the foreign key goes NULL — a roster is closer to history than to a join table.
+--
+-- `member_id` is nullable because ushers and choir members frequently are not registered members,
+-- and requiring them to sign up before they can be rostered would make this unusable.
+--
+-- A declined assignment is kept, not deleted: the church needs to see who said no in order to ask
+-- somebody else, and silently removing the row loses that.
+CREATE TABLE IF NOT EXISTS `service_assignments` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `role_id` INT NOT NULL,
+  `member_id` INT NULL COMMENT 'Set only when the person is a registered member',
+  `person_name` VARCHAR(150) NOT NULL,
+  `person_phone` VARCHAR(32) NULL COMMENT 'Normalised dial code + national number',
+  `status` ENUM('invited','accepted','declined') NOT NULL DEFAULT 'invited',
+  `invited_at` TIMESTAMP NULL,
+  `responded_at` DATETIME NULL,
+  `reminded_at` DATETIME NULL COMMENT 'The last reminder sent for this slot; stops the worker repeating',
+  `notes` VARCHAR(255) NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_assign_role` (`role_id`),
+  INDEX `idx_assign_member` (`member_id`),
+  FOREIGN KEY (`role_id`) REFERENCES `service_roles`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`member_id`) REFERENCES `members`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Daily devotionals. `tenant_id` and `org_unit_id` are NOT NULL DEFAULT 0 rather than
 -- the NULL that `sermon_series` uses for "shared", because this table needs
 -- UNIQUE (tenant_id, org_unit_id, publish_on) and MySQL treats every NULL as distinct,
 -- which would silently allow two devotionals for the same day. 0 means church-wide.
-CREATE TABLE IF NOT EXISTS `devotionals` (
-  `id` INT AUTO_INCREMENT PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS `devotionals` (  `id` INT AUTO_INCREMENT PRIMARY KEY,
   `tenant_id` INT NOT NULL DEFAULT 0,
   `org_unit_id` INT NOT NULL DEFAULT 0 COMMENT '0 = church-wide, otherwise the church it belongs to',
   `publish_on` DATE NOT NULL COMMENT 'The day this devotional is for',

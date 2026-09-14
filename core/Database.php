@@ -1913,6 +1913,72 @@ class Database
                 self::addColumnIfMissing($pdo, 'org_units', 'capacity', 'INT NULL', 'leader_phone_public');
                 self::addColumnIfMissing($pdo, 'org_units', 'cell_is_public', 'TINYINT(1) NOT NULL DEFAULT 1', 'capacity');
             },
+
+            // Duty roster. Three tables because the three things have genuinely different lifetimes:
+            // a service is a date, a role is a slot in that service, an assignment is a person in
+            // that slot. Collapsing roles into assignments would lose the count ("Ushering needs 4")
+            // and collapsing assignments into roles would lose the per-person answer.
+            //
+            // `service_assignments.person_name` is filled in even when `member_id` is set, so the
+            // roster still reads correctly after a member closes their account and the foreign key
+            // goes NULL. A roster is closer to a historical record than to a join table.
+            //
+            // `member_id` is nullable because ushers and choir members are often not registered
+            // members, and requiring sign-up before somebody can be rostered would make this
+            // unusable in a real church.
+            //
+            // Mirrored in installer/schema.sql for fresh installs. `service_plans` has no unique key
+            // over (tenant, unit, date, title): two services in a day is normal, and the title is
+            // what separates them.
+            '2026_34_duty_roster' => function (PDO $pdo): void {
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `service_plans` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `tenant_id` INT NOT NULL DEFAULT 0,
+                    `org_unit_id` INT NULL,
+                    `title` VARCHAR(150) NOT NULL,
+                    `service_date` DATE NOT NULL,
+                    `service_time` VARCHAR(40) NULL,
+                    `location` VARCHAR(200) NULL,
+                    `notes` TEXT NULL,
+                    `is_cancelled` TINYINT(1) NOT NULL DEFAULT 0,
+                    `created_by` INT NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    INDEX `idx_service_date` (`service_date`),
+                    INDEX `idx_service_unit` (`org_unit_id`),
+                    FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `service_roles` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `plan_id` INT NOT NULL,
+                    `name` VARCHAR(80) NOT NULL,
+                    `slots_needed` INT NOT NULL DEFAULT 1,
+                    `sort_order` INT NOT NULL DEFAULT 0,
+                    `notes` VARCHAR(255) NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    INDEX `idx_role_plan` (`plan_id`),
+                    FOREIGN KEY (`plan_id`) REFERENCES `service_plans`(`id`) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `service_assignments` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `role_id` INT NOT NULL,
+                    `member_id` INT NULL,
+                    `person_name` VARCHAR(150) NOT NULL,
+                    `person_phone` VARCHAR(32) NULL,
+                    `status` ENUM('invited','accepted','declined') NOT NULL DEFAULT 'invited',
+                    `invited_at` TIMESTAMP NULL,
+                    `responded_at` DATETIME NULL,
+                    `reminded_at` DATETIME NULL,
+                    `notes` VARCHAR(255) NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    INDEX `idx_assign_role` (`role_id`),
+                    INDEX `idx_assign_member` (`member_id`),
+                    FOREIGN KEY (`role_id`) REFERENCES `service_roles`(`id`) ON DELETE CASCADE,
+                    FOREIGN KEY (`member_id`) REFERENCES `members`(`id`) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+            },
         ];
     }
 

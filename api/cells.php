@@ -36,7 +36,7 @@ $data = array_map(static function (array $cell) use ($text): array {
         'meeting_address' => $text($cell['meeting_address'] ?? null),
         'leader_name' => $text($cell['leader_name'] ?? null),
         'leader_phone' => $phone,
-        'leader_phone_display' => $phone !== null ? HomeCell::displayPhone($phone) : null,
+        'leader_phone_display' => $phone !== null ? Phone::display($phone) : null,
         'capacity' => $cell['capacity'] !== null ? (int) $cell['capacity'] : null,
     ];
 }, $cells);

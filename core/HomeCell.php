@@ -26,7 +26,7 @@ final class HomeCell
     public const MAX_TIME = 12;
     public const MAX_ADDRESS = 255;
     public const MAX_LEADER = 150;
-    public const MAX_PHONE = 32;
+    public const MAX_PHONE = Phone::MAX_LENGTH;
     public const MAX_CAPACITY = 100000;
 
     private static ?PDO $pdo = null;
@@ -254,30 +254,13 @@ final class HomeCell
     /**
      * Normalises a typed number to dial-code form, or null when it cannot be one.
      *
-     * Delegates to Sms so a cell leader's number is stored exactly the way every other number in
-     * this codebase is, which is what lets the SMS and WhatsApp features use it later without a
-     * second normalisation that could disagree.
+     * Kept as a one-line delegation rather than inlined so every caller in this file reads the same,
+     * and so the definition of a valid number lives in exactly one place (core/Phone.php) now that
+     * service assignments collect numbers too.
      */
     public static function normalisePhone(string $raw): ?string
     {
-        if (class_exists('Sms') && method_exists('Sms', 'normaliseMsisdn')) {
-            $normalised = Sms::normaliseMsisdn($raw);
-            if (is_string($normalised) && $normalised !== '') {
-                return $normalised;
-            }
-        }
-        $digits = (string) preg_replace('/[^0-9]/', '', $raw);
-        return strlen($digits) >= 7 ? $digits : null;
-    }
-
-    /** "+234 803 123 4567" for a Nigerian number, otherwise the stored value unchanged. */
-    public static function displayPhone(?string $stored): string
-    {
-        $stored = (string) $stored;
-        if (preg_match('/^234(\d{3})(\d{3})(\d{4})$/', $stored, $m)) {
-            return '+234 ' . $m[1] . ' ' . $m[2] . ' ' . $m[3];
-        }
-        return $stored;
+        return Phone::normalise($raw);
     }
 
     /** "Up to 40 people", or empty when nobody recorded it. */
