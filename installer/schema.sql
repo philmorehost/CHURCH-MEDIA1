@@ -956,3 +956,59 @@ CREATE TABLE IF NOT EXISTS `devotionals` (
   FOREIGN KEY (`sermon_id`) REFERENCES `sermons`(`id`) ON DELETE SET NULL,
   FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Reading plans: a church's Bible-reading plan, and how far each member has got.
+--
+-- A day is not a row — it is the set of passages sharing a `day_number`, which is what lets a plan
+-- say "Genesis 1; Psalm 1" without a second child table that would carry nothing but a number.
+--
+-- `completed_on` is a DATE of its own rather than being read off `created_at`, because a streak
+-- counts calendar days.
+--
+-- These sit at the end of the file deliberately. `members.reading_plan_id` gains its foreign key in
+-- migration 2026_30 rather than here, because `members` is created earlier in this file than
+-- `reading_plans` is, and a one-shot script cannot reference a table it has not reached yet.
+CREATE TABLE IF NOT EXISTS `reading_plans` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NOT NULL DEFAULT 0 COMMENT '0 = no tenant resolved; otherwise Tenant::id()',
+  `name` VARCHAR(150) NOT NULL,
+  `description` TEXT NULL,
+  `days_count` INT NOT NULL DEFAULT 0 COMMENT 'Intended length in days; a plan may end with blank days that have no passage',
+  `is_published` TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Only a published plan can be chosen by a member',
+  `created_by` INT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_plan_name` (`tenant_id`, `name`),
+  FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `reading_plan_passages` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NOT NULL DEFAULT 0,
+  `plan_id` INT NOT NULL,
+  `day_number` INT NOT NULL COMMENT '1-based day of the plan; a day is every passage sharing it',
+  `sort_order` INT NOT NULL DEFAULT 0,
+  `book` VARCHAR(60) NOT NULL COMMENT 'Must match a book in the bundled KJV, e.g. Psalms',
+  `chapter_start` INT NOT NULL,
+  `chapter_end` INT NULL COMMENT 'NULL = the same chapter as chapter_start',
+  `verse_start` INT NULL COMMENT 'NULL = the whole chapter',
+  `verse_end` INT NULL COMMENT 'NULL with verse_start set = that one verse',
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_plan_day_passage` (`plan_id`, `day_number`, `sort_order`),
+  INDEX `idx_passage_plan_day` (`plan_id`, `day_number`),
+  FOREIGN KEY (`plan_id`) REFERENCES `reading_plans`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `reading_progress` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NOT NULL DEFAULT 0,
+  `member_id` INT NOT NULL,
+  `plan_id` INT NOT NULL,
+  `day_number` INT NOT NULL,
+  `completed_on` DATE NOT NULL COMMENT 'The calendar day it was read; this is what a streak counts',
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_progress_day` (`member_id`, `plan_id`, `day_number`),
+  INDEX `idx_progress_member_date` (`member_id`, `completed_on`),
+  FOREIGN KEY (`member_id`) REFERENCES `members`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`plan_id`) REFERENCES `reading_plans`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

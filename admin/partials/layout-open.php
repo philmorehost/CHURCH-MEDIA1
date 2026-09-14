@@ -48,6 +48,7 @@ $navGroups = [
             ['key' => 'sermons', 'href' => '/admin/sermons', 'label' => 'Sermons'],
             ['key' => 'series', 'href' => '/admin/series', 'label' => 'Series & Podcast'],
             ['key' => 'devotionals', 'href' => '/admin/devotionals', 'label' => 'Daily Devotionals'],
+            ['key' => 'reading-plans', 'href' => '/admin/reading-plans', 'label' => 'Reading Plans', 'super' => true],
         ],
     ],
     [
