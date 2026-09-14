@@ -60,6 +60,22 @@ class Pusher
         return $path;
     }
 
+    /**
+     * Whether a push could actually be delivered right now.
+     *
+     * A cron worker has to tell "there was nothing to send" apart from "sending is not
+     * configured" — the second one needs an admin, and reporting it as the first is how a
+     * notification silently stops. Same one-source-of-truth rule as serviceAccountPath().
+     */
+    public static function configured(): bool
+    {
+        if (self::projectId() === '') {
+            return false;
+        }
+        $path = self::serviceAccountPath();
+        return $path !== '' && is_file($path);
+    }
+
     public static function base64Url(string $data): string
     {
         return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');

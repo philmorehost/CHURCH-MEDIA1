@@ -15,8 +15,9 @@ declare(strict_types=1);
  * returns the winner per day — and the winner is the church's own, which is what will actually be
  * read that day. For a super admin that means a shadowed church-wide entry is not listed here.
  *
- * What this screen does NOT do yet: send the daily notification. The `push_sent_at` column is
- * waiting for that worker, so a devotional written here reaches the website and nobody's phone.
+ * The daily notification is scheduled from here too: whether it is switched on, when today's went
+ * out, and the exact cron line. The send itself lives in cli/devotional_worker.php, because cron
+ * is the only thing running when nobody is looking at a screen.
  */
 
 Auth::requireRole('admin', 'editor');
@@ -106,6 +107,25 @@ if ($action === 'delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     Devotional::delete($id);
     flash('success', 'Devotional deleted.');
     redirect('/admin/devotionals?month=' . $monthOf((string) ($entry['publish_on'] ?? '')));
+}
+
+/* ========================================================= notification switch == */
+if ($action === 'notify' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    Csrf::requireValid();
+
+    // One switch for the whole install, like the SMS sending window, so it belongs to head office
+    // rather than to whichever church an admin happens to be scoped to.
+    if (!$isSuper) {
+        flash('error', 'Only a head-office admin can change the daily notification.');
+        redirect('/admin/devotionals');
+    }
+
+    $enabled = !empty($_POST['enabled']);
+    settingSave(array('devotional_push_enabled' => $enabled ? 1 : 0));
+    flash('success', $enabled
+        ? 'The daily devotional notification is on.'
+        : 'The daily devotional notification is off. Devotionals still appear on the website.');
+    redirect('/admin/devotionals?month=' . $monthOf((string) ($_POST['month'] ?? '')));
 }
 
 /* =================================================================== load view == */
@@ -282,6 +302,80 @@ require __DIR__ . '/partials/layout-open.php';
       <?php endfor; ?>
     </tbody>
   </table>
+</div>
+
+<h2 style="font-size:16px;margin:26px 0 10px 0;">Daily notification</h2>
+
+<?php
+// Today's notification state, so an admin can answer "did it go out this morning?" without
+// opening the database.
+$notifyEnabled = (int) setting('devotional_push_enabled', 1) === 1;
+$deviceCount = DevotionalPush::audienceSize();
+$todayStatement = $pdo->prepare('SELECT title, org_unit_id, is_published, push_sent_at FROM devotionals WHERE publish_on = ? ORDER BY org_unit_id ASC');
+$todayStatement->execute(array($today));
+$todayEntries = $todayStatement->fetchAll();
+$cronPath = ROOT_PATH . '/cli/devotional_worker.php';
+?>
+
+<div style="border:1px solid rgba(0,0,0,0.12);border-radius:12px;padding:16px;max-width:780px;">
+  <p style="margin:0 0 10px 0;">
+    <?php if ($notifyEnabled): ?>
+      <strong style="color:var(--success,#1e8e3e);">On</strong> — today's entry is pushed to the app the next time the worker runs inside the sending window.
+    <?php else: ?>
+      <strong style="color:var(--danger,#c0392b);">Off</strong> — nothing is pushed. Members still see the devotional on the website.
+    <?php endif; ?>
+  </p>
+
+  <p style="margin:0 0 4px 0;font-size:13px;opacity:0.85;">
+    <?= (int) $deviceCount ?> device<?= $deviceCount === 1 ? '' : 's' ?> registered ·
+    sending window <?= e(SmsCampaign::quietHoursLabel()) ?>
+  </p>
+  <p style="margin:0 0 12px 0;font-size:12.5px;opacity:0.7;">
+    That window is the same one SMS and WhatsApp use, so a mis-set cron cannot wake anyone at 3am.
+    A member who switched devotionals off on their own dashboard is skipped.
+  </p>
+
+  <?php if (!$todayEntries): ?>
+    <p style="margin:0 0 12px 0;font-size:13px;">Nothing has been written for today, so there is nothing to send.</p>
+  <?php else: ?>
+    <ul style="margin:0 0 12px 0;padding-left:18px;font-size:13px;">
+      <?php foreach ($todayEntries as $row): ?>
+        <li>
+          <?= e((string) $row['title']) ?>
+          <span style="opacity:0.7;">(<?= ((int) $row['org_unit_id'] === 0) ? 'church-wide' : e($unitLabels[(int) $row['org_unit_id']] ?? 'church') ?>)</span>
+          —
+          <?php if (empty($row['is_published'])): ?>
+            hidden, so it will not be sent
+          <?php elseif (!empty($row['push_sent_at'])): ?>
+            sent <?= e(date('g:ia', strtotime((string) $row['push_sent_at']))) ?>
+          <?php else: ?>
+            not sent yet
+          <?php endif; ?>
+        </li>
+      <?php endforeach; ?>
+    </ul>
+  <?php endif; ?>
+
+  <p style="margin:0 0 6px 0;font-size:13px;">Add this to cron to send it each morning:</p>
+  <pre style="background:#0f0d1f;border:1px solid var(--border);border-radius:10px;padding:12px;overflow:auto;font-size:12.5px;">30 6 * * * php <?= e($cronPath) ?></pre>
+  <p style="margin:6px 0 0 0;font-size:12.5px;opacity:0.7;">
+    Change the time to suit you. Running it twice is harmless — the day is claimed before the first
+    notification goes out, so a duplicate cron entry cannot notify anyone twice.
+  </p>
+
+  <?php if ($isSuper): ?>
+    <form method="post" action="/admin/devotionals?action=notify" style="margin-top:14px;">
+      <?= Csrf::field() ?>
+      <input type="hidden" name="month" value="<?= e($monthStart) ?>">
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;">
+        <input type="checkbox" name="enabled" value="1" <?= $notifyEnabled ? 'checked' : '' ?>>
+        Send the daily devotional notification
+      </label>
+      <button class="btn sm" type="submit" style="margin-top:10px;">Save</button>
+    </form>
+  <?php else: ?>
+    <p style="margin:14px 0 0 0;font-size:12.5px;opacity:0.7;">Head office controls this setting.</p>
+  <?php endif; ?>
 </div>
 
 <?php require __DIR__ . '/partials/layout-close.php'; ?>

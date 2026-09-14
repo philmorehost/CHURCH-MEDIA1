@@ -100,6 +100,7 @@ CREATE TABLE IF NOT EXISTS `settings` (
   `sms_allow_unit_sending` TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'Whether a scoped church may send at all',
   `sms_optout_footer` VARCHAR(160) NOT NULL DEFAULT 'Reply STOP to opt out.',
   `sms_log_retention_days` INT NOT NULL DEFAULT 30,
+  `devotional_push_enabled` TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'Whether the daily devotional notification is sent',
   `timezone` VARCHAR(64) NOT NULL DEFAULT 'Africa/Lagos',
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY `uniq_settings_tenant` (`tenant_id`),
@@ -698,19 +699,6 @@ CREATE TABLE IF NOT EXISTS `notification_recipients` (
   UNIQUE KEY `uq_notif_recipient` (`notification_id`, `org_unit_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Push device tokens registered by the mobile app (FCM, anonymous).
-CREATE TABLE IF NOT EXISTS `device_tokens` (
-  `id` INT AUTO_INCREMENT PRIMARY KEY,
-  `token` VARCHAR(512) NOT NULL,
-  `platform` VARCHAR(30) NULL,
-  `org_unit_id` INT NULL,
-  `user_agent` VARCHAR(255) NULL,
-  `last_seen_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE KEY `uniq_device_token` (`token`(255)),
-  FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
 -- Church growth tracking: per-service attendance + newcomer follow-up.
 CREATE TABLE IF NOT EXISTS `attendance_records` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
@@ -918,6 +906,29 @@ CREATE TABLE IF NOT EXISTS `members` (
   INDEX `idx_member_verify` (`verify_token_hash`),
   INDEX `idx_member_reset` (`reset_token_hash`),
   FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Push device tokens registered by the mobile app (FCM).
+--
+-- Deliberately placed after `members`: a table must be created after anything it references,
+-- and this one has a foreign key to it. Order matters in this file because it is a one-shot
+-- script, unlike the migrations, which can add a constraint later.
+--
+-- `member_id` is what lets a notification honour a member's own settings; a device that has
+-- never signed in leaves it NULL, has expressed no preference, and keeps receiving.
+CREATE TABLE IF NOT EXISTS `device_tokens` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `token` VARCHAR(512) NOT NULL,
+  `platform` VARCHAR(30) NULL,
+  `org_unit_id` INT NULL,
+  `member_id` INT NULL COMMENT 'NULL = anonymous device, no stated preferences',
+  `user_agent` VARCHAR(255) NULL,
+  `last_seen_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_device_token` (`token`(255)),
+  INDEX `idx_device_member` (`member_id`),
+  FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL,
+  FOREIGN KEY (`member_id`) REFERENCES `members`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Daily devotionals. `tenant_id` and `org_unit_id` are NOT NULL DEFAULT 0 rather than

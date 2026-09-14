@@ -38,6 +38,7 @@ require __DIR__ . '/partials/layout-open.php';
     <a href="#events">Events</a>
     <a href="#sermons">Sermons</a>
     <a href="#series">Series &amp; Podcast</a>
+    <a href="#devotionals">Daily Devotionals</a>
     <a href="#team">Team</a>
     <a href="#prayer">Prayer Wall</a>
     <a href="#testimonies">Testimonies</a>
@@ -186,6 +187,16 @@ require __DIR__ . '/partials/layout-open.php';
     </ul>
     <p><strong>Subscribing:</strong> your feed lives at <code>/podcast.xml</code>. Paste that address into Spotify for Podcasters, Apple Podcasts or any other directory <strong>once</strong> — after that every new sermon published into a series appears there on its own. There is also a friendly <code>/podcast</code> page to share with people who are not podcast apps.</p>
     <p><strong>Two things to know before you submit:</strong> a feed with no episodes is <em>rejected</em> by the directories, so <strong>publish at least one sermon with audio first</strong>; and only sermons that have an audio file are listed, because a video-only sermon has nothing for a podcast app to play.</p>
+  </div>
+
+  <div class="card" style="margin-bottom:18px;">
+    <h2 id="devotionals">Daily Devotionals (<code>/admin/devotionals</code>) <span class="pill role">ADMIN/EDITOR</span></h2>
+    <p>One entry per day, written on a <strong>month grid</strong> so you can see what is going out and when. A list ordered by title cannot answer "what is going out on Sunday?", which is the question this screen exists for.</p>
+    <p><strong>A church can write its own.</strong> Head office writes the church-wide entry; a scoped admin writes for their own church. When a church has written its own for a day, its people are shown <em>that one</em> instead of the church-wide entry — not both.</p>
+    <p><strong>Where members read it:</strong> <code>/devotional</code> for today, and each day has its own link (<code>/devotional/2026-09-14</code>) that can be shared on WhatsApp. Writing the same day twice updates the entry rather than creating a second one.</p>
+    <p><strong>The daily notification</strong> is the card at the bottom of the screen: whether it is switched on, how many devices are registered, and whether today's has gone out. Sending needs a <strong>cron entry</strong> — the exact line is on that card. Nothing goes out on its own, and a devotional left as <em>hidden</em> is never sent.</p>
+    <p><strong>Who is skipped.</strong> A member who switched devotionals off on their own dashboard is not notified. That is only possible because their device is linked to their account, so a phone that has never signed in is treated as having expressed no preference and receives. Sending also obeys the same sending window as SMS and WhatsApp, so a mis-set cron cannot wake anyone at 3am.</p>
+    <p><strong>Running it twice is harmless.</strong> The day is claimed before the first notification goes out, so a duplicate cron entry, or a run that overlaps the previous one, cannot notify the church twice.</p>
   </div>
 
   <div class="card" style="margin-bottom:18px;">

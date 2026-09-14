@@ -1741,6 +1741,35 @@ class Database
                     FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
             },
+
+            // Binds a push device to a member, so a notification can honour that member's own
+            // settings.
+            //
+            // Until now `device_tokens` was anonymous and every push went to a topic ('all',
+            // 'unit-{id}'). That is fine for "there is a new sermon", but it cannot honour a
+            // member switching devotionals off: a topic send reaches every subscriber whatever
+            // their settings say, so the daily devotional would have ignored the tick — the same
+            // defect as the WhatsApp consent box, which wrote a column nothing ever read.
+            //
+            // NULL keeps its meaning. A device that has never signed in has expressed no
+            // preference and keeps receiving, which is what most devices are. ON DELETE SET NULL
+            // rather than CASCADE, because deleting a member must not quietly stop their phone
+            // receiving announcements — the device simply reverts to anonymous.
+            '2026_28_device_token_member' => function (PDO $pdo): void {
+                self::addColumnIfMissing($pdo, 'device_tokens', 'member_id', 'INT NULL', 'org_unit_id');
+                self::addIndexIfMissing($pdo, 'device_tokens', 'idx_device_member', 'INDEX `idx_device_member` (`member_id`)');
+                self::addForeignKeyIfMissing($pdo, 'device_tokens', 'fk_device_member', 'member_id', 'members', 'id', 'SET NULL');
+            },
+
+            // Whether the daily devotional notification goes out at all.
+            //
+            // Defaults to on, because a devotional that is written and never sent is the whole
+            // point missed. A church that wants the page but not the ping switches it off here,
+            // which is better than them deleting the cron line and having no record of why the
+            // notification stopped.
+            '2026_29_devotional_push' => function (PDO $pdo): void {
+                self::addColumnIfMissing($pdo, 'settings', 'devotional_push_enabled', 'TINYINT(1) NOT NULL DEFAULT 1', 'sms_log_retention_days');
+            },
         ];
     }
 
