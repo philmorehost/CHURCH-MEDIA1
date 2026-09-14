@@ -14,6 +14,17 @@ $currentUser = Auth::user();
 $superAdminId = (int) $pdo->query('SELECT id FROM users WHERE is_super_admin = 1 ORDER BY id ASC LIMIT 1')->fetchColumn();
 $isSuperAdmin = ((int) $currentUser['id'] === $superAdminId);
 
+// Admin accounts belong to one church, so this screen shows and touches only the church being
+// served — the super admin changes church with the switcher to manage another church's staff.
+// Before this the list showed every account in the platform, and edit, suspend and delete acted
+// on whatever id was posted to them without ever asking whose account it was.
+$tenantId = (int) (Tenant::id() ?? 0);
+$inThisChurch = static function (int $userId) use ($pdo, $tenantId): bool {
+    $stmt = $pdo->prepare('SELECT id FROM users WHERE id = ? AND tenant_id = ?');
+    $stmt->execute([$userId, $tenantId]);
+    return (bool) $stmt->fetch();
+};
+
 if ($action === 'create' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     Csrf::requireValid();
     $name = trim($_POST['name'] ?? '');
@@ -46,8 +57,11 @@ if ($action === 'create' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = 'Password must be at least 10 characters.';
     } else {
         try {
-            $pdo->prepare('INSERT INTO users (name, username, email, phone, sms_consent, password, role, org_unit_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-                ->execute([$name, $username, $email, $phone['msisdn'], $smsConsent, password_hash($password, PASSWORD_ARGON2ID), $role, $orgUnitId]);
+            // Stamped with this church explicitly rather than left to the column default: the
+            // migration backfill treats 0 as "belongs to the default church", which is right for
+            // accounts that predate tenancy and wrong for one created while serving church two.
+            $pdo->prepare('INSERT INTO users (name, username, email, phone, sms_consent, password, role, org_unit_id, tenant_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+                ->execute([$name, $username, $email, $phone['msisdn'], $smsConsent, password_hash($password, PASSWORD_ARGON2ID), $role, $orgUnitId, $tenantId]);
             flash('success', 'User created.');
             redirect('/admin/users');
         } catch (Throwable $e) {
@@ -77,15 +91,12 @@ if ($action === 'edit' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $role = $currentUser['role'];
     }
 
-    $stmt = $pdo->prepare('SELECT id FROM users WHERE id = ?');
-    $stmt->execute([$targetId]);
-
     $phone = Sms::checkPhone((string) ($_POST['phone'] ?? ''));
     $smsConsent = isset($_POST['sms_consent']) ? 1 : 0;
 
     if ($targetId === $superAdminId && !$isSuperAdmin) {
         $errors[] = 'The super admin account is protected and cannot be edited.';
-    } elseif (!$stmt->fetch()) {
+    } elseif (!$inThisChurch($targetId)) {
         $errors[] = 'User not found.';
     } elseif ($name === '' || $username === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
         $errors[] = 'Please provide a valid name, username, and email.';
@@ -121,7 +132,8 @@ if ($action === 'edit' && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 $params[] = $targetId;
-                $pdo->prepare('UPDATE users SET ' . implode(', ', $set) . ' WHERE id = ?')->execute($params);
+                $params[] = $tenantId;
+                $pdo->prepare('UPDATE users SET ' . implode(', ', $set) . ' WHERE id = ? AND tenant_id = ?')->execute($params);
 
                 flash('success', 'User updated.');
                 redirect('/admin/users');
@@ -136,7 +148,11 @@ if ($action === 'toggle_suspend' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($targetId === $superAdminId && !$isSuperAdmin) {
         flash('error', 'The super admin account is protected and cannot be suspended.');
     } elseif ($targetId !== $currentUser['id']) {
-        $pdo->prepare('UPDATE users SET is_suspended = NOT is_suspended WHERE id = ?')->execute([$targetId]);
+        if ($inThisChurch($targetId)) {
+            $pdo->prepare('UPDATE users SET is_suspended = NOT is_suspended WHERE id = ? AND tenant_id = ?')->execute([$targetId, $tenantId]);
+        } else {
+            flash('error', 'That account does not belong to this church.');
+        }
     }
     redirect('/admin/users');
 }
@@ -146,11 +162,13 @@ if ($action === 'delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $targetId = (int) ($_POST['id'] ?? 0);
     if ($targetId === $superAdminId && !$isSuperAdmin) {
         flash('error', 'The super admin account is protected and cannot be deleted.');
-    } elseif ($targetId !== $currentUser['id']) {
-        $pdo->prepare('DELETE FROM users WHERE id = ?')->execute([$targetId]);
+    } elseif ($targetId === (int) $currentUser['id']) {
+        flash('error', "You can't delete your own account.");
+    } elseif ($inThisChurch($targetId)) {
+        $pdo->prepare('DELETE FROM users WHERE id = ? AND tenant_id = ?')->execute([$targetId, $tenantId]);
         flash('success', 'User removed.');
     } else {
-        flash('error', "You can't delete your own account.");
+        flash('error', 'That account does not belong to this church.');
     }
     redirect('/admin/users');
 }
@@ -178,8 +196,8 @@ if ($action === 'edit') {
             $editUser['role'] = $currentUser['role'];
         }
     } else {
-        $stmt = $pdo->prepare('SELECT id, name, username, email, phone, sms_consent, role, org_unit_id FROM users WHERE id = ?');
-        $stmt->execute([$id]);
+        $stmt = $pdo->prepare('SELECT id, name, username, email, phone, sms_consent, role, org_unit_id FROM users WHERE id = ? AND tenant_id = ?');
+        $stmt->execute([$id, $tenantId]);
         $editUser = $stmt->fetch() ?: null;
         if ($editUser !== null && !empty($editUser['phone'])) {
             // Show the readable form rather than the stored 2348031234567.
@@ -191,7 +209,9 @@ if ($action === 'edit') {
     }
 }
 
-$users = $pdo->query('SELECT id, name, username, email, phone, sms_consent, role, is_suspended, last_login_at, last_login_ip, org_unit_id FROM users ORDER BY id ASC')->fetchAll();
+$userStmt = $pdo->prepare('SELECT id, name, username, email, phone, sms_consent, role, is_suspended, last_login_at, last_login_ip, org_unit_id FROM users WHERE tenant_id = ? ORDER BY id ASC');
+$userStmt->execute([$tenantId]);
+$users = $userStmt->fetchAll();
 
 // Assignable units: any level (province/zone/area/parish) for the super admin;
 // otherwise only units inside the current admin's own subtree.
@@ -212,6 +232,25 @@ require __DIR__ . '/partials/layout-open.php';
 ?>
 
 <?php foreach ($errors as $error): ?><div class="alert error"><?= e($error) ?></div><?php endforeach; ?>
+
+<?php
+// Say whose team this is — every row and every action below covers one church only.
+$currentTenant = class_exists('Tenant') ? Tenant::current() : null;
+?>
+<div class="card" style="margin-bottom:18px;">
+  <p style="margin:0;font-size:13.5px;">
+    <?php if ($currentTenant !== null): ?>
+      These are the admin accounts for <strong><?= e((string) $currentTenant['name']) ?></strong>.
+      Other churches on this installation have their own, and none of them appear here.
+    <?php else: ?>
+      This installation has no church set up yet, so these accounts belong to no church in particular.
+    <?php endif; ?>
+  </p>
+  <p class="sub" style="margin:8px 0 0;font-size:12.5px;">
+    An account can only sign in on the site of the church it belongs to. The super admin is the
+    exception — it works across every church, and the switcher chooses which one is shown here.
+  </p>
+</div>
 
 <?php if ($action === 'create'): ?>
   <div class="card" style="max-width:520px;">

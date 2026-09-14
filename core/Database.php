@@ -2146,6 +2146,43 @@ class Database
                     FOREIGN KEY (`recorded_donation_id`) REFERENCES `donations`(`id`) ON DELETE SET NULL
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
             },
+
+            // Which church an admin account belongs to.
+            //
+            // Nearly every table added since the SaaS work began carries `tenant_id`. Two of the
+            // old ones do not — `users` and `org_units` — and they are the pair that decides who
+            // may do what where, so they are the pair where the omission matters most. This
+            // migration covers `users`; the unit hierarchy is the next stage.
+            //
+            // What the omission cost, on an install with two churches:
+            //   - `Auth::attempt()` matched on username alone, so one church's admin could sign in
+            //     on the other church's site and use every screen their role allowed.
+            //   - `admin/users.php` listed every account in the platform, and its edit, suspend and
+            //     delete actions acted on any id posted to them without checking whose it was.
+            //
+            // 0 means "no church assigned". No tenant resolves to 0, so such an account can sign in
+            // nowhere except a site that has no tenant at all (the installer, before it finishes) —
+            // it is refused rather than let in everywhere. Super admins are unaffected: they are the
+            // platform owner, and they choose a church from the switcher inside the panel.
+            //
+            // The backfill runs on every bootstrap like every other migration, which is what picks
+            // up the account the installer creates before any tenant exists — the admin's first
+            // request after setup stamps them.
+            '2026_38_user_tenants' => function (PDO $pdo): void {
+                self::addColumnIfMissing($pdo, 'users', 'tenant_id', "INT NOT NULL DEFAULT 0 COMMENT '0 = no church assigned; otherwise Tenant::id()'", 'org_unit_id');
+                self::addIndexIfMissing($pdo, 'users', 'idx_user_tenant', 'INDEX `idx_user_tenant` (`tenant_id`)');
+
+                // Accounts that predate multi-tenancy belong to the default church, so a plain
+                // `tenant_id = ?` read never has to special-case 0.
+                try {
+                    $defaultTenant = (int) $pdo->query('SELECT id FROM tenants WHERE is_default = 1 ORDER BY id ASC LIMIT 1')->fetchColumn();
+                    if ($defaultTenant > 0) {
+                        $pdo->prepare('UPDATE users SET tenant_id = ? WHERE tenant_id = 0')->execute([$defaultTenant]);
+                    }
+                } catch (Throwable $e) {
+                    // No tenants table yet — nothing to attribute the accounts to.
+                }
+            },
         ];
     }
 

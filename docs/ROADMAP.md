@@ -65,7 +65,7 @@
 | **4** | WhatsApp channel | Official Cloud API integration (templates, 24-h window, webhooks) | 5–7 sessions | Per-conversation | ✅ closed (4.1–4.3; 4.4 rejected) |
 | **5** | Members & daily engagement | Member accounts, daily devotional, Bible reading plans + streaks, offline sermon downloads | 10–12 sessions | None | ✅ shipped (S1–S6) |
 | **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ✅ **complete** — 6a–6g shipped |
-| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings) |
+| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings), 7b shipped (an account belongs to one church) |
 
 **Confirmed 2026-09-12:** multi-tenant **SaaS is a real goal**. That is why **Phase 0
 (tenancy foundation) runs before everything else** — the SMS token, sender IDs, country
@@ -1250,10 +1250,99 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > Both harnesses removed afterwards; the settings and tenants tables are snapshotted and restored
 > exactly, and the harness asserts its own restore landed.
 >
-> **Not built yet in Phase 7:** per-church admin accounts (settings is still super-admin only, so a
-> church cannot yet edit its own branding without the platform owner), self-service tenant
-> provisioning with plan limits, per-tenant upload/cache namespacing, and tenant-scoped analytics and
-> reporting.
+> **7b shipped — an admin account belongs to one church.** The other half of 7a's problem, and the
+> half that was a security boundary rather than a display bug.
+>
+> **The gap:** `users` was one of the two tables the SaaS work never reached — no `tenant_id` — and
+> `Auth::attempt()` matched a username on its own. On an installation serving two churches that meant
+> one church's admin could sign in on the other's site and use every screen their role allowed. And
+> because `admin/users.php`'s list, editor, suspend and delete all took a user id straight off the URL
+> or the form without asking whose it was, an administrator could suspend, rename or **delete** any
+> account in the platform — including another church's staff — and `/admin/users` listed every account
+> along with its email address and phone number.
+>
+> **The public half was quieter and worse.** `/forgot-password` and `/unblock` looked an account up by
+> username with no church filter, so anyone could start a reset for another church's admin and have the
+> OTP arrive branded with the *wrong* church's name, from `setting('site_title')`. It also answered
+> "No admin account found", which is an enumeration oracle across the whole platform.
+>
+> **The fix is a column and a comparison.** Migration `2026_38_user_tenants` adds `users.tenant_id`
+> (`INT NOT NULL DEFAULT 0`) and backfills 0 → the default church, following the pattern
+> `2026_14_prayer_wall` set for `prayer_requests`. `Auth::allowedOnTenant()` is then the single place
+> that decides: a super admin is platform-wide, everybody else may sign in only where
+> `users.tenant_id` equals `Tenant::id()`. It is consulted in `attempt()` — before a session is opened —
+> and again in `requireLogin()`, so a session cannot outlive an account being moved to another church.
+>
+> **0 means "no church assigned", and no tenant resolves to 0**, so an account that somehow escaped
+> assignment is refused everywhere rather than let in everywhere. A refusal is the same generic
+> "Invalid credentials" as a wrong password and is counted as a failed login: naming the church would
+> turn the login form into a way to discover that a username exists somewhere else.
+>
+> **One safety net, chosen on purpose.** If `users.tenant_id` is absent altogether then
+> `2026_38_user_tenants` has not run against that database, and `allowedOnTenant()` returns true —
+> behaving as the code did before the migration is better than locking every admin out of a live site
+> because a schema change did not land.
+>
+> **Every write path stamps the church as well as filtering on it.** `admin/users.php` sets `tenant_id`
+> when creating an account, and its reads *and* writes carry `AND tenant_id = ?` — the filter is on the
+> UPDATE and DELETE statements themselves, not only on the check before them. The installer's first
+> admin, and `admin/registrations.php` when it approves a church registration, stamp
+> `Tenant::id() ?? 0` too: the backfill treats 0 as "the default church", which is right for accounts
+> that predate tenancy and wrong for one created while serving the second church.
+>
+> **The backfill doubles as the repair for the installer.** On a fresh install the first admin is
+> created before any tenant exists; because every migration re-runs on every bootstrap, that account is
+> stamped on the admin's first request after setup finishes.
+>
+> **Verified:** 41 domain assertions — the column and its type, nullability and default; the index;
+> `installer/schema.sql` mirroring both; the backfill leaving no account unassigned and none pointing at
+> a non-existent church; the `allowedOnTenant()` truth table across both churches, including the
+> super-admin bypass, an unassigned account being refused, and a row without the column behaving as it
+> did before; and `Auth::attempt()` end to end in both directions. Plus **39 HTTP assertions** through
+> real logins and real requests: an admin of church 1 signing in on church 1 and being refused on church
+> 2, and the mirror image for church 2 (reached by sending `Host: h7b-second.test`, matched through
+> `tenants.domain`); each one's users screen listing only its own accounts and neither the other
+> church's nor the owner's; and, for each of suspend, delete, the editor and a forged edit POST, that the
+> action **is** refused across the boundary while the same action succeeds on the admin's own account —
+> a refusal proves nothing unless the same request also proves it could have worked. Also that no OTP is
+> issued for, and no unblock succeeds against, another church's account.
+>
+> **Also fixed while verifying, and disclosed rather than buried:** four allow-list checks in
+> `admin/settings.php` read `$_POST['x']` in the true branch of a ternary whose condition was
+> `$_POST['x'] ?? 'default'`. Because those particular defaults are themselves in the allow-list, a form
+> posted without the field took the true branch and logged "Undefined array key" on every save. The
+> value was the default either way, so it is a log-noise fix with no behaviour change, and it is proved
+> by evaluating the four real expressions from the file with `$_POST` empty, with a bare
+> `$_POST['hero_type']` read as the control that shows the detector can fail.
+>
+> **Not verified, and the limit of the above:** no browser was involved — the HTTP assertions drive the
+> app over a socket, so nothing here confirms the pages *look* right, only that they respond correctly.
+> No second church exists in production, so all of it ran against fixtures on the local database, which
+> is snapshotted and restored exactly (1 user, 1 church, 1 ip rule before and after) with the harness
+> asserting that its own restore landed.
+>
+> **Two things this deliberately does not do.** Usernames and emails are still globally unique, so two
+> churches cannot both have an admin called `john` — login is by username alone, and making that
+> per-church needs the login form to disambiguate. And deactivating a church now locks its admins out
+> everywhere rather than only on its own domain, because `Tenant::resolve()` falls back to the default
+> church when no host matches and the locked-out admin's own church is no longer the one being served.
+>
+> **Also noted, not changed:** `core/Database.php`'s lock-out guard promotes the lowest-id user to super
+> admin whenever no super admin exists. On a multi-church installation that could hand platform-wide
+> rights to whichever church owns the lowest id. The guard exists to prevent a total lockout, it only
+> fires in a state where the platform has no owner at all, and changing it is exactly the kind of edit
+> that can lock a live site out — so it is recorded here for a deliberate pass rather than touched in
+> this one.
+
+> **Not built yet in Phase 7:** a church admin still cannot edit its own branding — `admin/settings.php`
+> is super-admin only, and letting one in needs a decision about which fields are theirs (name, logo,
+> service times) and which belong to the platform (SMTP, the Payment Gateway, SMS credentials, backups,
+> the licence key). Also `org_units` has no `tenant_id`, so the unit hierarchy — and with it the unit
+> pickers on this screen, plus `admin/notifications.php`, `core/Notifier.php`, and the SMS address-book
+> source in `core/SmsContacts.php`, which all select staff *by unit* — is still shared between churches.
+> That is the next stage, because units are how admin scope is expressed and every one of those reads
+> inherits the same gap. Then self-service tenant provisioning with plan limits, per-tenant upload/cache
+> namespacing, and tenant-scoped analytics and reporting.
 
 - **Multi-tenant SaaS** — *the foundation is already built in Phase 0*. Phase 7 finishes the
   job: tenant-aware settings UI, per-tenant branding (logo, colours, domain) applied across

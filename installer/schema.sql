@@ -165,6 +165,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   `role` ENUM('admin','media_team','editor') NOT NULL DEFAULT 'media_team',
   `is_super_admin` TINYINT(1) NOT NULL DEFAULT 0,
   `org_unit_id` INT NULL,
+  `tenant_id` INT NOT NULL DEFAULT 0 COMMENT '0 = no church assigned; otherwise Tenant::id(). Super admins are platform-wide.',
   `is_suspended` TINYINT(1) NOT NULL DEFAULT 0,
   `notify_on_login` TINYINT(1) NOT NULL DEFAULT 1,
   `bio` TEXT NULL,
@@ -172,6 +173,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   `last_login_at` TIMESTAMP NULL,
   `last_login_ip` VARCHAR(45) NULL,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_user_tenant` (`tenant_id`),
   FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

@@ -60,8 +60,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
 
-            $stmt = $pdo->prepare('INSERT INTO users (name, username, email, password, role, is_super_admin, notify_on_login) VALUES (?, ?, ?, ?, "admin", 1, 1)');
-            $stmt->execute([$name, $username, $email, password_hash($password, PASSWORD_ARGON2ID)]);
+            // The first admin is the platform's super admin, so which church it is stamped with only
+            // matters on an install that already has one (a re-run, or a recovery install). On a
+            // fresh install no tenant exists yet and this writes 0; the `2026_38_user_tenants`
+            // backfill stamps the account on the first request after setup finishes.
+            $installTenantId = (int) (Tenant::id() ?? 0);
+            $stmt = $pdo->prepare('INSERT INTO users (name, username, email, password, role, is_super_admin, tenant_id, notify_on_login) VALUES (?, ?, ?, ?, "admin", 1, ?, 1)');
+            $stmt->execute([$name, $username, $email, password_hash($password, PASSWORD_ARGON2ID), $installTenantId]);
 
             $exists = (int) $pdo->query('SELECT COUNT(*) FROM settings')->fetchColumn();
             if ($exists === 0) {

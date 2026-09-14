@@ -473,6 +473,8 @@ require __DIR__ . '/partials/layout-open.php';
   <div class="card" style="margin-bottom:18px;">
     <h2 id="users">Users (<code>/admin/users</code>) <span class="pill role">ADMIN</span></h2>
     <p>Create and manage accounts for your church's team. Set name, username, email, role (admin/editor/media team), password, and <strong>Home Unit</strong> (the church they manage). The very first super-admin account can't be deleted or edited by others.</p>
+    <p><strong>An account belongs to one church.</strong> The list shows your church's team and nothing else, an account you create here belongs to your church, and it can sign in on your church's web address — and nowhere else. The super admin is the exception: it works across every church, and uses the <strong>switcher</strong> in the sidebar to choose which church's team it is looking at.</p>
+    <p>If somebody says they cannot sign in, check that they are on <em>your</em> church's web address and that they appear in this list. An account belonging to another church is told only that its credentials are invalid — that is deliberate, so the sign-in form cannot be used to find out who has an account where.</p>
   </div>
 
   <div class="card" style="margin-bottom:18px;">

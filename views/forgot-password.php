@@ -17,13 +17,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo = Database::getInstance()->getConnection();
             // Check if alt_email column exists before using it in WHERE clause
             $hasAltEmail = (int) $pdo->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'alt_email'")->fetchColumn() > 0;
-            $sql = 'SELECT * FROM users WHERE username = ? OR email = ?';
+
+            // Scoped to the church this site serves. Without it, anybody on one church's site
+            // could start a reset for another church's admin and have the OTP arrive branded with
+            // the wrong church's name — and could learn from the answer that the username exists.
+            $sql = 'SELECT * FROM users WHERE (username = ? OR email = ?';
             $params = [$usernameOrEmail, $usernameOrEmail];
             if ($hasAltEmail) {
                 $sql .= ' OR alt_email = ?';
                 $params[] = $usernameOrEmail;
             }
-            $sql .= ' LIMIT 1';
+            $sql .= ') AND tenant_id = ? LIMIT 1';
+            $params[] = (int) (Tenant::id() ?? 0);
 
             $stmt = $pdo->prepare($sql);
             $stmt->execute($params);
@@ -77,8 +82,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $step = 'pin_reset';
         } else {
             $pdo = Database::getInstance()->getConnection();
-            $stmt = $pdo->prepare('SELECT * FROM users WHERE username = ? OR email = ? LIMIT 1');
-            $stmt->execute([$usernameOrEmail, $usernameOrEmail]);
+            $stmt = $pdo->prepare('SELECT * FROM users WHERE (username = ? OR email = ?) AND tenant_id = ? LIMIT 1');
+            $stmt->execute([$usernameOrEmail, $usernameOrEmail, (int) (Tenant::id() ?? 0)]);
             $user = $stmt->fetch();
 
             if (!$user) {
@@ -107,8 +112,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $step = 'request';
         } else {
             $pdo = Database::getInstance()->getConnection();
-            $stmt = $pdo->prepare('SELECT * FROM users WHERE id = ? LIMIT 1');
-            $stmt->execute([$userId]);
+            $stmt = $pdo->prepare('SELECT * FROM users WHERE id = ? AND tenant_id = ? LIMIT 1');
+            $stmt->execute([$userId, (int) (Tenant::id() ?? 0)]);
             $user = $stmt->fetch();
 
             if (!$user || empty($user['reset_otp']) || $user['reset_otp'] !== $otp) {

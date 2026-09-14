@@ -150,8 +150,11 @@ if ($action === 'approve' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($check->fetch()) {
                 $errors[] = 'That username or email is already in use — edit it before approving.';
             } else {
-                $pdo->prepare('INSERT INTO users (name, username, email, password, unblock_pin_hash, role, org_unit_id, notify_on_login) VALUES (?, ?, ?, ?, ?, ?, ?, 1)')
-                    ->execute([mb_substr($name, 0, 150), mb_substr($username, 0, 100), mb_substr($email, 0, 150), $reg['password_hash'], $reg['unblock_pin_hash'] ?? null, $role, (int) $parish['id']]);
+                // The approved admin belongs to the church the super admin is working on, which is
+                // the whole reason the switcher exists: switch to the church, then approve its admin.
+                // `pending_registrations` carries no tenant of its own to copy from.
+                $pdo->prepare('INSERT INTO users (name, username, email, password, unblock_pin_hash, role, org_unit_id, tenant_id, notify_on_login) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)')
+                    ->execute([mb_substr($name, 0, 150), mb_substr($username, 0, 100), mb_substr($email, 0, 150), $reg['password_hash'], $reg['unblock_pin_hash'] ?? null, $role, (int) $parish['id'], (int) (Tenant::id() ?? 0)]);
 
                 // Auto-create the corporate email (+ optional forwarder) via cPanel.
                 $emailResult = createCorporateEmail($reg, $username);

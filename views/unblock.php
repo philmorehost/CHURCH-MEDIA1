@@ -14,8 +14,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = 'Username, password, and Security Unblock PIN are all required.';
     } else {
         $pdo = Database::getInstance()->getConnection();
-        $stmt = $pdo->prepare('SELECT * FROM users WHERE username = ? OR email = ? LIMIT 1');
-        $stmt->execute([$username, $username]);
+        // Same church boundary as signing in: a church's admin restores access on that church's
+        // own site, and nowhere else.
+        $stmt = $pdo->prepare('SELECT * FROM users WHERE (username = ? OR email = ?) AND tenant_id = ? LIMIT 1');
+        $stmt->execute([$username, $username, (int) (Tenant::id() ?? 0)]);
         $user = $stmt->fetch();
 
         if (!$user || !password_verify($password, $user['password'])) {
