@@ -1,11 +1,11 @@
 {
-    "name": "church_media_app",
-    "short_name": "church_media_app",
+    "name": "RCCGLP63",
+    "short_name": "RCCGLP63",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "description": "RCCG LP63 YAYA — reels, sermons, events and the offline Bible.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

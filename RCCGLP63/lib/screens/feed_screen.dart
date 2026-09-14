@@ -585,9 +585,12 @@ class _FeedSlideState extends State<_FeedSlide> {
                 _actionButton(
                   icon: Icons.ios_share,
                   label: '',
+                  // The post's own page rather than /feed. WhatsApp reads the og: tags off the URL
+                  // it is handed, so a shared reel only previews with its cover if the link points
+                  // at the post. Pointing every share at /feed is why they all showed the logo.
                   onTap: () => ShareService.share(
                     text: post.caption ?? 'Check this out',
-                    uri: '${ApiClient.baseUrl}/feed',
+                    uri: '${ApiClient.baseUrl}/post/${post.id}',
                   ),
                   iconOnly: true,
                 ),

@@ -35,6 +35,46 @@ $router->get('/media', function () {
     render('media');
 });
 
+// A permalink for one reel or post, which exists because of the share sheet.
+//
+// WhatsApp fetches whatever URL it is given and reads the og: tags off that page. The app used to
+// share /feed, which has no idea which post was meant, so every reel previewed with the church
+// logo. A post needs an address of its own before it can have a preview of its own.
+$router->get('/post/{id}', function (array $params) {
+    $id = (int) ($params['id'] ?? 0);
+    $pdo = Database::getInstance()->getConnection();
+
+    $post = null;
+    if ($id > 0) {
+        $stmt = $pdo->prepare('SELECT p.*, u.name AS author_name FROM media_posts p JOIN users u ON u.id = p.user_id WHERE p.id = ? AND p.is_published = 1 LIMIT 1');
+        $stmt->execute([$id]);
+        $post = $stmt->fetch() ?: null;
+    }
+
+    // A deleted or unpublished post is a 404 rather than a redirect to the feed: a link somebody
+    // shared should say plainly that it is gone instead of quietly showing something else.
+    if ($post === null) {
+        http_response_code(404);
+        render('404');
+        return;
+    }
+
+    $items = $pdo->prepare('SELECT type, file_path, thumbnail_path, alt_text FROM media_post_items WHERE media_post_id = ? ORDER BY sort_order ASC');
+    $items->execute([$post['id']]);
+
+    $caption = trim((string) ($post['caption'] ?? ''));
+    $isReel = (string) ($post['post_type'] ?? '') === 'vertical_reel';
+
+    render('post', [
+        'metaTitle' => $caption !== '' ? mb_strimwidth($caption, 0, 70, '…') : ($isReel ? 'Reel' : 'Post') . ' — ' . setting('site_title'),
+        'metaDescription' => $caption !== '' ? mb_strimwidth($caption, 0, 155, '…') : 'Watch it on ' . setting('site_title') . '.',
+        // Absolute, because the crawler fetching this has to be able to reach it from outside.
+        'metaImage' => baseUrl(ShareCard::urlFor('post', (int) $post['id'], (string) ($post['slug'] ?? ''))),
+        'post' => $post,
+        'media' => $items->fetchAll(),
+    ]);
+});
+
 $router->get('/unit/{slug}', function (array $params) {
     render('unit', ['slug' => $params['slug']]);
 });

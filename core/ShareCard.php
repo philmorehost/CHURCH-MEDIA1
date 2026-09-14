@@ -199,7 +199,7 @@ final class ShareCard
                         $caption !== '' ? $caption : (string) setting('site_title'),
                         $cover,
                         array_filter([!empty($row['created_at']) ? date('F j, Y', (int) strtotime((string) $row['created_at'])) : null]),
-                        '/feed');
+                        '/post/' . (int) $row['id']);
             }
         } catch (Throwable $e) {
             error_log('ShareCard resolve failed: ' . $e->getMessage());
