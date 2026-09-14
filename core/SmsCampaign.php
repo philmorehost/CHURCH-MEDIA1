@@ -45,8 +45,11 @@ final class SmsCampaign
             return null;
         }
         try {
-            $stmt = self::db()->prepare('SELECT * FROM sms_campaigns WHERE id = ? LIMIT 1');
-            $stmt->execute([$id]);
+            // Scoped to the church being served. The SMS worker is the only caller, and it asks for a
+            // specific campaign when it is told to run just one — under the wrong church that would send
+            // another church's campaign with this church's gateway credentials and sender ID.
+            $stmt = self::db()->prepare('SELECT * FROM sms_campaigns WHERE id = ? AND tenant_id = ? LIMIT 1');
+            $stmt->execute([$id, self::tenantId()]);
             return $stmt->fetch() ?: null;
         } catch (Throwable $e) {
             return null;
@@ -56,22 +59,56 @@ final class SmsCampaign
     /**
      * Campaigns a worker should work on now: those queued or mid-send, oldest first.
      *
+     * Scoped to the church being served, which is what lets the worker run one pass per church and
+     * read each church's own gateway token, sender ID, cap and sending window while it does. A worker
+     * pass that saw every church's campaigns would use one church's credentials for another's messages.
+     *
      * @return array<int, array<string, mixed>>
      */
     public static function active(int $limit = self::CAMPAIGNS_PER_RUN): array
     {
-        $limit = max(1, min(50, $limit));
+        return self::queuedFor('tenant_id = ?', [self::tenantId()], $limit);
+    }
+
+    /**
+     * The same list across **every** church.
+     *
+     * For `cli/sms_maintenance.php`, which is an operator tool rather than a sender: it returns
+     * abandoned claims to `pending` and must reach every campaign still in flight, whatever church it
+     * belongs to. Nothing that sends may use this.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function activeAll(int $limit = self::CAMPAIGNS_PER_RUN): array
+    {
+        return self::queuedFor('1 = 1', [], $limit);
+    }
+
+    /**
+     * @param  array<int, mixed> $params
+     * @return array<int, array<string, mixed>>
+     */
+    private static function queuedFor(string $where, array $params, int $limit): array
+    {
+        $limit = max(1, min(200, $limit));
         try {
-            $stmt = self::db()->query(
+            $stmt = self::db()->prepare(
                 "SELECT * FROM sms_campaigns
-                 WHERE status IN ('queued','sending')
+                 WHERE status IN ('queued','sending') AND {$where}
                  ORDER BY COALESCE(scheduled_at, created_at) ASC, id ASC
                  LIMIT {$limit}"
             );
+            $stmt->execute($params);
             return $stmt->fetchAll();
         } catch (Throwable $e) {
             return [];
         }
+    }
+
+    /** The church whose queue is being read. 0 when nothing resolves, which is how rows are stamped. */
+    private static function tenantId(): int
+    {
+        return (class_exists('Tenant') ? Tenant::id() : null) ?? 0;
     }
 
     /** Recipients still waiting to be sent, ignoring any claim. */
@@ -104,11 +141,14 @@ final class SmsCampaign
     public static function promoteDue(): int
     {
         try {
+            // Scoped: each church's scheduled campaigns are promoted during its own pass, so the
+            // promotion and the sending that follows it always happen as the same church.
             $stmt = self::db()->prepare(
                 "UPDATE sms_campaigns SET status = 'queued'
-                 WHERE status = 'scheduled' AND scheduled_at IS NOT NULL AND scheduled_at <= NOW()"
+                 WHERE status = 'scheduled' AND scheduled_at IS NOT NULL AND scheduled_at <= NOW()
+                   AND tenant_id = ?"
             );
-            $stmt->execute();
+            $stmt->execute([self::tenantId()]);
             return $stmt->rowCount();
         } catch (Throwable $e) {
             error_log('SmsCampaign promoteDue failed: ' . $e->getMessage());
@@ -553,11 +593,21 @@ final class SmsCampaign
     /**
      * Units already spent today, summed from the queue rather than from a counter, so
      * it cannot disagree with what was actually sent.
+     *
+     * Scoped to the church being served, because the daily cap is per church: without the join, a busy
+     * church would spend a quiet church's allowance and then pause that church's campaigns for a reason
+     * it had nothing to do with.
      */
     public static function unitsSentToday(): int
     {
         try {
-            $stmt = self::db()->query("SELECT COALESCE(SUM(units), 0) FROM sms_campaign_recipients WHERE status = 'sent' AND sent_at >= CURDATE()");
+            $stmt = self::db()->prepare(
+                "SELECT COALESCE(SUM(r.units), 0)
+                 FROM sms_campaign_recipients r
+                 JOIN sms_campaigns c ON c.id = r.campaign_id
+                 WHERE r.status = 'sent' AND r.sent_at >= CURDATE() AND c.tenant_id = ?"
+            );
+            $stmt->execute([self::tenantId()]);
             return (int) $stmt->fetchColumn();
         } catch (Throwable $e) {
             return 0;

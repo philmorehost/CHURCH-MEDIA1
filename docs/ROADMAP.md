@@ -65,7 +65,7 @@
 | **4** | WhatsApp channel | Official Cloud API integration (templates, 24-h window, webhooks) | 5–7 sessions | Per-conversation | ✅ closed (4.1–4.3; 4.4 rejected) |
 | **5** | Members & daily engagement | Member accounts, daily devotional, Bible reading plans + streaks, offline sermon downloads | 10–12 sessions | None | ✅ shipped (S1–S6) |
 | **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ✅ **complete** — 6a–6g shipped |
-| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings), 7b shipped (an account belongs to one church), 7c shipped (a unit belongs to one church), 7d-i shipped (worker tenancy plumbing) |
+| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings), 7b shipped (an account belongs to one church), 7c shipped (a unit belongs to one church), 7d-i shipped (worker tenancy plumbing), 7d-ii part 1 shipped (the SMS worker acts as one church at a time) |
 
 **Confirmed 2026-09-12:** multi-tenant **SaaS is a real goal**. That is why **Phase 0
 (tenancy foundation) runs before everything else** — the SMS token, sender IDs, country
@@ -1414,9 +1414,9 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > both own `grace-zone` — the second silently gets `grace-zone-2` from the `uniqueSlug()` loop. Making
 > slugs per-church means changing that key, which is its own job.
 
-> **7d — PLANNED (audited 2026-09-14). 7d-i is shipped; 7d-ii is not.** The background workers read
-> one church's settings while serving every church. The audit below is written down before the code, as
-> a record of what was found.
+> **7d — PLANNED (audited 2026-09-14). 7d-i and the first half of 7d-ii are shipped.** The background
+> workers read one church's settings while serving every church. The audit below is written down before
+> the code, as a record of what was found.
 >
 > **First, a correction to what this document said after 7c.** It claimed `Devotional` and
 > `GivingCampaign` "act on the default church alone" in a cron. That is wrong for the workers: the
@@ -1515,9 +1515,67 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > unexercised, because every runner is still called only from `cli/`; it is kept anyway as a guard,
 > since without it a future "send now" button would loop every church.
 >
-> **7d-ii — the conversions, still to do.** One worker per commit, cheapest to riskiest: `sms_worker`
-> first (wrong credentials), then `sms_sender_check` and `sms_maintenance`, then `devotional_worker`
-> (needs the new column), then `roster_worker` and `followup_worker`, then `wa_worker`. Each becomes
+> **7d-ii (part 1) shipped — the SMS worker.** The worker now runs one pass per church, through
+> `Tenant::each()`. Recorded here because of why it went first: it is the one worker whose cross-church
+> failure **costs money and misattributes who spoke**.
+>
+> **What the defect was.** `SmsCampaign::active()` asked for every church's queued campaigns, and
+> `SmsRunner::run()` then worked them as whichever church happened to resolve — from cron, the default
+> one. So a campaign belonging to church B was sent with church A's gateway token and sender ID, billed
+> to church A's wallet, with church A's name dropped into `{church}` for church B's members, and the
+> gateway log stamped with church A's `tenant_id`. The harness demonstrates exactly that: with
+> `active()` deliberately un-scoped, **12 assertions fail**, and the captured gateway call shows all
+> four fixture recipients — two churches' members — going out under one sender ID and one token.
+>
+> **Scoped:** `SmsCampaign::find()`, `active()` and `promoteDue()` now filter on `tenant_id`, and
+> `unitsSentToday()` joins `sms_campaigns` so the daily cap is per church. `SmsRunner::run()` needed
+> **no change at all** — inside a pass, `sms_token`, `sms_default_sender_id`, `sms_daily_unit_cap`,
+> `sms_quiet_start`/`_end` and `site_title` already resolve for the pass's church, which is what 7d-i's
+> plumbing bought.
+>
+> **`activeAll()` is new and deliberately un-scoped**, for `cli/sms_maintenance.php` — an operator tool
+> that releases abandoned claims and must reach every campaign in flight. It is the only caller, and its
+> docblock says plainly that nothing which sends may use it.
+>
+> **Two deliberate consequences, both worth knowing.**
+> (1) `queuedFor()`'s clamp was `min(50, …)`, and `sms_maintenance.php` had long been passing
+> `active(200)` and silently getting 50. The clamp is now `min(200, …)`, so that call site genuinely
+> reaches 200. `active(50)` and the default `CAMPAIGNS_PER_RUN` are unaffected.
+> (2) `cli/sms_worker.php` now exits **1** when a church's pass *threw*, so cron mails the operator, and
+> still exits 0 for a church that was merely outside its sending window or short of wallet. It used to
+> always exit 0.
+>
+> **The worker's pre-flight `Sms::configured()` guard was removed on purpose.** It asked the default
+> church only, so a church with no token would have stopped every other church's messages before any
+> pass ran. `SmsRunner::run()` checks the token itself, per pass, and reports it as a stop reason.
+>
+> **Not touched, and known:** the dashboard's 30-day and "this month" spend tiles
+> (`admin/partials/sms/dashboard.php`) query `sms_campaign_recipients` with **no** church filter, so they
+> are install-wide. The tiles that call `unitsSentToday()` are per church and now agree with the worker.
+> Scoping those two raw queries belongs to the screens/settings pass, not this one.
+>
+> **Verified (7d-ii part 1): 62 assertions.** Fixtures: two churches, each with a token, a sender ID, a
+> queued campaign with two members, and a scheduled campaign. A `Sms::setTransport()` fake stands in for
+> the gateway, so nothing was bought. Asserted: each church saw only its own queue and `find()` could not
+> reach the other's — each negation paired with the same call succeeding for the church that owns the row;
+> `promoteDue()` promoted one church's due campaign and left the other's alone; one worker invocation sent
+> both churches' campaigns with **each church's own sender ID and token**, `{church}` filled from that
+> church's own `site_title`, to that church's own numbers only; both campaigns finished, every recipient
+> went once and none was duplicated; `unitsSentToday()` counted 2 units for each church rather than 4 for
+> one; every `sms_messages_log` row carried its own church's `tenant_id` and no row carried the wrong one;
+> each church recorded its own `sms_wallet_log` snapshot; a second run sent nothing and promoted nothing;
+> and with church two's cap deliberately already met, **church two paused while church one still sent**.
+> The harness snapshotted and restored exactly, asserting its own restore landed, and the real
+> `cli/sms_worker.php --status` was run as a subprocess with three churches (three blocks, no PHP error)
+> and again after cleanup with one (one block, no heading — the single-church output is unchanged in shape).
+>
+> **Not verified:** no message reached a real gateway (a fake transport stands in, consistent with the
+> standing caveat that no SMS has ever actually been delivered in this project); the worker was not run
+> from a real cron; and `--status` was read but never rendered in a browser. There is still no second
+> church in production, so every multi-church result here is from local fixtures.
+>
+> **7d-ii — the rest, still to do.** `sms_sender_check`, then `devotional_worker` (needs the new
+> `device_tokens.tenant_id`), then `roster_worker`, `followup_worker` and `wa_worker`. Each becomes
 > `Tenant::each(...)` with the pass body unchanged, so a failure in one church cannot stop another's run.
 >
 > **Still not tested against a second church** — there is none in production, and every claim in this

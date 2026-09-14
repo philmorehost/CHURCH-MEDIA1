@@ -145,10 +145,14 @@ foreach ([
  * SmsCampaign::releaseStale() returns rows to `pending` when their claim is older than
  * CLAIM_TIMEOUT_MINUTES. Run across every campaign still in flight, this covers the case
  * where the worker that took the claim never came back.
+ *
+ * `activeAll()`, not `active()`: those are now scoped to the church being served, and this is an
+ * operator tool run from a shell, where the church being served is only ever the default one. It must
+ * reach every campaign in flight, whatever church it belongs to.
  */
 $released = 0;
 try {
-    foreach (SmsCampaign::active(200) as $campaign) {
+    foreach (SmsCampaign::activeAll(200) as $campaign) {
         $campaignId = (int) $campaign['id'];
         if ($dryRun) {
             $stmt = $pdo->prepare(

@@ -80,31 +80,59 @@ function say(string $line): void
 /* --------------------------------------------------------------- status mode */
 
 if ($statusOnly) {
-    $rows = SmsCampaign::active(50);
-    if (!$rows) {
-        fwrite(STDOUT, "No campaigns are queued.\n");
-    } else {
-        foreach ($rows as $row) {
-            $counts = SmsCampaign::statusCounts((int) $row['id']);
-            fwrite(STDOUT, sprintf(
-                "#%-4d %-10s %-40s pending=%d sent=%d failed=%d%s\n",
-                (int) $row['id'],
-                (string) $row['status'],
-                mb_strimwidth((string) $row['title'], 0, 40, '…'),
-                $counts['pending'],
-                $counts['sent'],
-                $counts['failed'],
-                $row['paused_reason'] ? '  (' . $row['paused_reason'] . ')' : ''
-            ));
+    // One report per church. The queue, the cap and the sending window are all per church, and from a
+    // shell the church being served is only ever the default one — so reporting `active()` once would
+    // print one church's queue and call it the queue.
+    $status = Tenant::each(static function (int $tenantId): array {
+        $rows = [];
+        foreach (SmsCampaign::active(50) as $row) {
+            $row['counts'] = SmsCampaign::statusCounts((int) $row['id']);
+            $rows[] = $row;
         }
+        return [
+            'rows' => $rows,
+            'sent' => SmsCampaign::unitsSentToday(),
+            'cap' => SmsCampaign::dailyCap(),
+            'quiet' => SmsCampaign::quietHoursLabel(),
+            'within' => SmsCampaign::withinQuietHours(),
+        ];
+    });
+
+    $several = count($status) > 1;
+    foreach ($status as $tenantId => $entry) {
+        if ($entry['ok'] !== true || !is_array($entry['result'])) {
+            fwrite(STDERR, 'sms_worker: status failed for church ' . $tenantId . ' — '. (string) ($entry['error'] ?? 'unknown error') . "\n");
+            continue;
+        }
+        $report = $entry['result'];
+        if ($several) {
+            $church = Tenant::find((int) $tenantId);
+            fwrite(STDOUT, "\n" . ((string) ($church['name'] ?? ('Church ' . $tenantId))) . "\n");
+        }
+        if (!$report['rows']) {
+            fwrite(STDOUT, "No campaigns are queued.\n");
+        } else {
+            foreach ($report['rows'] as $row) {
+                fwrite(STDOUT, sprintf(
+                    "#%-4d %-10s %-40s pending=%d sent=%d failed=%d%s\n",
+                    (int) $row['id'],
+                    (string) $row['status'],
+                    mb_strimwidth((string) $row['title'], 0, 40, '…'),
+                    $row['counts']['pending'],
+                    $row['counts']['sent'],
+                    $row['counts']['failed'],
+                    $row['paused_reason'] ? '  (' . $row['paused_reason'] . ')' : ''
+                ));
+            }
+        }
+        fwrite(STDOUT, sprintf(
+            "\nToday: %d unit(s) sent%s. Quiet hours: %s. Now within them: %s\n",
+            (int) $report['sent'],
+            $report['cap'] > 0 ? ' of ' . (int) $report['cap'] . ' allowed' : ' (no cap)',
+            (string) $report['quiet'],
+            $report['within'] ? 'yes' : 'no'
+        ));
     }
-    fwrite(STDOUT, sprintf(
-        "\nToday: %d unit(s) sent%s. Quiet hours: %s. Now within them: %s\n",
-        SmsCampaign::unitsSentToday(),
-        SmsCampaign::dailyCap() > 0 ? ' of ' . SmsCampaign::dailyCap() . ' allowed' : ' (no cap)',
-        SmsCampaign::quietHoursLabel(),
-        SmsCampaign::withinQuietHours() ? 'yes' : 'no'
-    ));
     exit(0);
 }
 
@@ -123,37 +151,69 @@ if (!flock($lock, LOCK_EX | LOCK_NB)) {
     exit(0);
 }
 
-if (!Sms::configured()) {
-    fwrite(STDERR, "sms_worker: no SMS API token is configured. Add one under Admin → SMS → Settings.\n");
-    exit(0);
+// One pass per church, because the queue, the gateway token, the sender ID, the daily cap and the
+// sending window are all per church. A single run for the whole install read whichever church resolved
+// first — the default one, from a cron — and used its credentials to send everybody's messages.
+//
+// The pre-flight `Sms::configured()` guard that used to sit here is gone on purpose: it asked the
+// default church only, so a church with no token would have stopped every other church's messages.
+// `SmsRunner::run()` checks the token itself, per pass, and reports it as a stop reason.
+$runs = Tenant::each(static function (int $tenantId) use ($onlyCampaign, $force): array {
+    return SmsRunner::run([
+        'only_campaign' => $onlyCampaign,
+        'force' => $force,
+    ]);
+});
+
+$several = count($runs) > 1;
+$totals = ['processed' => 0, 'sent' => 0, 'failed' => 0, 'paused' => 0, 'elapsed' => 0.0];
+$failedPasses = 0;
+
+foreach ($runs as $tenantId => $entry) {
+    $church = $several ? Tenant::find((int) $tenantId) : null;
+    $label = $several ? ((string) ($church['name'] ?? ('Church ' . $tenantId)) . ': ') : '';
+
+    if ($entry['ok'] !== true || !is_array($entry['result'])) {
+        // The pass threw. Tenant::each held it so the other churches still ran, so this is where it
+        // has to become visible — silently skipping a church is how a schedule quietly stops working.
+        $failedPasses++;
+        fwrite(STDERR, 'sms_worker: ' . $label . 'the run failed — ' . (string) ($entry['error'] ?? 'unknown error') . "\n");
+        continue;
+    }
+
+    $summary = $entry['result'];
+
+    foreach ($summary['paused_reasons'] as $reason) {
+        fwrite(STDERR, 'sms_worker: ' . $label . 'paused — ' . $reason . "\n");
+    }
+
+    if ($summary['stopped'] !== null) {
+        say($label . $summary['stopped']);
+    }
+
+    $totals['processed'] += (int) $summary['processed'];
+    $totals['sent'] += (int) $summary['sent'];
+    $totals['failed'] += (int) $summary['failed'];
+    $totals['paused'] += (int) $summary['paused'];
+    $totals['elapsed'] += (float) $summary['elapsed'];
 }
 
-$summary = SmsRunner::run([
-    'only_campaign' => $onlyCampaign,
-    'force' => $force,
-]);
-
-foreach ($summary['paused_reasons'] as $reason) {
-    fwrite(STDERR, 'sms_worker: paused — ' . $reason . "\n");
-}
-
-if ($summary['stopped'] !== null) {
-    say($summary['stopped']);
-}
-
-if ($summary['processed'] === 0) {
+if ($totals['processed'] === 0) {
     say('Nothing to send.');
 } else {
     say(sprintf(
         'Run finished in %ss: %d campaign(s), %d sent, %d failed%s.',
-        $summary['elapsed'],
-        $summary['processed'],
-        $summary['sent'],
-        $summary['failed'],
-        $summary['paused'] > 0 ? ', ' . $summary['paused'] . ' paused' : ''
+        round($totals['elapsed'], 1),
+        $totals['processed'],
+        $totals['sent'],
+        $totals['failed'],
+        $totals['paused'] > 0 ? ', ' . $totals['paused'] . ' paused' : ''
     ));
 }
 
 flock($lock, LOCK_UN);
 fclose($lock);
-exit(0);
+
+// A pass that threw is a bug worth a non-zero exit — cron mails the operator. A church that was simply
+// outside its sending window, or short of wallet, is not a failure and must stay quiet.
+exit($failedPasses > 0 ? 1 : 0);
