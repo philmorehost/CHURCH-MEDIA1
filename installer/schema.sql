@@ -137,6 +137,14 @@ CREATE TABLE IF NOT EXISTS `org_units` (
   `name` VARCHAR(150) NOT NULL,
   `slug` VARCHAR(160) NULL UNIQUE,
   `sort_order` INT NOT NULL DEFAULT 0,
+  `meeting_day` VARCHAR(12) NULL COMMENT 'Sunday..Saturday, or NULL when this unit does not meet as a cell',
+  `meeting_time` VARCHAR(12) NULL COMMENT 'Free text, e.g. "6:30 PM" — see HomeCell for why this is not a TIME',
+  `meeting_address` VARCHAR(255) NULL,
+  `leader_name` VARCHAR(150) NULL,
+  `leader_phone` VARCHAR(32) NULL COMMENT 'Normalised dial code + number. Collected always, published only when leader_phone_public = 1',
+  `leader_phone_public` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '0 = never shown on the public finder, even if a number is stored',
+  `capacity` INT NULL COMMENT 'How many people the meeting place holds; NULL = not recorded',
+  `cell_is_public` TINYINT(1) NOT NULL DEFAULT 1 COMMENT '0 hides this cell from the public finder without deleting anything',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (`parent_id`) REFERENCES `org_units`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

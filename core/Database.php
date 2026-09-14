@@ -1885,6 +1885,34 @@ class Database
                 $pdo->prepare('UPDATE pages SET content = REPLACE(REPLACE(content, ?, ?), ?, ?) WHERE content LIKE ?')
                     ->execute(['Welcome to ' . $old, 'Welcome to ' . $new, $old, $new, '%' . $old . '%']);
             },
+
+            // Home cell details, on the deepest level of whichever hierarchy the church has
+            // configured (by default a Parish). Putting them here rather than in a new table is
+            // what makes the feature work for a church that adds a "House Fellowship" level:
+            // whatever its smallest grouping is becomes the thing that meets in a home.
+            //
+            // `meeting_time` is free text, not a TIME column. A cell that meets at "6:30 PM"
+            // should keep saying 6:30 PM — a TIME value would render as 18:30, and the church
+            // would have to think in 24-hour time while filling in the form. It is a label people
+            // read, not something we do arithmetic on.
+            //
+            // `leader_phone` is stored for the church's own use and published only when
+            // `leader_phone_public` is set. A leader's personal number on a public page is
+            // scraped; making publication an explicit per-cell choice keeps that the church's
+            // decision rather than a side effect of filling in the form.
+            //
+            // `cell_is_public` lets a cell be hidden from the finder without deleting it, which
+            // is what a church needs when a cell is between leaders.
+            '2026_33_home_cells' => function (PDO $pdo): void {
+                self::addColumnIfMissing($pdo, 'org_units', 'meeting_day', 'VARCHAR(12) NULL', 'sort_order');
+                self::addColumnIfMissing($pdo, 'org_units', 'meeting_time', 'VARCHAR(12) NULL', 'meeting_day');
+                self::addColumnIfMissing($pdo, 'org_units', 'meeting_address', 'VARCHAR(255) NULL', 'meeting_time');
+                self::addColumnIfMissing($pdo, 'org_units', 'leader_name', 'VARCHAR(150) NULL', 'meeting_address');
+                self::addColumnIfMissing($pdo, 'org_units', 'leader_phone', 'VARCHAR(32) NULL', 'leader_name');
+                self::addColumnIfMissing($pdo, 'org_units', 'leader_phone_public', 'TINYINT(1) NOT NULL DEFAULT 0', 'leader_phone');
+                self::addColumnIfMissing($pdo, 'org_units', 'capacity', 'INT NULL', 'leader_phone_public');
+                self::addColumnIfMissing($pdo, 'org_units', 'cell_is_public', 'TINYINT(1) NOT NULL DEFAULT 1', 'capacity');
+            },
         ];
     }
 

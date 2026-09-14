@@ -67,6 +67,7 @@ $navGroups = [
         'label' => 'Churches & People',
         'items' => [
             ['key' => 'units', 'href' => '/admin/units', 'label' => 'Units', 'roles' => ['admin']],
+            ['key' => 'home-cells', 'href' => '/admin/home-cells', 'label' => 'Home Cells', 'roles' => ['admin']],
             ['key' => 'unit-levels', 'href' => '/admin/unit-levels', 'label' => 'Unit Levels', 'super' => true],
             ['key' => 'registrations', 'href' => '/admin/registrations', 'label' => 'Registrations', 'super' => true],
             ['key' => 'users', 'href' => '/admin/users', 'label' => 'Users', 'roles' => ['admin']],

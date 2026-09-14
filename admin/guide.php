@@ -52,6 +52,7 @@ require __DIR__ . '/partials/layout-open.php';
     <a href="#newcomers">Newcomers</a>
     <a href="#pages">Pages</a>
     <a href="#units">Units</a>
+    <a href="#home-cells">Home Cells</a>
     <a href="#unit-levels">Unit Levels</a>
     <a href="#registrations">Registrations</a>
     <a href="#security">Security</a>
@@ -333,6 +334,20 @@ require __DIR__ . '/partials/layout-open.php';
       <li><strong>⬇ Export Units (CSV)</strong> — download a complete CSV with one column per level plus ID, Level, Name, Slug, Full Hierarchy and Created At. The level columns match the import format, so an export can be edited and imported straight back (available to Super Admin, and to Church Admins scoped to their own units).</li>
       <li><strong>🏷 Name Corrections</strong> — review church name corrections flagged from the registration page. <em>Approve</em> automatically renames the church to the suggested spelling; <em>Reject</em> makes no changes.</li>
     </ul>
+  </div>
+
+  <div class="card" style="margin-bottom:18px;">
+    <h2 id="home-cells">Home Cells (<code>/admin/home-cells</code>) <span class="pill role">ADMIN</span></h2>
+    <p>The <strong>midweek gatherings</strong> — where your people meet during the week. Everything here feeds the public <a href="/find-a-cell" target="_blank" rel="noopener"><code>/find-a-cell</code></a> page and the app's cell list.</p>
+    <ul>
+      <li><strong>The list</strong> shows every unit at your <em>deepest</em> level (a Parish by default) with what is known about its meeting, and whether it is showing to the public. Search by cell name, leader or area.</li>
+      <li><strong>Meeting day</strong> is what puts a cell on the public page. A unit with no day is simply a church, not a cell — so a hierarchy of 200 parishes with 12 real cells shows 12 cards, not 200 blank ones.</li>
+      <li><strong>Meeting time</strong> is typed the way people say it — <em>6:30 PM</em> stays 6:30 PM. It is a label, not a clock value, so nobody has to convert to 24-hour time.</li>
+      <li><strong>List this cell</strong> — untick while a cell is between leaders. Nothing is deleted, it just stops appearing.</li>
+    </ul>
+    <p><strong>A leader's number is private until you say otherwise.</strong> It is stored the moment you type it, but the public page <em>and</em> the app both hide it unless <strong>Show this number on the public finder</strong> is ticked for that cell. A personal number on a public page gets copied and called by people the leader never agreed to hear from, and the person filling in this form is not the leader — so publishing is a decision rather than a side effect of saving. Once ticked, the number appears with tap-to-call and a WhatsApp link.</p>
+    <p>Cells are <strong>not</strong> sorted by distance and there is no “near me” button. Doing that needs a latitude and longitude for every meeting place, and asking every cell leader for coordinates is a burden most churches will not carry — a button that returns nothing useful is worse than a plain, reliable filter. Adding a map later is an addition, not a rework.</p>
+    <p>Editing is limited to <strong>Church Admins</strong>, and a scoped admin only ever sees cells inside their own part of the hierarchy.</p>
   </div>
 
   <div class="card" style="margin-bottom:18px;">

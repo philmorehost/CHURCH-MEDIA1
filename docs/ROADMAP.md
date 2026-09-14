@@ -64,7 +64,7 @@
 | **3** | Sermons: series + podcast | Sermon series, series pages, podcast RSS feed + Spotify/Apple submission | 3–4 sessions | None | ✅ shipped (3.1–3.6) |
 | **4** | WhatsApp channel | Official Cloud API integration (templates, 24-h window, webhooks) | 5–7 sessions | Per-conversation | ✅ closed (4.1–4.3; 4.4 rejected) |
 | **5** | Members & daily engagement | Member accounts, daily devotional, Bible reading plans + streaks, offline sermon downloads | 10–12 sessions | None | ✅ shipped (S1–S6) |
-| **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ⬜ **next** |
+| **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ⬜ **next** — 6a shipped |
 | **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ partly advanced — the second church's app is built |
 
 **Confirmed 2026-09-12:** multi-tenant **SaaS is a real goal**. That is why **Phase 0
@@ -958,6 +958,39 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
   pledge tracking on top of the existing Payhub flow.
 - **Verify**: each automation is idempotent; a member who opts out mid-sequence is removed
   immediately; campaign totals reconcile with `donations`.
+
+> **6a shipped — home cell finder (website side).** The deepest level of whichever hierarchy the
+> church has configured gains meeting day, time, address, leader name, leader phone, capacity, a
+> phone-publication switch and a list/hide switch; `admin/home-cells.php` edits them, `/find-a-cell`
+> publishes them, and `/api/cells` serves them.
+>
+> **The geolocation half of this bullet is not built, on purpose.** Sorting by distance needs
+> coordinates for every meeting place. Asking each cell leader for a latitude and longitude is a
+> burden most churches will not carry out, and a "nearest to me" that silently returns nothing is
+> worse than a filter that always works. The filter is text plus branch of the hierarchy, both in the
+> query string so a filtered view can be shared. Coordinates, if ever wanted, are two nullable
+> columns behind the same list — additive, not a rework.
+>
+> **A leader's number is private by default**, and that is enforced in two places rather than one.
+> The column exists so the church can ring the leader; publishing it is a separate per-cell choice,
+> and `/api/cells` omits it on the same terms as the page — an API is a second public surface, and
+> returning it there "for the app" would quietly undo the decision made on the web form.
+>
+> **Verified:** 42 assertions against a real database covering validation, day canonicalisation,
+> phone normalisation, capacity bounds, the permission clearing itself when the number it belonged to
+> is removed, and filtering by text, leader, address and ancestor branch. 25 assertions over HTTP on
+> the finder, the API and the search filter, including that the number is absent from both surfaces
+> when the box is unticked. 13 assertions driving a real admin login to confirm the list and the form
+> render with no PHP notice. Both temp harnesses were removed afterwards and the database restored.
+>
+> **Not built yet in 6a:** the app's cell list. The endpoint it needs is live and tested, so that is
+> screen work alone.
+>
+> **A finding worth carrying forward:** the first HTTP run showed the number leaking on three checks,
+> and the cause was the test harness — a fixture helper called with a missing argument fatally errored
+> before it saved, leaving the previous fixture's state in place. The lesson is not "write better
+> fixtures" but "make a fixture assert that it applied", which the re-run now does. It is the second
+> time in this project that a broken harness looked exactly like a broken feature.
 
 ## 9. Phase 7 — Reach & platform
 

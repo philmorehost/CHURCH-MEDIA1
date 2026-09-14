@@ -83,6 +83,12 @@ $router->get('/units', function () {
     render('units');
 });
 
+// Home cell finder — the midweek gatherings, with the filter in the query string so a
+// filtered list can be shared or bookmarked ("here is the cell near me").
+$router->get('/find-a-cell', function () {
+    render('find-a-cell');
+});
+
 // Forgot Password / OTP Reset route
 $router->get('/forgot-password', function () {
     render('forgot-password', [], false);
