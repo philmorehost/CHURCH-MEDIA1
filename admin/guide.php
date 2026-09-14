@@ -39,6 +39,7 @@ require __DIR__ . '/partials/layout-open.php';
     <a href="#sermons">Sermons</a>
     <a href="#series">Series &amp; Podcast</a>
     <a href="#devotionals">Daily Devotionals</a>
+    <a href="#reading-plans">Reading Plans</a>
     <a href="#team">Team</a>
     <a href="#prayer">Prayer Wall</a>
     <a href="#testimonies">Testimonies</a>
@@ -197,6 +198,19 @@ require __DIR__ . '/partials/layout-open.php';
     <p><strong>The daily notification</strong> is the card at the bottom of the screen: whether it is switched on, how many devices are registered, and whether today's has gone out. Sending needs a <strong>cron entry</strong> — the exact line is on that card. Nothing goes out on its own, and a devotional left as <em>hidden</em> is never sent.</p>
     <p><strong>Who is skipped.</strong> A member who switched devotionals off on their own dashboard is not notified. That is only possible because their device is linked to their account, so a phone that has never signed in is treated as having expressed no preference and receives. Sending also obeys the same sending window as SMS and WhatsApp, so a mis-set cron cannot wake anyone at 3am.</p>
     <p><strong>Running it twice is harmless.</strong> The day is claimed before the first notification goes out, so a duplicate cron entry, or a run that overlaps the previous one, cannot notify the church twice.</p>
+  </div>
+
+  <div class="card" style="margin-bottom:18px;">
+    <h2 id="reading-plans">Reading Plans (<code>/admin/reading-plans</code>) <span class="pill super">SUPER</span></h2>
+    <p>Give the church a Bible-reading plan — a chapter a day, a year through the Bible, whatever suits. Members choose one from their own account and tick off the days as they read.</p>
+    <p><strong>Writing a plan.</strong> The editor is a text box with <strong>one line per day</strong>, because that is how a plan is written on paper and the only form that stays readable at 365 lines. Write a passage as <code>Genesis 1</code>, <code>Genesis 1-3</code>, <code>Genesis 1:1-5</code> or <code>John 3:16</code>, and put more than one reading on a day by separating them with a semicolon: <code>Psalm 23; John 10</code>.</p>
+    <p><strong>Leave a line blank for a rest day</strong> — the days after it keep their numbers. A plan that rests on Sundays depends on that, and a plan nobody has to renumber is one nobody mistypes.</p>
+    <p><strong>Mistakes are caught as you type them, not later.</strong> Book names are checked against the Bible the app carries, and a chapter that does not exist — <em>Genesis 51</em> — is refused with the reason. An ambiguous name such as <em>Jud</em> is refused rather than guessed at, because it could be Judges or Jude and putting people in the wrong book is worse than asking. A misspelling suggests what you probably meant.</p>
+    <p><strong>Plans are shared by every church</strong> in this installation, which is why only a super admin can create or change one. A scoped admin can read the list, so they know what their people have been offered.</p>
+    <p><strong>Members see it on their own account</strong> at <code>/member</code>: their place, how far through they are, and the reading they are up to. Progress survives switching plans, so leaving one and coming back finds the place still marked.</p>
+    <p><strong>The daily reminder.</strong> Members who have not read yet get a nudge in the evening, if they have not switched reading reminders off in their own notification choices. It needs a <strong>cron entry</strong> — nothing is sent on its own:</p>
+    <pre style="background:#0f0d1f;border:1px solid var(--border);border-radius:10px;padding:12px;overflow:auto;font-size:12.5px;">30 18 * * * php <?= e(ROOT_PATH) ?>/cli/reading_worker.php</pre>
+    <p>Run it as often as you like — the day is claimed per member before anything is sent, so an hourly cron still nudges anybody at most once. It obeys the same sending window as SMS and WhatsApp, so a mis-set cron cannot wake anyone at 3am.</p>
   </div>
 
   <div class="card" style="margin-bottom:18px;">

@@ -1394,11 +1394,29 @@ $router->get('/member', function () {
     $memberId = (int) $member['id'];
     $email = (string) $member['email'];
 
+    // The reading plan, if they are on one. `next_day` is the first day they have not ticked,
+    // which is what the dashboard offers to tick — not today's date, because a plan is a list of
+    // readings rather than a calendar, and a member catching up after a week away should be
+    // offered the reading they actually stopped at.
+    $plan = ReadingPlan::currentFor($memberId);
+    $planProgress = null;
+    $planReadings = array();
+    if ($plan !== null) {
+        $planProgress = ReadingPlan::progressFor($memberId, (int) $plan['id']);
+        if ($planProgress['next_day'] !== null) {
+            $planReadings = ReadingPlan::passagesForDay((int) $plan['id'], (int) $planProgress['next_day']);
+        }
+    }
+
     render('member/dashboard', [
         'metaTitle' => 'My account',
         'metaRobots' => 'noindex, nofollow',
         'member' => $member,
         'prefs' => Member::preferences($member),
+        'plan' => $plan,
+        'planProgress' => $planProgress,
+        'planReadings' => $planReadings,
+        'planChoices' => ReadingPlan::published(),
         // The reads take the current fingerprint and email alongside the member id, so
         // activity from this browser appears straight away rather than at the next
         // sign-in when the claim runs.
@@ -1494,6 +1512,117 @@ $router->post('/member', function () {
     }
 
     redirect('/member');
+});
+
+// The whole plan on one page. Every day is a checkbox in a single form, because the form replaces
+// the member's set of read days wholesale — that is what makes unticking work — and a form that
+// only covered one page of days would clear every day on the others.
+$router->get('/member/plan', function () {
+    MemberAuth::requireLogin();
+    $member = MemberAuth::member();
+    if ($member === null) {
+        MemberAuth::logout();
+        redirect('/member/login');
+    }
+
+    $plan = ReadingPlan::currentFor((int) $member['id']);
+    if ($plan === null) {
+        // The picker lives on the dashboard, so there is nothing to show here yet.
+        redirect('/member');
+    }
+
+    render('member/plan', [
+        'metaTitle' => $plan['name'],
+        'metaRobots' => 'noindex, nofollow',
+        'member' => $member,
+        'plan' => $plan,
+        'progress' => ReadingPlan::progressFor((int) $member['id'], (int) $plan['id']),
+        'days' => ReadingPlan::days((int) $plan['id']),
+        'read' => ReadingPlan::completedDays((int) $member['id'], (int) $plan['id']),
+    ]);
+});
+
+$router->post('/member/plan', function () {
+    Csrf::requireValid();
+    MemberAuth::requireLogin();
+
+    $member = MemberAuth::member();
+    if ($member === null) {
+        MemberAuth::logout();
+        redirect('/member/login');
+    }
+    $memberId = (int) $member['id'];
+
+    switch ((string) ($_POST['do'] ?? '')) {
+        case 'join':
+            // 0 means "leave", and is allowed: progress is kept, so coming back finds their place.
+            $planId = (int) ($_POST['plan_id'] ?? 0);
+            if ($planId > 0 && ReadingPlan::find($planId) === null) {
+                flash('member_error', 'That reading plan is no longer available.');
+                break;
+            }
+            ReadingPlan::join($memberId, $planId);
+            flash('member_notice', $planId > 0
+                ? 'You are now following that plan.'
+                : 'You have left the plan. Your progress has been kept.');
+            break;
+
+        case 'tick':
+            // Marks one day and nothing else, so the quick action on the dashboard can never
+            // untick something by omission.
+            $plan = ReadingPlan::currentFor($memberId);
+            if ($plan === null) {
+                flash('member_error', 'Choose a reading plan first.');
+                break;
+            }
+            $day = (int) ($_POST['day'] ?? 0);
+            if ($day < 1 || $day > (int) $plan['days_count']) {
+                flash('member_error', 'That is not a day of this plan.');
+                break;
+            }
+            ReadingPlan::markRead($memberId, (int) $plan['id'], $day);
+            flash('member_notice', 'Day ' . $day . ' is marked as read.');
+            break;
+
+        case 'days':
+            $plan = ReadingPlan::currentFor($memberId);
+            if ($plan === null) {
+                flash('member_error', 'Choose a reading plan first.');
+                break;
+            }
+            $planId = (int) $plan['id'];
+            $total = (int) $plan['days_count'];
+
+            // Whatever was submitted is the whole truth. Out-of-range values are dropped rather
+            // than trusted, so a hand-edited form cannot mark day 9000 or reach another plan.
+            $wanted = array();
+            foreach ((array) ($_POST['days'] ?? array()) as $day) {
+                $day = (int) $day;
+                if ($day >= 1 && $day <= $total) {
+                    $wanted[$day] = $day;
+                }
+            }
+
+            $already = ReadingPlan::completedDays($memberId, $planId);
+            foreach ($wanted as $day) {
+                if (!isset($already[$day])) {
+                    ReadingPlan::markRead($memberId, $planId, $day);
+                }
+            }
+            foreach ($already as $day) {
+                if (!isset($wanted[$day])) {
+                    ReadingPlan::unmarkRead($memberId, $planId, $day);
+                }
+            }
+
+            flash('member_notice', count($wanted) . ' day' . (count($wanted) === 1 ? '' : 's') . ' marked as read.');
+            redirect('/member/plan');
+
+        default:
+            break;
+    }
+
+    redirect('/member/plan');
 });
 
 $router->get('/devotional', function () {

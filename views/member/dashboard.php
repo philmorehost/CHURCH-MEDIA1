@@ -50,6 +50,71 @@ $verified = !empty($member['is_verified']);
       </div>
     <?php endif; ?>
 
+    <h2 class="form-title" style="font-size:18px;margin:22px 0 6px;">Bible reading plan</h2>
+
+    <?php if ($plan === null): ?>
+      <?php if (!$planChoices): ?>
+        <p class="form-desc">No reading plan has been published yet. When your church adds one it will appear here.</p>
+      <?php else: ?>
+        <p class="form-desc">Read through the Bible with the whole church. Your place is kept, and the days you read are counted towards a streak.</p>
+        <form method="post" action="/member/plan">
+          <?= Csrf::field() ?>
+          <input type="hidden" name="do" value="join">
+          <div class="form-field">
+            <label class="form-label" for="plan_id">Choose a plan</label>
+            <select id="plan_id" name="plan_id">
+              <?php foreach ($planChoices as $choice): ?>
+                <option value="<?= (int) $choice['id'] ?>"><?= e((string) $choice['name']) ?> &middot; <?= (int) $choice['days_count'] ?> days</option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <button type="submit" class="form-submit"><span>Start this plan</span></button>
+        </form>
+      <?php endif; ?>
+    <?php else: ?>
+      <?php $nextDay = $planProgress['next_day']; ?>
+      <p class="form-desc">
+        <strong><?= e((string) $plan['name']) ?></strong> &middot;
+        <?= (int) $planProgress['done'] ?> of <?= (int) $planProgress['total'] ?> days read
+        <?php if ($planProgress['streak'] > 1): ?>
+          &middot; <strong><?= (int) $planProgress['streak'] ?> days in a row</strong>
+        <?php elseif ($planProgress['streak'] === 1): ?>
+          &middot; <strong>1 day in a row</strong>
+        <?php endif; ?>
+      </p>
+
+      <div style="height:10px;border-radius:6px;background:rgba(0,0,0,0.10);overflow:hidden;margin:0 0 16px;"
+           role="progressbar" aria-valuenow="<?= (int) $planProgress['percent'] ?>" aria-valuemin="0" aria-valuemax="100">
+        <div style="height:100%;width:<?= (int) $planProgress['percent'] ?>%;background:var(--gold,#d4af37);"></div>
+      </div>
+
+      <?php if ($nextDay === null): ?>
+        <p class="form-desc"><strong>You have finished this plan.</strong> Well done — you can start another one whenever you like.</p>
+      <?php else: ?>
+        <?php // The first day not yet ticked, not today's date: a member who has been away for a week
+              // should be offered the reading they actually stopped at. ?>
+        <div style="border:1px solid rgba(0,0,0,0.12);border-radius:10px;padding:14px 16px;margin-bottom:12px;">
+          <div style="font-size:12px;letter-spacing:0.06em;text-transform:uppercase;opacity:0.65;">Next up &middot; Day <?= (int) $nextDay ?></div>
+          <div style="font-size:17px;font-weight:600;margin:4px 0 0;"><?= e(ReadingPlan::labelForDay($planReadings)) ?></div>
+          <form method="post" action="/member/plan" style="margin-top:12px;">
+            <?= Csrf::field() ?>
+            <input type="hidden" name="do" value="tick">
+            <input type="hidden" name="day" value="<?= (int) $nextDay ?>">
+            <button type="submit" class="form-submit" style="margin:0;"><span>Mark day <?= (int) $nextDay ?> as read</span></button>
+          </form>
+        </div>
+      <?php endif; ?>
+
+      <p class="form-desc"><a href="/member/plan">See the whole plan</a>, or catch up on days you missed.</p>
+
+      <form method="post" action="/member/plan">
+        <?= Csrf::field() ?>
+        <input type="hidden" name="do" value="join">
+        <input type="hidden" name="plan_id" value="0">
+        <button type="submit" class="form-submit ghost"><span>Leave this plan</span></button>
+      </form>
+    <?php endif; ?>
+
     <h2 class="form-title" style="font-size:18px;margin:22px 0 6px;">Your details</h2>
     <form method="post" action="/member">
       <?= Csrf::field() ?>

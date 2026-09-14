@@ -263,6 +263,35 @@ class Member
         return $prefs;
     }
 
+    /**
+     * Whether this member wants a particular kind of notification.
+     *
+     * Defaults to yes, matching preferences(): an unset key means on, because a member who has never
+     * opened the settings should not be silently excluded from everything. A member row that no
+     * longer exists answers yes too — the foreign key nulls the device's link rather than deleting
+     * it, so this is only reachable in a race and sending is the harmless side.
+     *
+     * The devotional push and the reading reminder both come through here, so the two cannot drift
+     * into disagreeing about what a member has switched off.
+     */
+    public static function wantsNotification(?int $memberId, string $key): bool
+    {
+        if ($memberId === null || $memberId < 1) {
+            return true;
+        }
+
+        $stmt = Database::getInstance()->getConnection()
+            ->prepare('SELECT notification_prefs FROM members WHERE id = ? LIMIT 1');
+        $stmt->execute(array($memberId));
+        $row = $stmt->fetch();
+        if (!$row) {
+            return true;
+        }
+
+        $prefs = self::preferences($row);
+        return ($prefs[$key] ?? true) !== false;
+    }
+
     public static function savePreferences(int $memberId, array $submitted): void
     {
         $prefs = array();

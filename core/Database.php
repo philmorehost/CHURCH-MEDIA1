@@ -1839,6 +1839,20 @@ class Database
                 self::addIndexIfMissing($pdo, 'members', 'idx_member_plan', 'INDEX `idx_member_plan` (`reading_plan_id`)');
                 self::addForeignKeyIfMissing($pdo, 'members', 'fk_member_plan', 'reading_plan_id', 'reading_plans', 'id', 'SET NULL');
             },
+
+            // The daily "you have not read yet" nudge, and the column that stops it repeating.
+            //
+            // `reading_reminded_on` is a column rather than a log table because the question it
+            // answers is one-per-member-per-day, which is exactly what a DATE column holds. The
+            // worker claims it with a conditional UPDATE before sending, so an hourly cron cannot
+            // nudge the same person five times.
+            //
+            // The notification preference for this already exists on the member dashboard — it is
+            // one of Member::NOTIFICATION_KEYS — and until now it switched off nothing at all.
+            '2026_31_reading_reminder' => function (PDO $pdo): void {
+                self::addColumnIfMissing($pdo, 'members', 'reading_reminded_on', 'DATE NULL', 'reading_plan_id');
+                self::addColumnIfMissing($pdo, 'settings', 'reading_reminder_enabled', 'TINYINT(1) NOT NULL DEFAULT 1', 'devotional_push_enabled');
+            },
         ];
     }
 

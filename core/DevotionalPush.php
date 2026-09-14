@@ -174,7 +174,7 @@ final class DevotionalPush
                 // Cached because a member can have several devices, and reading their preferences
                 // once per device would be a query per row for nothing.
                 if (!array_key_exists($memberId, $wants)) {
-                    $wants[$memberId] = self::wantsDevotional($pdo, $memberId);
+                    $wants[$memberId] = Member::wantsNotification($memberId, 'devotional');
                 }
                 if ($wants[$memberId] === false) {
                     continue;
@@ -250,24 +250,6 @@ final class DevotionalPush
         return $stmt->rowCount() === 1;
     }
 
-    /**
-     * Whether the member still wants devotional notifications.
-     *
-     * Defaults to yes, which matches Member::preferences(): an unset key means on. A member row
-     * that has disappeared returns true rather than false — the foreign key sets `member_id` to
-     * NULL on delete, so this is only reachable in a race, and sending is the harmless side.
-     */
-    private static function wantsDevotional(PDO $pdo, int $memberId): bool
-    {
-        $stmt = $pdo->prepare('SELECT notification_prefs FROM members WHERE id = ? LIMIT 1');
-        $stmt->execute(array($memberId));
-        $row = $stmt->fetch();
-        if (!$row) {
-            return true;
-        }
-        $prefs = Member::preferences($row);
-        return $prefs['devotional'] !== false;
-    }
 
     /** The notification title: the church, then the devotional. */
     private static function titleFor(array $entry): string
