@@ -536,8 +536,7 @@ final class ServiceRoster
 
     /** How many slots are still open across every upcoming service — the sidebar's nudge. */
     public static function openSlots(?array $user, int $days = 14): int
-    {
-        $stmt = self::db()->prepare(
+    {        $stmt = self::db()->prepare(
             'SELECT id, org_unit_id FROM service_plans'
             . ' WHERE service_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL ? DAY) AND is_cancelled = 0'
         );
@@ -552,6 +551,94 @@ final class ServiceRoster
             $open += $totals['open'];
         }
         return $open;
+    }
+
+    /* ------------------------------------------------------------- what a member sees -- */
+
+    /**
+     * The services this member has been put on and can still answer for.
+     *
+     * Only assignments carrying their `member_id` — somebody typed in by name is not on the system
+     * and has no way to answer, which is why the planner is shown their number instead.
+     *
+     * Past and cancelled services are left out: there is nothing useful to do about either, and a
+     * list that keeps showing last month's rota stops being read.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function upcomingForMember(int $memberId, int $limit = 5): array
+    {
+        $stmt = self::db()->prepare(
+            'SELECT a.id AS assignment_id, a.status, a.responded_at,'
+            . ' r.name AS role_name, r.slots_needed,'
+            . ' p.id AS plan_id, p.title, p.service_date, p.service_time, p.location'
+            . ' FROM service_assignments a'
+            . ' JOIN service_roles r ON r.id = a.role_id'
+            . ' JOIN service_plans p ON p.id = r.plan_id'
+            . ' WHERE a.member_id = ? AND p.is_cancelled = 0 AND p.service_date >= CURDATE()'
+            . ' ORDER BY p.service_date ASC, p.service_time ASC, a.id ASC'
+            . ' LIMIT ' . max(1, min(50, $limit))
+        );
+        $stmt->execute([$memberId]);
+
+        $rows = $stmt->fetchAll();
+        foreach ($rows as &$row) {
+            $row['assignment_id'] = (int) $row['assignment_id'];
+            $row['plan_id'] = (int) $row['plan_id'];
+            $row['slots_needed'] = (int) $row['slots_needed'];
+        }
+        unset($row);
+        return $rows;
+    }
+
+    /** How many invitations are waiting on this member's answer. */
+    public static function pendingForMember(int $memberId): int
+    {
+        $stmt = self::db()->prepare(
+            'SELECT COUNT(*) FROM service_assignments a'
+            . ' JOIN service_roles r ON r.id = a.role_id'
+            . ' JOIN service_plans p ON p.id = r.plan_id'
+            . " WHERE a.member_id = ? AND a.status = 'invited' AND p.is_cancelled = 0 AND p.service_date >= CURDATE()"
+        );
+        $stmt->execute([$memberId]);
+        return (int) $stmt->fetchColumn();
+    }
+
+    /**
+     * A member answering their own invitation.
+     *
+     * **The membership check is in the WHERE clause, not in a caller.** `a.member_id = ?` means a
+     * guessed assignment id updates nothing at all — there is no branch where the wrong member's
+     * row is reachable, so no future screen can forget to check. An owner check written in PHP
+     * would have to be repeated at every call site, and the second one would eventually be missed.
+     *
+     * Past and cancelled services are excluded for the same reason they are hidden: an answer
+     * arrives too late to be useful, and accepting last Sunday's slot would be quietly wrong.
+     *
+     * @return array{errors?: array<int, string>, ok?: bool}
+     */
+    public static function respondAsMember(int $memberId, int $assignmentId, string $status): array
+    {
+        // 'invited' is not an answer anybody gives — it is the state before one.
+        if (!in_array($status, array('accepted', 'declined'), true)) {
+            return array('errors' => array('Choose either accept or decline.'));
+        }
+
+        $stmt = self::db()->prepare(
+            'UPDATE service_assignments a'
+            . ' JOIN service_roles r ON r.id = a.role_id'
+            . ' JOIN service_plans p ON p.id = r.plan_id'
+            . ' SET a.status = ?, a.responded_at = NOW()'
+            . ' WHERE a.id = ? AND a.member_id = ? AND p.is_cancelled = 0 AND p.service_date >= CURDATE()'
+        );
+        $stmt->execute(array($status, $assignmentId, $memberId));
+
+        if ($stmt->rowCount() === 0) {
+            // Deliberately one message for every reason. Telling somebody apart from somebody
+            // else's invitation would confirm which ids exist.
+            return array('errors' => array('That invitation is not available to answer. It may have been changed already.'));
+        }
+        return array('ok' => true);
     }
 
     /**

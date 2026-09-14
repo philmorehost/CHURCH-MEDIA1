@@ -1430,6 +1430,10 @@ $router->get('/member', function () {
         'giving' => MemberActivity::givingHistory($memberId, $email, 25),
         'totals' => MemberActivity::givingTotals($memberId, $email),
         'homeCell' => Member::homeCell($member),
+        // Roster invitations waiting on this member. Capped, because the dashboard is a summary —
+        // "what am I on next" rather than a full history of everything they have ever served.
+        'serving' => ServiceRoster::upcomingForMember($memberId, 5),
+        'servingPending' => ServiceRoster::pendingForMember($memberId),
     ]);
 });
 
@@ -1479,6 +1483,25 @@ $router->post('/member', function () {
         case 'prefs':
             Member::savePreferences($memberId, (array) ($_POST['prefs'] ?? []));
             flash('member_notice', 'Your notification choices are saved.');
+            break;
+
+        case 'serving':
+            // A member answering their own roster invitation. The ownership check lives in
+            // ServiceRoster::respondAsMember rather than here, so a guessed assignment id changes
+            // nothing and no future screen can forget to make the check itself.
+            $answer = ServiceRoster::respondAsMember(
+                $memberId,
+                (int) ($_POST['assignment_id'] ?? 0),
+                (string) ($_POST['status'] ?? '')
+            );
+
+            if (empty($answer['ok'])) {
+                flash('member_error', implode(' ', $answer['errors'] ?? array('We could not record that answer.')));
+            } else {
+                flash('member_notice', (string) ($_POST['status'] ?? '') === 'accepted'
+                    ? 'Thank you — the team can see you are coming.'
+                    : 'Thank you for saying — the team will ask somebody else.');
+            }
             break;
 
         case 'resend':

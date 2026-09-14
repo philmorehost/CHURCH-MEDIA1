@@ -64,7 +64,7 @@
 | **3** | Sermons: series + podcast | Sermon series, series pages, podcast RSS feed + Spotify/Apple submission | 3–4 sessions | None | ✅ shipped (3.1–3.6) |
 | **4** | WhatsApp channel | Official Cloud API integration (templates, 24-h window, webhooks) | 5–7 sessions | Per-conversation | ✅ closed (4.1–4.3; 4.4 rejected) |
 | **5** | Members & daily engagement | Member accounts, daily devotional, Bible reading plans + streaks, offline sermon downloads | 10–12 sessions | None | ✅ shipped (S1–S6) |
-| **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ⬜ **next** — 6a/6b/6c shipped |
+| **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ⬜ **next** — 6a–6d shipped |
 | **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ partly advanced — the second church's app is built |
 
 **Confirmed 2026-09-12:** multi-tenant **SaaS is a real goal**. That is why **Phase 0
@@ -1030,10 +1030,31 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > by guessing the id. Every fixture that sets up state now asserts the write actually landed, which is
 > the fix for the mistake made twice earlier in this phase.
 >
+> **6d shipped — members answer their own invitations.** A registered member put on a service sees
+> it on their account under “You’re serving” and can accept, decline, or change their mind. Somebody
+> typed in by name cannot answer, which is exactly why their number is shown on the roster.
+>
+> **The ownership check is a WHERE clause, not a branch.** `respondAsMember` updates only where
+> `a.member_id = ?`, so a guessed assignment id changes nothing and there is no code path where the
+> wrong member's row is reachable. An owner check written in PHP would have to be repeated at every
+> call site, and the second one would eventually be missed — this is the same reasoning as the home
+> cell leader's number being omitted by the query rather than filtered afterwards.
+>
+> **Past and cancelled services are exempt from answering**, in the same query. An answer to last
+> Sunday's rota is not useful, and quietly accepting it would be wrong.
+>
+> **One message for every refusal.** “That invitation is not available to answer” covers wrong owner,
+> unknown id, past service and cancelled service alike. Distinguishing them would confirm which ids
+> exist.
+>
+> **Verified:** 30 domain assertions and 17 over HTTP driving a real member sign-in — the invitation
+> appearing on the dashboard, accepting it, changing their mind, being refused when answering another
+> member's slot, and a POST without a CSRF token changing nothing.
+>
 > **Not built yet in Phase 6:** the automatic SMS/WhatsApp reminder 24 h before a service, newcomer
-> follow-up automation, and giving campaigns. Member-facing accept/decline is also still to come —
-> the status field and the response path exist and are tested, but only an admin can record an answer
-> so far.
+> follow-up automation, and giving campaigns. Until the reminder lands, a member only sees an
+> invitation if they happen to open their account — so **notifying them when they are put on a rota is
+> the natural next step**, because an invitation nobody sees is an invitation nobody answers.
 >
 > **A finding worth carrying forward:** the first HTTP run showed the number leaking on three checks,
 > and the cause was the test harness — a fixture helper called with a missing argument fatally errored

@@ -50,6 +50,84 @@ $verified = !empty($member['is_verified']);
       </div>
     <?php endif; ?>
 
+    <?php
+    // "You're serving" sits above the reading plan on purpose: a roster answer is time-sensitive —
+    // somebody is planning round it this week — while a reading plan is a discipline you catch up
+    // on whenever. If there is nothing to answer, the whole section is left out rather than shown
+    // empty, because an empty box on a dashboard teaches people to stop reading that area.
+    ?>
+    <?php if (!empty($serving)): ?>
+      <h2 class="form-title" style="font-size:18px;margin:22px 0 6px;">You&rsquo;re serving</h2>
+
+      <?php if ((int) ($servingPending ?? 0) > 0): ?>
+        <p class="form-desc">
+          <strong><?= (int) $servingPending ?> waiting on your answer.</strong>
+          The team is planning around this, so a yes and a no are equally helpful.
+        </p>
+      <?php else: ?>
+        <p class="form-desc">Here is what you are on. Thank you for serving.</p>
+      <?php endif; ?>
+
+      <?php foreach ($serving as $slot): ?>
+        <div style="border:1px solid rgba(0,0,0,0.12);border-radius:10px;padding:14px 16px;margin-bottom:12px;">
+          <div style="font-size:12px;letter-spacing:0.06em;text-transform:uppercase;opacity:0.65;">
+            <?= e(ServiceRoster::dateLabel((string) $slot['service_date'])) ?><?php
+              if (trim((string) $slot['service_time']) !== '') {
+                  echo ' &middot; ' . e((string) $slot['service_time']);
+              }
+            ?>
+          </div>
+          <div style="font-size:17px;font-weight:600;margin:4px 0 0;">
+            <?= e((string) $slot['role_name']) ?>
+            <span style="font-weight:400;opacity:0.7;">at <?= e((string) $slot['title']) ?></span>
+          </div>
+          <?php if (trim((string) ($slot['location'] ?? '')) !== ''): ?>
+            <div class="form-desc" style="margin:4px 0 0;"><?= e((string) $slot['location']) ?></div>
+          <?php endif; ?>
+
+          <?php if ($slot['status'] === 'accepted'): ?>
+            <p class="form-desc" style="margin:10px 0 0;"><strong>You said yes.</strong> The team can see you are coming.</p>
+            <form method="post" action="/member" style="margin-top:8px;">
+              <?= Csrf::field() ?>
+              <input type="hidden" name="do" value="serving">
+              <input type="hidden" name="assignment_id" value="<?= (int) $slot['assignment_id'] ?>">
+              <input type="hidden" name="status" value="declined">
+              <button type="submit" class="form-submit ghost"><span>Something has changed &mdash; I can&rsquo;t make it</span></button>
+            </form>
+          <?php elseif ($slot['status'] === 'declined'): ?>
+            <p class="form-desc" style="margin:10px 0 0;">
+              <strong>You said you can&rsquo;t make this one.</strong>
+              Changing your mind is fine &mdash; tell the team and they will put you back on.
+            </p>
+            <form method="post" action="/member" style="margin-top:8px;">
+              <?= Csrf::field() ?>
+              <input type="hidden" name="do" value="serving">
+              <input type="hidden" name="assignment_id" value="<?= (int) $slot['assignment_id'] ?>">
+              <input type="hidden" name="status" value="accepted">
+              <button type="submit" class="form-submit ghost"><span>Actually, I can make it</span></button>
+            </form>
+          <?php else: ?>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;">
+              <form method="post" action="/member" style="margin:0;">
+                <?= Csrf::field() ?>
+                <input type="hidden" name="do" value="serving">
+                <input type="hidden" name="assignment_id" value="<?= (int) $slot['assignment_id'] ?>">
+                <input type="hidden" name="status" value="accepted">
+                <button type="submit" class="form-submit" style="margin:0;"><span>Yes, I&rsquo;ll be there</span></button>
+              </form>
+              <form method="post" action="/member" style="margin:0;">
+                <?= Csrf::field() ?>
+                <input type="hidden" name="do" value="serving">
+                <input type="hidden" name="assignment_id" value="<?= (int) $slot['assignment_id'] ?>">
+                <input type="hidden" name="status" value="declined">
+                <button type="submit" class="form-submit ghost"><span>Sorry, I can&rsquo;t</span></button>
+              </form>
+            </div>
+          <?php endif; ?>
+        </div>
+      <?php endforeach; ?>
+    <?php endif; ?>
+
     <h2 class="form-title" style="font-size:18px;margin:22px 0 6px;">Bible reading plan</h2>
 
     <?php if ($plan === null): ?>
