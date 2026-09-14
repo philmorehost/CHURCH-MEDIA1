@@ -7,6 +7,7 @@ import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/event_sermon_cards.dart';
 import 'bible_screen.dart';
+import 'devotional_screen.dart';
 import 'notifications_screen.dart';
 import 'units_screen.dart';
 import 'event_detail_screen.dart';
@@ -26,6 +27,7 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Post> _posts = [];
   List<ChurchEvent> _events = [];
   List<Sermon> _sermons = [];
+  Devotional? _devotional;
   bool _loading = true;
   bool _unread = false;
   String? _newestAt;
@@ -109,12 +111,14 @@ class _HomeScreenState extends State<HomeScreen> {
         _api.fetchFeed(page: 1),
         _api.fetchEvents(scope: 'upcoming'),
         _api.fetchSermons(page: 1),
+        _api.fetchDevotional(),
       ]);
       setState(() {
         _settings = results[0] as ChurchSettings;
         _posts = (results[1] as ({List<Post> posts, bool hasMore})).posts.take(6).toList();
         _events = (results[2] as ({List<ChurchEvent> events, bool hasMore})).events.take(3).toList();
         _sermons = (results[3] as ({List<Sermon> sermons, bool hasMore})).sermons.take(3).toList();
+        _devotional = (results[4] as DevotionalDay).entry;
         _loading = false;
       });
     } catch (_) {
@@ -134,6 +138,7 @@ class _HomeScreenState extends State<HomeScreen> {
         child: CustomScrollView(
           slivers: [
             SliverToBoxAdapter(child: _buildHero(s)),
+            if (_devotional != null) SliverToBoxAdapter(child: _buildDevotionalCard(_devotional!)),
             SliverToBoxAdapter(child: _buildBibleCard()),
             SliverToBoxAdapter(child: _buildParishCard()),
             SliverToBoxAdapter(child: SectionHeader(eyebrow: 'Community', title: 'From Our Feed')),
@@ -209,6 +214,52 @@ class _HomeScreenState extends State<HomeScreen> {
           child: _bellButton(),
         ),
       ],
+    );
+  }
+
+  /// Today's devotional, when there is one.
+  ///
+  /// Left out entirely rather than shown empty when the church has not written one: a card that
+  /// says nothing is worse than no card, and a church that does not use devotionals should not
+  /// have to look at one.
+  Widget _buildDevotionalCard(Devotional entry) {
+    return GestureDetector(
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => DevotionalScreen(date: entry.publishOn)),
+      ),
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(colors: [Color(0xFF6B4E16), Color(0xFF9A7420)]),
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: Row(children: [
+          const Icon(Icons.auto_stories, size: 40, color: AppColors.goldSoft),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text(
+                "TODAY'S DEVOTIONAL",
+                style: TextStyle(color: AppColors.goldSoft, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.1),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                entry.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+              if (entry.scriptureReference.isNotEmpty) ...[
+                const SizedBox(height: 2),
+                Text(entry.scriptureReference, style: const TextStyle(color: Colors.white70, fontSize: 13)),
+              ],
+            ]),
+          ),
+          const Icon(Icons.arrow_forward_ios, color: Colors.white, size: 18),
+        ]),
+      ),
     );
   }
 

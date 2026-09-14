@@ -385,3 +385,72 @@ class PrayerRequest {
         createdAt: json['created_at'] as String? ?? '',
       );
 }
+
+/// One day's devotional.
+///
+/// A single class covers both the full entry and the archive list — the list omits the body and
+/// the scripture text, and those simply arrive empty.
+class Devotional {
+  final int id;
+  final String title;
+  final String scriptureReference;
+  final String scriptureText;
+  final String body;
+  final String publishOn;
+  final int unitId;
+  final String? audioUrl;
+  final int? sermonId;
+
+  const Devotional({
+    required this.id,
+    required this.title,
+    required this.scriptureReference,
+    required this.scriptureText,
+    required this.body,
+    required this.publishOn,
+    required this.unitId,
+    this.audioUrl,
+    this.sermonId,
+  });
+
+  factory Devotional.fromJson(Map<String, dynamic> json) => Devotional(
+        id: (json['id'] as num?)?.toInt() ?? 0,
+        title: json['title'] as String? ?? '',
+        scriptureReference: json['scripture_reference'] as String? ?? '',
+        scriptureText: json['scripture_text'] as String? ?? '',
+        body: json['body'] as String? ?? '',
+        publishOn: json['publish_on'] as String? ?? '',
+        unitId: (json['unit_id'] as num?)?.toInt() ?? 0,
+        audioUrl: (json['audio_url'] as String? ?? '').isEmpty ? null : json['audio_url'] as String,
+        sermonId: (json['sermon_id'] as num?)?.toInt(),
+      );
+
+  bool get hasAudio => audioUrl != null && audioUrl!.isNotEmpty;
+  bool get hasScriptureText => scriptureText.trim().isNotEmpty;
+  bool get hasBody => body.trim().isNotEmpty;
+}
+
+/// Today's devotional and the days around it, as /api/devotional answers.
+///
+/// [entry] is null when nothing has been published for [date]. That is a normal answer rather
+/// than a failure, so screens show their empty state instead of an error.
+class DevotionalDay {
+  final String date;
+  final bool isToday;
+  final Devotional? entry;
+  final List<Devotional> recent;
+
+  const DevotionalDay({required this.date, required this.isToday, this.entry, this.recent = const []});
+
+  factory DevotionalDay.fromJson(Map<String, dynamic> json) {
+    final entry = json['data'] as Map<String, dynamic>?;
+    return DevotionalDay(
+      date: json['date'] as String? ?? '',
+      isToday: json['is_today'] as bool? ?? false,
+      entry: entry != null ? Devotional.fromJson(entry) : null,
+      recent: (json['recent'] as List<dynamic>? ?? [])
+          .map((e) => Devotional.fromJson(e as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+}

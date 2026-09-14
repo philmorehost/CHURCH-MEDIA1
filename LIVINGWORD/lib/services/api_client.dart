@@ -40,6 +40,20 @@ class ApiClient {
     return (json['data'] as List<dynamic>? ?? []).map((e) => Category.fromJson(e as Map<String, dynamic>)).toList();
   }
 
+  /// Today's devotional, or another day's when [date] is given as Y-m-d.
+  ///
+  /// [unit] is the church the reader follows. Passing it makes that church's own entry win over
+  /// the church-wide one, the same rule the website applies; leaving it out asks the same
+  /// question the website asks.
+  Future<DevotionalDay> fetchDevotional({String? date, String? unit, int limit = 14}) async {
+    final json = await _get('/api/devotional', {
+      'date': date,
+      'unit': unit,
+      'limit': limit,
+    });
+    return DevotionalDay.fromJson(json);
+  }
+
   Future<({List<Post> posts, bool hasMore})> fetchFeed({int page = 1, String? category, String? unit, bool saved = false}) async {
     final json = await _get('/api/feed', {
       'page': page,

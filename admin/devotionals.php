@@ -18,6 +18,10 @@ declare(strict_types=1);
  * The daily notification is scheduled from here too: whether it is switched on, when today's went
  * out, and the exact cron line. The send itself lives in cli/devotional_worker.php, because cron
  * is the only thing running when nobody is looking at a screen.
+ *
+ * A new entry can be started from a sermon, which copies its title, reference and notes in and
+ * remembers the link in `sermon_id` — most devotionals come from a message someone already
+ * preached, so typing it out again is the part worth removing.
  */
 
 Auth::requireRole('admin', 'editor');
@@ -31,6 +35,9 @@ $errors = array();
 
 $assignableUnits = Unit::assignableScope($user);
 $unitLabels = Unit::labelsById();
+// The same scoping the Sermons screen uses, so a scoped admin is never offered another church's
+// titles as a source to copy from.
+$sermonScope = Unit::scopeClause($user, 'org_unit_id');
 
 // Which month the grid is showing. Anything unparseable falls back to this month rather than
 // erroring — a hand-edited URL should not produce a blank screen.
@@ -83,6 +90,7 @@ if (in_array($action, array('create', 'edit'), true) && $_SERVER['REQUEST_METHOD
         'scripture_text' => (string) ($_POST['scripture_text'] ?? ''),
         'body' => (string) ($_POST['body'] ?? ''),
         'is_published' => !empty($_POST['is_published']),
+        'sermon_id' => (int) ($_POST['sermon_id'] ?? 0),
         'created_by' => (int) ($user['id'] ?? 0),
     ));
 
@@ -147,7 +155,31 @@ if ($action === 'edit') {
         'org_unit_id' => $myUnitId,
         'is_published' => 1,
         'can_manage' => true,
+        'sermon_id' => 0,
     );
+
+    // "Start from a sermon": seed the draft from a message the church already has, which is where
+    // most devotionals come from anyway. The id is carried through to the save so the two stay
+    // linked, and the admin edits whatever the copy does not fit.
+    $fromSermon = (int) ($_GET['from_sermon'] ?? 0);
+    if ($fromSermon > 0) {
+        $sql = 'SELECT id, title, scripture_ref, description FROM sermons WHERE id = ?';
+        if ($sermonScope !== '') {
+            $sql .= ' AND ' . $sermonScope;
+        }
+        $statement = $pdo->prepare($sql . ' LIMIT 1');
+        $statement->execute(array($fromSermon));
+        $sermon = $statement->fetch();
+        if ($sermon) {
+            $editing['title'] = (string) $sermon['title'];
+            $editing['scripture_reference'] = (string) ($sermon['scripture_ref'] ?? '');
+            $editing['body'] = trim((string) ($sermon['description'] ?? ''));
+            $editing['sermon_id'] = (int) $sermon['id'];
+        } else {
+            // Says so rather than silently opening blank, which would read as the button not working.
+            flash('error', 'That sermon was not found, so this devotional starts empty.');
+        }
+    }
 }
 
 // `false` for published-only, so drafts appear in the grid: an unpublished entry the admin
@@ -155,6 +187,17 @@ if ($action === 'edit') {
 $entries = Devotional::month($gridYear, $gridMonth, $isSuper ? Devotional::ALL_UNITS : $myUnitId, false);
 $daysInMonth = (int) date('t', strtotime($monthStart));
 $today = date('Y-m-d');
+
+// Messages a devotional can be started from. Only needed on the create form, so it is not queried
+// for the month grid.
+$sermonOptions = array();
+if ($action === 'create') {
+    $sql = 'SELECT id, title, published_at FROM sermons WHERE is_published = 1';
+    if ($sermonScope !== '') {
+        $sql .= ' AND ' . $sermonScope;
+    }
+    $sermonOptions = $pdo->query($sql . ' ORDER BY published_at DESC LIMIT 60')->fetchAll();
+}
 
 $pageTitle = 'Daily Devotionals';
 $activeNav = 'devotionals';
@@ -185,8 +228,31 @@ require __DIR__ . '/partials/layout-open.php';
       <?php endif; ?>
     </h2>
 
+    <?php if ($isNew && $sermonOptions): ?>
+      <form method="get" action="/admin/devotionals" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin:0 0 16px 0;padding:12px 14px;border:1px dashed rgba(0,0,0,0.18);border-radius:10px;">
+        <input type="hidden" name="action" value="create">
+        <input type="hidden" name="month" value="<?= e($monthStart) ?>">
+        <input type="hidden" name="date" value="<?= e((string) $editing['publish_on']) ?>">
+        <label style="display:block;flex:1;min-width:260px;">
+          <span style="display:block;font-size:12px;opacity:0.7;margin-bottom:3px;">Start from a sermon — copies its title, reference and notes in as a first draft</span>
+          <select name="from_sermon" style="width:100%;">
+            <option value="">Choose a sermon…</option>
+            <?php foreach ($sermonOptions as $option): ?>
+              <option value="<?= (int) $option['id'] ?>" <?= (int) ($editing['sermon_id'] ?? 0) === (int) $option['id'] ? 'selected' : '' ?>><?= e((string) $option['title']) ?> · <?= e(date('j M Y', strtotime((string) $option['published_at']))) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </label>
+        <button class="btn sm secondary" type="submit">Use this sermon</button>
+      </form>
+    <?php endif; ?>
+
     <form method="post" action="/admin/devotionals?action=<?= $isNew ? 'create' : 'edit' ?><?= $isNew ? '' : '&amp;id=' . (int) $editing['id'] ?>">
       <?= Csrf::field() ?>
+      <input type="hidden" name="sermon_id" value="<?= (int) ($editing['sermon_id'] ?? 0) ?>">
+
+      <?php if ((int) ($editing['sermon_id'] ?? 0) > 0): ?>
+        <p style="margin:0 0 12px 0;font-size:12.5px;opacity:0.75;">Started from a sermon — the link is kept on the entry.</p>
+      <?php endif; ?>
 
       <div class="btn-row" style="flex-wrap:wrap;gap:16px;align-items:flex-end;">
         <label style="display:block;">
