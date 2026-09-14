@@ -60,6 +60,11 @@ class MemberAuth
                 ->execute([password_hash($password, PASSWORD_ARGON2ID), (int) $member['id']]);
         }
 
+        // Adopt the bookmarks this browser made before the account existed, so the saved
+        // list does not start empty on the day somebody registers. Idempotent, and it
+        // never touches a row that already belongs to someone else.
+        MemberActivity::claimFor((int) $member['id'], Fingerprint::hash(), (string) $member['email']);
+
         self::login((int) $member['id']);
         return true;
     }

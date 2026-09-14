@@ -286,8 +286,10 @@ CREATE TABLE IF NOT EXISTS `post_saves` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `media_post_id` INT NOT NULL,
   `fingerprint_hash` VARCHAR(64) NOT NULL,
+  `member_id` INT NULL COMMENT 'Set once the anonymous saver signs in, so bookmarks survive a change of device',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY `uniq_save_post_fingerprint` (`media_post_id`, `fingerprint_hash`),
+  INDEX `idx_save_member` (`member_id`),
   FOREIGN KEY (`media_post_id`) REFERENCES `media_posts`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -617,6 +619,7 @@ CREATE TABLE IF NOT EXISTS `donations` (
   `donor_name` VARCHAR(150) NULL,
   `donor_email` VARCHAR(255) NULL,
   `donor_phone` VARCHAR(50) NULL,
+  `member_id` INT NULL COMMENT 'Set when the donor is signed in, or adopted later by matching donor_email',
   `category` VARCHAR(100) NOT NULL DEFAULT 'Tithe',
   `amount` DECIMAL(12,2) NOT NULL,
   `currency` VARCHAR(10) NOT NULL DEFAULT 'NGN',
@@ -630,6 +633,7 @@ CREATE TABLE IF NOT EXISTS `donations` (
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX `idx_donation_status` (`payment_status`, `payment_method`),
   INDEX `idx_donation_category` (`category`),
+  INDEX `idx_donation_member` (`member_id`, `payment_status`),
   FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

@@ -1351,11 +1351,21 @@ $router->get('/member', function () {
         MemberAuth::logout();
         redirect('/member/login');
     }
+    $memberId = (int) $member['id'];
+    $email = (string) $member['email'];
+
     render('member/dashboard', [
         'metaTitle' => 'My account',
         'metaRobots' => 'noindex, nofollow',
         'member' => $member,
         'prefs' => Member::preferences($member),
+        // The reads take the current fingerprint and email alongside the member id, so
+        // activity from this browser appears straight away rather than at the next
+        // sign-in when the claim runs.
+        'saved' => MemberActivity::savedPosts($memberId, Fingerprint::hash(), 24),
+        'giving' => MemberActivity::givingHistory($memberId, $email, 25),
+        'totals' => MemberActivity::givingTotals($memberId, $email),
+        'homeCell' => Member::homeCell($member),
     ]);
 });
 
@@ -1395,6 +1405,32 @@ $router->post('/member', function () {
             flash($sent ? 'member_notice' : 'member_error', $sent
                 ? 'A fresh confirmation link is on its way.'
                 : 'We could not send that email — please ask an admin to check the mail settings.');
+            break;
+
+        case 'homecell':
+            // Typed rather than picked from a dropdown: this organisation has hundreds of
+            // units, and a select listing them all is unusable on a phone. Phase 6's cell
+            // finder (meeting day, address, nearest-to-me) is what replaces this.
+            $typed = Unit::nameFor((string) ($_POST['unit_name'] ?? ''));
+
+            if ($typed === '') {
+                Member::setHomeCell($memberId, null);
+                flash('member_notice', 'Your home church has been cleared.');
+                break;
+            }
+
+            $unit = Unit::findByNameAnywhere($typed);
+            if ($unit === null) {
+                flash('member_error', 'We could not find a church called "' . $typed . '". Check the spelling, or ask an admin to add it.');
+                break;
+            }
+
+            if (!Member::setHomeCell($memberId, (int) $unit['id'])) {
+                flash('member_error', 'That name matches a group rather than one church. Please type the church itself.');
+                break;
+            }
+
+            flash('member_notice', 'Your home church is saved.');
             break;
     }
 

@@ -282,6 +282,33 @@ class Member
             ->execute(array(trim($name), self::normalisePhone($phone), $smsConsent ? 1 : 0, $waConsent ? 1 : 0, $memberId));
     }
 
+    /**
+     * Sets or clears the member's home church.
+     *
+     * Only a leaf unit is accepted — "my home cell" pointing at a whole province would
+     * be meaningless, and the picker is built from `Unit::assignableScope()` anyway.
+     */
+    public static function setHomeCell(int $memberId, ?int $unitId): bool
+    {
+        if ($unitId !== null) {
+            $unit = Unit::find($unitId);
+            if ($unit === null || $unit['type'] !== Unit::leafType()) {
+                return false;
+            }
+        }
+        Database::getInstance()->getConnection()
+            ->prepare('UPDATE members SET org_unit_id = ? WHERE id = ?')
+            ->execute(array($unitId, $memberId));
+        return true;
+    }
+
+    /** The member's home church row, or null when they have not chosen one. */
+    public static function homeCell(array $member): ?array
+    {
+        $unitId = (int) ($member['org_unit_id'] ?? 0);
+        return $unitId > 0 ? Unit::find($unitId) : null;
+    }
+
     private static function newToken(): string
     {
         return bin2hex(random_bytes(32));

@@ -85,6 +85,85 @@ $verified = !empty($member['is_verified']);
       <button type="submit" class="form-submit"><span>Save Details</span></button>
     </form>
 
+    <h2 class="form-title" style="font-size:18px;margin:26px 0 6px;">My home church</h2>
+    <?php if ($homeCell): ?>
+      <p class="form-desc">
+        You are at home in <strong><?= e((string) $homeCell['name']) ?></strong>.
+        <?php if (!empty($homeCell['slug'])): ?>
+          <a href="/unit/<?= e((string) $homeCell['slug']) ?>">Visit its page</a>.
+        <?php endif; ?>
+      </p>
+    <?php else: ?>
+      <p class="form-desc">Tell us where you worship and we will keep you posted about that cell.</p>
+    <?php endif; ?>
+
+    <form method="post" action="/member">
+      <?= Csrf::field() ?>
+      <input type="hidden" name="do" value="homecell">
+      <div class="form-field">
+        <label class="form-label" for="unit_name">Home church</label>
+        <input type="text" id="unit_name" name="unit_name" value="<?= e((string) ($homeCell['name'] ?? '')) ?>" placeholder="Type its name as it appears in the church list">
+        <small style="opacity:0.7;">Leave this blank and save to clear it.</small>
+      </div>
+      <button type="submit" class="form-submit"><span>Save Home Church</span></button>
+    </form>
+
+    <h2 class="form-title" style="font-size:18px;margin:26px 0 6px;">My giving</h2>
+    <?php if ($totals): ?>
+      <p class="form-desc">
+        <?php foreach ($totals as $i => $total): ?><?= $i > 0 ? ' &middot; ' : '' ?><strong><?= e((string) $total['currency']) ?> <?= e(number_format((float) $total['total'], 2)) ?></strong> across <?= (int) $total['gifts'] ?> gift<?= (int) $total['gifts'] === 1 ? '' : 's' ?><?php endforeach; ?>
+      </p>
+    <?php endif; ?>
+
+    <?php if (!$giving): ?>
+      <p class="form-desc">
+        No completed gifts are recorded against <?= e((string) $member['email']) ?> yet.
+        Gifts given with a different email address will not appear here — ask an admin if something is missing.
+      </p>
+    <?php else: ?>
+      <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:14px;">
+          <thead>
+            <tr style="text-align:left;">
+              <th style="padding:6px 8px 6px 0;">Date</th>
+              <th style="padding:6px 8px;">For</th>
+              <th style="padding:6px 8px;">Amount</th>
+              <th style="padding:6px 8px;">Method</th>
+              <th style="padding:6px 0;">Reference</th>
+            </tr>
+          </thead>
+          <tbody>
+            <?php foreach ($giving as $gift): ?>
+              <tr style="border-top:1px solid rgba(0,0,0,0.08);">
+                <td style="padding:8px 8px 8px 0;white-space:nowrap;"><?= e(date('j M Y', strtotime((string) $gift['created_at']))) ?></td>
+                <td style="padding:8px;"><?= e((string) $gift['category']) ?></td>
+                <td style="padding:8px;white-space:nowrap;"><?= e((string) $gift['currency']) ?> <?= e(number_format((float) $gift['amount'], 2)) ?></td>
+                <td style="padding:8px;"><?= $gift['payment_method'] === 'manual_bank' ? 'Bank transfer' : 'Online' ?></td>
+                <td style="padding:8px 0;font-family:monospace;font-size:12px;"><?= e((string) ($gift['payment_reference'] ?? '')) ?: '&mdash;' ?></td>
+              </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
+    <?php endif; ?>
+
+    <h2 class="form-title" style="font-size:18px;margin:26px 0 6px;">Saved for later</h2>
+    <?php if (!$saved): ?>
+      <p class="form-desc">Nothing saved yet. Tap the bookmark on anything in the <a href="/feed">feed</a> and it will be waiting here.</p>
+    <?php else: ?>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:14px;">
+        <?php foreach ($saved as $item): ?>
+          <a href="/feed" style="text-decoration:none;color:inherit;display:block;">
+            <?php if (!empty($item['thumb'])): ?>
+              <img src="<?= e((string) uploadUrl((string) $item['thumb'])) ?>" alt="" style="width:100%;aspect-ratio:9/16;object-fit:cover;border-radius:10px;display:block;">
+            <?php endif; ?>
+            <div style="font-size:13px;margin-top:6px;line-height:1.35;"><?= e(mb_substr(trim((string) ($item['caption'] ?? '')), 0, 70)) ?></div>
+            <div style="font-size:11px;opacity:0.6;margin-top:2px;">Saved <?= e(date('j M Y', strtotime((string) $item['saved_at']))) ?></div>
+          </a>
+        <?php endforeach; ?>
+      </div>
+    <?php endif; ?>
+
     <h2 class="form-title" style="font-size:18px;margin:26px 0 6px;">What we may notify you about</h2>
     <div class="form-desc">Turn off anything you would rather not hear about. Announcements from the church are not affected.</div>
 

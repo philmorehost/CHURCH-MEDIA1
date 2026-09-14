@@ -1643,21 +1643,21 @@ class Database
                 self::dropColumnIfExists($pdo, 'settings', 'wa_bridge_token');
             },
 
-            // Member accounts — the first visitor-facing logins in this project.
-            //
-            // Deliberately NOT the `users` table. `users` is staff: every admin screen, role
-            // check and SMS/WhatsApp audience resolves against it, and a member is a different
-            // thing with a different lifecycle. Merging the two would mean every future
-            // `WHERE role IN (...)` had to remember to exclude members.
-            //
-            // `tenant_id` is NOT NULL DEFAULT 0, unlike the NULL used by `settings`, because
-            // NULL would break the `(tenant_id, email)` uniqueness below — MySQL treats every
-            // NULL as distinct, so the same address could register twice on the default church.
-            // 0 simply means "no tenant resolved", and reads and writes both go through
-            // `MemberAuth::tenantKey()`, so the value on a row always matches what login looks
-            // for. This is what makes membership per-church: a Grace & Life member cannot sign
-            // in on the Living Word site.
             '2026_25_members' => function (PDO $pdo): void {
+                // Member accounts — the first visitor-facing logins in this project.
+                //
+                // Deliberately NOT the `users` table. `users` is staff: every admin screen, role
+                // check and SMS/WhatsApp audience resolves against it, and a member is a different
+                // thing with a different lifecycle. Merging the two would mean every future
+                // `WHERE role IN (...)` had to remember to exclude members.
+                //
+                // `tenant_id` is NOT NULL DEFAULT 0, unlike the NULL used by `settings`, because
+                // NULL would break the `(tenant_id, email)` uniqueness below — MySQL treats every
+                // NULL as distinct, so the same address could register twice on the default church.
+                // 0 simply means "no tenant resolved", and reads and writes both go through
+                // `MemberAuth::tenantKey()`, so the value on a row always matches what login looks
+                // for. This is what makes membership per-church: a Grace & Life member cannot sign
+                // in on the Living Word site.
                 $pdo->exec("CREATE TABLE IF NOT EXISTS `members` (
                     `id` INT AUTO_INCREMENT PRIMARY KEY,
                     `tenant_id` INT NOT NULL DEFAULT 0 COMMENT '0 = no tenant resolved; otherwise Tenant::id()',
@@ -1686,6 +1686,24 @@ class Database
                     INDEX `idx_member_reset` (`reset_token_hash`),
                     FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+            },
+
+            // Links anonymous activity to a member account.
+            //
+            // `post_saves` was keyed only by a browser fingerprint and `donations` only by
+            // donor email, so a signed-in member could see neither their bookmarks nor their
+            // giving history. Both gain a nullable `member_id`.
+            //
+            // Claiming happens at sign-in (`MemberActivity::claimFor()`), which also adopts
+            // whatever this browser saved or gave before the account existed — the usual
+            // "sign in and keep your saves" behaviour. Anonymous visitors are unaffected: the
+            // columns stay NULL until somebody signs in.
+            '2026_26_member_activity' => function (PDO $pdo): void {
+                self::addColumnIfMissing($pdo, 'post_saves', 'member_id', 'INT NULL', 'fingerprint_hash');
+                self::addIndexIfMissing($pdo, 'post_saves', 'idx_save_member', 'INDEX `idx_save_member` (`member_id`)');
+
+                self::addColumnIfMissing($pdo, 'donations', 'member_id', 'INT NULL', 'donor_phone');
+                self::addIndexIfMissing($pdo, 'donations', 'idx_donation_member', 'INDEX `idx_donation_member` (`member_id`, `payment_status`)');
             },
         ];
     }

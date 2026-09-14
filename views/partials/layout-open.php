@@ -58,6 +58,10 @@ $navTree = [
             ['href' => '/contact', 'label' => 'Contact'],
             ['href' => '/advertise', 'label' => 'Advertise With Us'],
             ['href' => '/register', 'label' => 'Register'],
+            // One link for both states on purpose: /member/login redirects a signed-in
+            // member straight to /member, so this never says "Sign In" to somebody who
+            // already is — and the partial never has to touch the session to know.
+            ['href' => '/member/login', 'label' => 'Sign In'],
         ],
     ],
 ];
