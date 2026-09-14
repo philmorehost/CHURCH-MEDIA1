@@ -65,7 +65,7 @@
 | **4** | WhatsApp channel | Official Cloud API integration (templates, 24-h window, webhooks) | 5–7 sessions | Per-conversation | ✅ closed (4.1–4.3; 4.4 rejected) |
 | **5** | Members & daily engagement | Member accounts, daily devotional, Bible reading plans + streaks, offline sermon downloads | 10–12 sessions | None | ✅ shipped (S1–S6) |
 | **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ✅ **complete** — 6a–6g shipped |
-| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings), 7b shipped (an account belongs to one church) |
+| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings), 7b shipped (an account belongs to one church), 7c shipped (a unit belongs to one church) |
 
 **Confirmed 2026-09-12:** multi-tenant **SaaS is a real goal**. That is why **Phase 0
 (tenancy foundation) runs before everything else** — the SMS token, sender IDs, country
@@ -1343,15 +1343,87 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > that can lock a live site out — so it is recorded here for a deliberate pass rather than touched in
 > this one.
 
-> **Not built yet in Phase 7:** a church admin still cannot edit its own branding — `admin/settings.php`
-> is super-admin only, and letting one in needs a decision about which fields are theirs (name, logo,
-> service times) and which belong to the platform (SMTP, the Payment Gateway, SMS credentials, backups,
-> the licence key). Also `org_units` has no `tenant_id`, so the unit hierarchy — and with it the unit
-> pickers on this screen, plus `admin/notifications.php`, `core/Notifier.php`, and the SMS address-book
-> source in `core/SmsContacts.php`, which all select staff *by unit* — is still shared between churches.
-> That is the next stage, because units are how admin scope is expressed and every one of those reads
-> inherits the same gap. Then self-service tenant provisioning with plan limits, per-tenant upload/cache
-> namespacing, and tenant-scoped analytics and reporting.
+> **7c shipped — an organisational unit belongs to one church.** The matching half of 7b, and the wider
+> of the two: `org_units` was the other table the SaaS work never reached.
+>
+> **Why it mattered more than it sounds.** Units *are* admin scope — `Unit::scopeClause()` compares
+> `org_unit_id`, `Unit::all()` feeds every picker, and `Unit::tree()` feeds the public site. While a
+> unit belonged to nobody, on an installation serving two churches:
+>   - the unit pickers on Users, Media, Events, Sermons, Prayer, Forms, Team and Newsletter offered
+>     every church's units;
+>   - `admin/units.php` listed, and could rename or **delete**, any church's hierarchy —
+>     `Unit::delete()` took a bare id straight from the form with no check at all, and a delete cascades
+>     to the children below it;
+>   - `/unit/{slug}` and the app's `/api/unit`, `/api/feed`, `/api/media`, `/api/devices` and
+>     `/api/devotional` each resolved a slug from the query string with no church filter, so one
+>     church's unit page and app feed could be served on the other's site;
+>   - the public home-cell finder, the units index and the public testimony form showed both churches';
+>   - `HomeCell::save()` wrote cell details — including a leader's name and number — onto any unit by id;
+>   - and the staff-by-unit reads (`SmsContacts`'s team source, `admin/notifications.php`) spanned
+>     everyone, because the unit list they were filtered by was itself shared. `SmsContacts`'s team
+>     source was the one staff read with no unit filter in its SQL at all, so that one is fixed by
+>     adding the church to the query rather than by the unit work.
+>
+> **The fix.** Migration `2026_39_unit_tenants` adds `org_units.tenant_id` (`INT NOT NULL DEFAULT 0`,
+> indexed) and backfills 0 → the church the site actually serves, using `Tenant::resolve()`'s own order
+> exactly as `2026_38_user_tenants` does, and leaving the rows at 0 when nothing is active.
+> `core/Unit.php` then filters `all()`, `find()`, `byType()`, `children()`, `findByName()` and
+> `findByNameAnywhere()` by the church being served, stamps `create()`, and carries
+> `AND tenant_id = ?` on the `UPDATE` and `DELETE` statements themselves rather than only on the check
+> before them. Because `tree()`, `treeLight()`, `labelsById()` and `subtreeIds()` all sit on `all()`, and
+> `ancestors()`/`path()`/`label()` sit on `find()`, ~85 call sites across 38 files came along untouched.
+>
+> **One new method replaced six hand-written filters.** `Unit::findBySlug()` is now the only place a
+> slug becomes a unit, because a slug is not an identifier: `org_units.slug` carries a global UNIQUE
+> key, so it identifies a row without saying whose it is.
+>
+> **Two worker fallbacks had to name a church explicitly.** `SmsRunner`'s "a campaign with no church,
+> so tell everyone" and `cli/sms_sender_check.php`'s equivalent were `Unit::all()` inside a cron, where
+> there is no host to resolve from and the ambient church is always the default one. Both now use the
+> row's own church through the new `Unit::allForTenant()` — narrower and more correct at once.
+>
+> **`unit_levels` stays shared, deliberately.** It names the *shape* of the hierarchy, not the units in
+> it, and both the count shown for "can I delete this level?" and the refusal in `levelDelete()` are
+> platform-wide on purpose: a per-church count would show 0 and then refuse the delete.
+>
+> **A real bug the harness found, not the feature work.** `Unit::update()`'s cycle check read
+> `in_array($id, subtreeIds($parentId))`, which is true for **every ordinary edit**, because a unit is
+> always a descendant of the parent it already has. So the Units editor refused to rename anything
+> unless its parent changed too, with the message "a unit cannot be nested inside itself or one of its
+> own children". Reversed to `in_array($parentId, subtreeIds($id))`: the guard now refuses what it is
+> for — a unit becoming its own descendant — and allows the rename. Only `admin/units.php` calls it, so
+> the blast radius is exactly the screen that was broken.
+>
+> **Verified:** 74 domain assertions and 50 HTTP assertions. The domain half covers the column and the
+> index, `schema.sql` mirroring both, the backfill, and every read and write in both directions —
+> `all`/`find`/`byType`/`children`/`findByName`/`findByNameAnywhere`/`subtreeIds`/`labelsById`/`tree`,
+> `create`/`update`/`delete`, and `HomeCell::all`/`find`/`save`/`published` — including a unit stamped 0
+> being invisible everywhere. The HTTP half drives real screens over a socket with a chosen `Host:`
+> header: the cell finder, the units index, `/unit/{slug}`, `/api/unit`, `/api/cells`, the Units and
+> Users screens and both pickers, on both churches' hosts — and for rename and delete, that the action
+> **is** refused across the boundary while the same request succeeds on the admin's own unit. Both
+> cross-church write attempts are structurally valid requests, so the church is the only thing that can
+> refuse them; the first version of the harness aimed an invalid one and proved nothing.
+>
+> **Not verified:** no browser again, so that the pages respond correctly is established but that they
+> look right is not, and no second church exists in production. Everything ran against fixtures on the
+> local database, snapshotted and restored exactly (2 units, 1 church, 1 account, 1 ip rule before and
+> after) with the harness asserting that its own restore landed.
+>
+> **One consequence to know about.** `org_units.slug` is still globally unique, so two churches cannot
+> both own `grace-zone` — the second silently gets `grace-zone-2` from the `uniqueSlug()` loop. Making
+> slugs per-church means changing that key, which is its own job.
+
+> **Not built yet in Phase 7:** letting a church admin edit its own branding (`admin/settings.php` is
+> super-admin only, and letting one in needs a decision about which fields are theirs — name, logo,
+> service times — and which belong to the platform: SMTP, the Payment Gateway, SMS credentials, backups
+> and the licence key). **And the cron workers only serve one church:** a worker has no host to resolve
+> from, so `Tenant::id()` is the default church on every CLI run, which means `Devotional`,
+> `GivingCampaign` and the roster and follow-up workers already act on the default church alone. Where a
+> worker is holding a row of its own — a campaign, a sender id — it now names that church, but the
+> general fix is to loop the workers per tenant, and that is unbuilt. Then self-service tenant
+> provisioning with plan limits, per-tenant upload/cache namespacing, and tenant-scoped analytics and
+> reporting.
 
 - **Multi-tenant SaaS** — *the foundation is already built in Phase 0*. Phase 7 finishes the
   job: tenant-aware settings UI, per-tenant branding (logo, colours, domain) applied across

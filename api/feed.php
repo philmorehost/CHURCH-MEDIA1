@@ -28,9 +28,8 @@ if ($savedOnly) {
 }
 if ($unitSlug !== '') {
     // Filter to a unit and everything under it (a zone shows its areas + parishes).
-    $unitStmt = $pdo->prepare('SELECT id FROM org_units WHERE slug = ? LIMIT 1');
-    $unitStmt->execute([$unitSlug]);
-    $unitId = (int) $unitStmt->fetchColumn();
+    $found = Unit::findBySlug($unitSlug);
+    $unitId = $found !== null ? (int) $found['id'] : 0;
     if ($unitId > 0) {
         $unitIds = Unit::subtreeIds($unitId);
         $in = [];

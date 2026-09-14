@@ -10,6 +10,14 @@ declare(strict_types=1);
  * a parish uniquely determines its full ancestor chain, so posts only need to
  * be tagged with a parish (`media_posts.org_unit_id`) and every roll-up
  * (zone / area / province) is derived by walking up.
+ *
+ * Since 2026_39 a unit carries `tenant_id` and belongs to exactly one church, and every read here
+ * is scoped to the church being served. That matters because units are how admin scope is expressed
+ * (`scopeClause()`): while a unit belonged to nobody, every picker, count, tree and walk in the
+ * admin area — and the public home-cell finder and unit pages — spanned the whole platform.
+ *
+ * `unit_levels` (the level *definitions*) is deliberately still shared: it names the shape of the
+ * hierarchy, not the units in it, and it is edited only by the platform owner.
  */
 class Unit
 {
@@ -18,6 +26,18 @@ class Unit
     private static function db(): PDO
     {
         return self::$pdo ??= Database::getInstance()->getConnection();
+    }
+
+    /**
+     * The church whose units are being read. 0 when nothing resolves, which is how rows are stamped,
+     * so an unstamped unit is invisible rather than visible everywhere.
+     *
+     * A background worker has no host to resolve from and gets the default church; where a worker has
+     * a row of its own to go on it should name that church explicitly with `allForTenant()` instead.
+     */
+    private static function tenantId(): int
+    {
+        return (class_exists('Tenant') ? Tenant::id() : null) ?? 0;
     }
 
     /** Fallback hierarchy used when `unit_levels` is missing or empty. */
@@ -215,6 +235,10 @@ class Unit
     /** Level rows with their depth and how many units use them (Unit Levels admin). */
     public static function levelsWithCounts(): array
     {
+        // Counted across every church on purpose: this number answers "can I delete this level?", and
+        // `levelDelete()` refuses while ANY church still has a unit of that type. Counting only the
+        // church being served would show 0 and then refuse the delete. `unit_levels` is shared, not
+        // per-church, so both are the platform owner's business.
         $counts = [];
         foreach (self::db()->query('SELECT type, COUNT(*) AS n FROM org_units GROUP BY type')->fetchAll() as $r) {
             $counts[(string) $r['type']] = (int) $r['n'];
@@ -334,28 +358,62 @@ class Unit
 
     public static function all(string $order = 'sort_order ASC, name ASC'): array
     {
-        return self::db()->query("SELECT * FROM org_units ORDER BY {$order}")->fetchAll();
+        return self::allForTenant(self::tenantId(), $order);
+    }
+
+    /**
+     * Every unit of ONE named church, ignoring the church this request is serving.
+     *
+     * For a background worker, which has no host to resolve from: a cron that is holding a campaign,
+     * a sender id or any other row should ask for that row's church rather than the default one.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function allForTenant(int $tenantId, string $order = 'sort_order ASC, name ASC'): array
+    {
+        $stmt = self::db()->prepare("SELECT * FROM org_units WHERE tenant_id = ? ORDER BY {$order}");
+        $stmt->execute([$tenantId]);
+        return $stmt->fetchAll();
     }
 
     public static function find(int $id): ?array
     {
-        $stmt = self::db()->prepare('SELECT * FROM org_units WHERE id = ?');
-        $stmt->execute([$id]);
+        $stmt = self::db()->prepare('SELECT * FROM org_units WHERE id = ? AND tenant_id = ?');
+        $stmt->execute([$id, self::tenantId()]);
         return $stmt->fetch() ?: null;
     }
 
     public static function byType(string $type): array
     {
-        $stmt = self::db()->prepare('SELECT * FROM org_units WHERE type = ? ORDER BY name ASC');
-        $stmt->execute([$type]);
+        $stmt = self::db()->prepare('SELECT * FROM org_units WHERE type = ? AND tenant_id = ? ORDER BY name ASC');
+        $stmt->execute([$type, self::tenantId()]);
         return $stmt->fetchAll();
+    }
+
+    /**
+     * Find a unit by its slug, within the church being served.
+     *
+     * A slug is not an identifier. `org_units.slug` carries a global UNIQUE key, so `?slug=grace-zone`
+     * identifies a row but says nothing about whose it is — five public and app routes took a slug
+     * straight from the query string, and every one of them could hand back another church's unit.
+     * They all come through here now, so the church filter cannot be left out of one of them.
+     */
+    public static function findBySlug(string $slug): ?array
+    {
+        $slug = trim($slug);
+        if ($slug === '') {
+            return null;
+        }
+        $stmt = self::db()->prepare('SELECT * FROM org_units WHERE slug = ? AND tenant_id = ? LIMIT 1');
+        $stmt->execute([$slug, self::tenantId()]);
+        return $stmt->fetch() ?: null;
     }
 
     /** Direct children of a unit, ordered. */
     public static function children(int $parentId): array
     {
-        $stmt = self::db()->prepare('SELECT * FROM org_units WHERE parent_id = ? ORDER BY name ASC');
-        $stmt->execute([$parentId]);
+        $stmt = self::db()->prepare('SELECT * FROM org_units WHERE parent_id = ? AND tenant_id = ? ORDER BY name ASC');
+        $stmt->execute([$parentId, self::tenantId()]);
         return $stmt->fetchAll();
     }
 
@@ -548,15 +606,17 @@ class Unit
         return mb_strtoupper(trim($name));
     }
 
-    /** Find a unit by (case-insensitive) name + type + parent. */
+    /** Find a unit by (case-insensitive) name + type + parent, within the church being served. */
     public static function findByName(string $type, string $name, ?int $parentId): ?array
     {
-        $sql = 'SELECT * FROM org_units WHERE type = ? AND UPPER(name) = UPPER(?) AND parent_id ' . ($parentId === null ? 'IS NULL' : '= ?') . ' ORDER BY id ASC LIMIT 1';
+        $sql = 'SELECT * FROM org_units WHERE type = ? AND UPPER(name) = UPPER(?) AND parent_id '
+            . ($parentId === null ? 'IS NULL' : '= ?') . ' AND tenant_id = ? ORDER BY id ASC LIMIT 1';
         $stmt = self::db()->prepare($sql);
         $params = [$type, $name];
         if ($parentId !== null) {
             $params[] = $parentId;
         }
+        $params[] = self::tenantId();
         $stmt->execute($params);
         return $stmt->fetch() ?: null;
     }
@@ -564,8 +624,8 @@ class Unit
     /** Find a unit with this name anywhere in the hierarchy (used for correction flags). */
     public static function findByNameAnywhere(string $name): ?array
     {
-        $stmt = self::db()->prepare('SELECT * FROM org_units WHERE UPPER(name) = UPPER(?) ORDER BY id ASC LIMIT 1');
-        $stmt->execute([$name]);
+        $stmt = self::db()->prepare('SELECT * FROM org_units WHERE UPPER(name) = UPPER(?) AND tenant_id = ? ORDER BY id ASC LIMIT 1');
+        $stmt->execute([$name, self::tenantId()]);
         return $stmt->fetch() ?: null;
     }
 
@@ -624,8 +684,8 @@ class Unit
         }
 
         $slug = self::uniqueSlug($name);
-        $stmt = self::db()->prepare('INSERT INTO org_units (parent_id, type, name, slug) VALUES (?, ?, ?, ?)');
-        $stmt->execute([$parentId, $type, $name, $slug]);
+        $stmt = self::db()->prepare('INSERT INTO org_units (parent_id, tenant_id, type, name, slug) VALUES (?, ?, ?, ?, ?)');
+        $stmt->execute([$parentId, self::tenantId(), $type, $name, $slug]);
         return ['id' => (int) self::db()->lastInsertId()];
     }
 
@@ -639,7 +699,12 @@ class Unit
         $type = in_array($type, self::types(), true) ? $type : $existing['type'];
         $expectedParent = self::parentType($type);
 
-        if ($parentId !== null && in_array($id, self::subtreeIds($parentId), true)) {
+        // The new parent must not be this unit or one of its own descendants — that is a cycle.
+        // The check used to read the other way round (`$id` inside `subtreeIds($parentId)`), which
+        // is true for every ordinary edit, because a unit is always a descendant of the parent it
+        // already has. So keeping a church under its existing parent was refused with "a unit cannot
+        // be nested inside itself", and renaming one was impossible unless the parent changed too.
+        if ($parentId !== null && in_array($parentId, self::subtreeIds($id), true)) {
             return ['errors' => ['A unit cannot be nested inside itself or one of its own children.']];
         }
         if ($expectedParent === null) {
@@ -659,19 +724,27 @@ class Unit
         }
 
         $slug = self::uniqueSlug($name, $id);
-        $stmt = self::db()->prepare('UPDATE org_units SET parent_id = ?, type = ?, name = ?, slug = ? WHERE id = ?');
-        $stmt->execute([$parentId, $type, $name, $slug, $id]);
+        // The church is on the statement, not only on the `find()` above it: the caller posts a bare
+        // id, and a where-clause is the one place a scope cannot be forgotten or raced past.
+        $stmt = self::db()->prepare('UPDATE org_units SET parent_id = ?, type = ?, name = ?, slug = ? WHERE id = ? AND tenant_id = ?');
+        $stmt->execute([$parentId, $type, $name, $slug, $id, self::tenantId()]);
         return ['id' => $id];
     }
 
     /** Delete a unit (children cascade; posts/users under it are set to NULL). */
     public static function delete(int $id): void
     {
-        self::db()->prepare('DELETE FROM org_units WHERE id = ?')->execute([$id]);
+        // Scoped for the same reason as update(): the id arrives straight from a form, and the
+        // children cascade, so an unscoped delete reaches two levels further than it looks.
+        self::db()->prepare('DELETE FROM org_units WHERE id = ? AND tenant_id = ?')->execute([$id, self::tenantId()]);
     }
 
     private static function uniqueSlug(string $name, ?int $ignoreId = null): string
     {
+        // Deliberately NOT scoped to the church: `org_units.slug` carries a global UNIQUE key, so a
+        // per-church check would hand two churches the same slug and the INSERT would then fail on a
+        // duplicate key. Two churches wanting the same parish name is normal, so the second one gets
+        // the "-2" suffix. Making slugs per-church means changing that key, which is its own job.
         $base = strtolower(trim((string) preg_replace('/[^a-zA-Z0-9]+/', '-', $name), '-')) ?: 'unit';
         $slug = $base;
         $i = 2;

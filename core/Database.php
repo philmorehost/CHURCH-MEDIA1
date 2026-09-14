@@ -334,6 +334,11 @@ class Database
                 self::addForeignKeyIfMissing($pdo, 'users', 'fk_users_org_unit', 'org_unit_id', 'org_units', 'id', 'SET NULL');
                 self::addForeignKeyIfMissing($pdo, 'media_posts', 'fk_media_posts_org_unit', 'org_unit_id', 'org_units', 'id', 'SET NULL');
                 if ((int) $pdo->query('SELECT COUNT(*) FROM org_units')->fetchColumn() === 0) {
+                    // These two seed units are written with no church (the column default, 0) because
+                    // this migration runs ahead of `2026_10_tenants` — the tenants table does not
+                    // exist yet on an upgrade. `2026_39_unit_tenants` runs later in the same pass and
+                    // stamps them, so they are visible on the first request after setup. Do not add a
+                    // tenant here: it would break the ordering on an upgraded site.
                     $pdo->prepare("INSERT INTO org_units (type, name, slug) VALUES ('province', ?, ?)")->execute(['Headquarters', 'headquarters']);
                     $provinceId = (int) $pdo->lastInsertId();
                     $pdo->prepare("INSERT INTO org_units (parent_id, type, name, slug) VALUES (?, 'parish', ?, ?)")->execute([$provinceId, 'Headquarters Parish', 'headquarters-parish']);
@@ -2194,6 +2199,41 @@ class Database
                     }
                 } catch (Throwable $e) {
                     // No tenants table yet — nothing to attribute the accounts to.
+                }
+            },
+
+            // Which church an organisational unit belongs to.
+            //
+            // `users` and `org_units` were the two tables the SaaS work never reached, and they are
+            // the pair that decides who may see what. `users.tenant_id` landed in 2026_38; this is
+            // the other half, and it was the wider one.
+            //
+            // Units are how admin scope is expressed (`Unit::scopeClause()` compares `org_unit_id`),
+            // so while a unit belonged to nobody, every screen that lists, picks, counts or walks
+            // units worked across the whole platform: the unit pickers on Users and on every content
+            // screen, the Units screen itself, the audience pickers behind notifications and SMS, the
+            // staff-by-unit reads that feed them, and the public home-cell finder and unit pages.
+            // The `users` half of that was closed in 7b; the units underneath it were not, so a
+            // church could still be shown, and scoped by, another church's hierarchy.
+            //
+            // 0 means "no church assigned", and no tenant resolves to 0, so a unit that somehow
+            // escaped assignment is visible nowhere rather than everywhere. The target follows
+            // `Tenant::resolve()`'s own order — default-if-active, else the lowest active — with 0
+            // left in place when nothing is active, exactly as 2026_38 does and for the same reason.
+            '2026_39_unit_tenants' => function (PDO $pdo): void {
+                self::addColumnIfMissing($pdo, 'org_units', 'tenant_id', "INT NOT NULL DEFAULT 0 COMMENT '0 = no church assigned; otherwise Tenant::id()'", 'parent_id');
+                self::addIndexIfMissing($pdo, 'org_units', 'idx_unit_tenant', 'INDEX `idx_unit_tenant` (`tenant_id`)');
+
+                try {
+                    $target = (int) $pdo->query('SELECT id FROM tenants WHERE is_default = 1 AND is_active = 1 ORDER BY id ASC LIMIT 1')->fetchColumn();
+                    if ($target === 0) {
+                        $target = (int) $pdo->query('SELECT id FROM tenants WHERE is_active = 1 ORDER BY id ASC LIMIT 1')->fetchColumn();
+                    }
+                    if ($target > 0) {
+                        $pdo->prepare('UPDATE org_units SET tenant_id = ? WHERE tenant_id = 0')->execute([$target]);
+                    }
+                } catch (Throwable $e) {
+                    // No tenants table yet — nothing to attribute the units to.
                 }
             },
         ];

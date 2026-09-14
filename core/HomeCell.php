@@ -37,6 +37,14 @@ final class HomeCell
     }
 
     /**
+     * The church whose cells are being read. 0 when nothing resolves, matching how units are stamped.
+     */
+    private static function tenantId(): int
+    {
+        return (class_exists('Tenant') ? Tenant::id() : null) ?? 0;
+    }
+
+    /**
      * Every leaf unit with its cell details, including the ones hidden from the public finder.
      * This is what the admin grid lists.
      *
@@ -44,8 +52,8 @@ final class HomeCell
      */
     public static function all(): array
     {
-        $stmt = self::db()->prepare('SELECT * FROM org_units WHERE type = ? ORDER BY name ASC');
-        $stmt->execute([Unit::leafType()]);
+        $stmt = self::db()->prepare('SELECT * FROM org_units WHERE type = ? AND tenant_id = ? ORDER BY name ASC');
+        $stmt->execute([Unit::leafType(), self::tenantId()]);
         $leaves = $stmt->fetchAll();
         if (!$leaves) {
             return [];
@@ -87,8 +95,9 @@ final class HomeCell
 
     public static function find(int $id): ?array
     {
-        $stmt = self::db()->prepare('SELECT * FROM org_units WHERE id = ? LIMIT 1');
-        $stmt->execute([$id]);
+        // Scoped: this is reachable with an id from the URL, and the finder is public.
+        $stmt = self::db()->prepare('SELECT * FROM org_units WHERE id = ? AND tenant_id = ? LIMIT 1');
+        $stmt->execute([$id, self::tenantId()]);
         $row = $stmt->fetch();
         return $row ? self::decorate($row) : null;
     }
@@ -181,7 +190,7 @@ final class HomeCell
 
         self::db()->prepare(
             'UPDATE org_units SET meeting_day = ?, meeting_time = ?, meeting_address = ?, leader_name = ?,'
-            . ' leader_phone = ?, leader_phone_public = ?, capacity = ?, cell_is_public = ? WHERE id = ?'
+            . ' leader_phone = ?, leader_phone_public = ?, capacity = ?, cell_is_public = ? WHERE id = ? AND tenant_id = ?'
         )->execute([
             $day !== '' ? $day : null,
             $time !== '' ? $time : null,
@@ -192,6 +201,7 @@ final class HomeCell
             $capacity,
             empty($in['cell_is_public']) ? 0 : 1,
             $id,
+            self::tenantId(),
         ]);
 
         return ['ok' => true];

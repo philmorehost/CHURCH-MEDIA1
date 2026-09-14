@@ -41,11 +41,9 @@ $limit = max(1, min(50, $limit));
 $unitId = Devotional::ALL_UNITS;
 $unitSlug = trim((string) ($_GET['unit'] ?? ''));
 if ($unitSlug !== '') {
-    $lookup = $pdo->prepare('SELECT id FROM org_units WHERE slug = ? LIMIT 1');
-    $lookup->execute([$unitSlug]);
-    $found = $lookup->fetchColumn();
-    if ($found !== false) {
-        $unitId = (int) $found;
+    $found = Unit::findBySlug($unitSlug);
+    if ($found !== null) {
+        $unitId = (int) $found['id'];
     }
 }
 

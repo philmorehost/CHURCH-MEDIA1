@@ -539,8 +539,12 @@ final class SmsContacts
                 // Consent gate. A number on a staff profile is a contact detail; permission
                 // to text it is a separate thing, and 2026_19 keeps them apart so that no
                 // source can opt someone into bulk messaging just by holding their number.
+                //
+                // Scoped to the church being served: this is the one source with no unit filter built
+                // into its SQL (the unit scope is applied afterwards, by filter()), so without this a
+                // super admin syncing one church pulled in every other church's staff as well.
                 'label' => 'Church team who agreed to be texted',
-                'sql' => 'SELECT id, name, phone, email, org_unit_id FROM users WHERE phone IS NOT NULL AND phone != \'\' AND sms_consent = 1',
+                'sql' => 'SELECT id, name, phone, email, org_unit_id FROM users WHERE phone IS NOT NULL AND phone != \'\' AND sms_consent = 1 AND tenant_id = ' . (int) (class_exists('Tenant') ? (Tenant::id() ?? 0) : 0),
                 'tag' => 'team',
                 'source' => 'team',
             ],

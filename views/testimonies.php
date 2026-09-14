@@ -17,7 +17,8 @@ $pdo = Database::getInstance()->getConnection();
  */
 $units = [];
 try {
-    $units = $pdo->query('SELECT id, name FROM org_units ORDER BY name ASC')->fetchAll();
+    // `Unit::all()` is scoped to the church being served (2026_39).
+    $units = Unit::all('name ASC');
 } catch (Throwable $e) {
     $units = [];
 }

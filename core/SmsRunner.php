@@ -307,7 +307,15 @@ final class SmsRunner
             if (!empty($campaign['org_unit_id'])) {
                 $units[] = (int) $campaign['org_unit_id'];
             } else {
-                foreach (Unit::all('id ASC') as $unit) {
+                // A worker has no host to resolve a church from, so ask for the campaign's own church
+                // rather than the ambient one. `Unit::all()` here would either name the wrong church
+                // or, from a cron, always name the default church — telling one church about another
+                // church's paused campaign.
+                $tenantId = (int) ($campaign['tenant_id'] ?? 0);
+                if ($tenantId <= 0) {
+                    $tenantId = (int) (Tenant::id() ?? 0);
+                }
+                foreach (Unit::allForTenant($tenantId, 'id ASC') as $unit) {
                     $units[] = (int) $unit['id'];
                 }
             }

@@ -218,8 +218,14 @@ function notifyApproved(array $row): void
     }
 
     if ($units === []) {
-        // No church attached — tell everyone who can act on it rather than nobody.
-        foreach (Unit::all('id ASC') as $unit) {
+        // No church attached — tell everyone who can act on it rather than nobody. Bounded to the
+        // sender's own church: this runs from a cron, where the ambient church is always the default
+        // one, so asking for `Unit::all()` would name every church in the platform.
+        $tenantId = (int) ($row['tenant_id'] ?? 0);
+        if ($tenantId <= 0) {
+            $tenantId = (int) (Tenant::id() ?? 0);
+        }
+        foreach (Unit::allForTenant($tenantId, 'id ASC') as $unit) {
             $units[] = (int) $unit['id'];
         }
     }

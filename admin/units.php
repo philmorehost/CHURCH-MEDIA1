@@ -194,7 +194,10 @@ if ($action === 'flag_approve' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $targetId = $found ? (int) $found['id'] : null;
         }
         if ($targetId !== null && $suggested !== '') {
-            $pdo->prepare('UPDATE org_units SET name = ? WHERE id = ?')->execute([$suggested, $targetId]);
+            // The church filter is on the statement: `$targetId` comes from a flag row, and a
+            // correction must never rename a unit belonging to another church.
+            $renamed = $pdo->prepare('UPDATE org_units SET name = ? WHERE id = ? AND tenant_id = ?');
+            $renamed->execute([$suggested, $targetId, (int) (Tenant::id() ?? 0)]);
             flash('success', 'Church name corrected to "' . $suggested . '".');
         } else {
             flash('error', 'Could not resolve the church to rename — no changes made.');

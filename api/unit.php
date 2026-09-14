@@ -7,10 +7,8 @@ $pdo = Database::getInstance()->getConnection();
 $slug = trim((string) ($_GET['slug'] ?? ''));
 $shuffle = !empty($_GET['shuffle']) && $_GET['shuffle'] === '1';
 
-$stmt = $pdo->prepare('SELECT * FROM org_units WHERE slug = ? LIMIT 1');
-$stmt->execute([$slug]);
-$unit = $stmt->fetch();
-if (!$unit) {
+$unit = Unit::findBySlug($slug);
+if ($unit === null) {
     jsonResponse(['status' => 'error', 'message' => 'Unit not found.'], 404);
 }
 

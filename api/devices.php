@@ -48,11 +48,9 @@ $platform = in_array(trim((string) ($input['platform'] ?? '')), ['android', 'ios
 $unitId = null;
 $unitSlug = trim((string) ($input['unit_slug'] ?? ''));
 if ($unitSlug !== '') {
-    $stmt = $pdo->prepare('SELECT id FROM org_units WHERE slug = ? LIMIT 1');
-    $stmt->execute([$unitSlug]);
-    $oid = $stmt->fetchColumn();
-    if ($oid !== false) {
-        $unitId = (int) $oid;
+    $found = Unit::findBySlug($unitSlug);
+    if ($found !== null) {
+        $unitId = (int) $found['id'];
     }
 }
 

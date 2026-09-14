@@ -134,6 +134,7 @@ INSERT IGNORE INTO `unit_levels` (`type`, `label`, `plural`, `sort_order`) VALUE
 CREATE TABLE IF NOT EXISTS `org_units` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `parent_id` INT NULL,
+  `tenant_id` INT NOT NULL DEFAULT 0 COMMENT '0 = no church assigned; otherwise Tenant::id(). The church whose hierarchy this unit is part of.',
   `type` VARCHAR(40) NOT NULL,
   `name` VARCHAR(150) NOT NULL,
   `slug` VARCHAR(160) NULL UNIQUE,
@@ -147,6 +148,7 @@ CREATE TABLE IF NOT EXISTS `org_units` (
   `capacity` INT NULL COMMENT 'How many people the meeting place holds; NULL = not recorded',
   `cell_is_public` TINYINT(1) NOT NULL DEFAULT 1 COMMENT '0 hides this cell from the public finder without deleting anything',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_unit_tenant` (`tenant_id`),
   FOREIGN KEY (`parent_id`) REFERENCES `org_units`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
