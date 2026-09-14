@@ -64,7 +64,7 @@
 | **3** | Sermons: series + podcast | Sermon series, series pages, podcast RSS feed + Spotify/Apple submission | 3–4 sessions | None | ✅ shipped (3.1–3.6) |
 | **4** | WhatsApp channel | Official Cloud API integration (templates, 24-h window, webhooks) | 5–7 sessions | Per-conversation | ✅ closed (4.1–4.3; 4.4 rejected) |
 | **5** | Members & daily engagement | Member accounts, daily devotional, Bible reading plans + streaks, offline sermon downloads | 10–12 sessions | None | ✅ shipped (S1–S6) |
-| **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ⬜ **next** — 6a shipped |
+| **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ⬜ **next** — 6a/6b shipped |
 | **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ partly advanced — the second church's app is built |
 
 **Confirmed 2026-09-12:** multi-tenant **SaaS is a real goal**. That is why **Phase 0
@@ -983,8 +983,24 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > when the box is unticked. 13 assertions driving a real admin login to confirm the list and the form
 > render with no PHP notice. Both temp harnesses were removed afterwards and the database restored.
 >
-> **Not built yet in 6a:** the app's cell list. The endpoint it needs is live and tested, so that is
-> screen work alone.
+> **6b shipped — the app's cell list, in both apps.** A Home Cells entry in More, a search box, and
+> a card per cell with the meeting day, address, leader and space. Tapping a card opens that church's
+> media page, so somebody who has just found their cell can go straight on to listening to what it has
+> posted. Tap-to-call and WhatsApp appear only when the church published the number.
+>
+> **The app searches rather than offering a dropdown.** The website can narrow by branch of the
+> hierarchy because it has the width for a select; a picker listing hundreds of units is unusable on a
+> phone, which is the same reasoning already recorded in `core/routes.php` about the member's home
+> church. The endpoint accepts both filters, so nothing is lost if that changes.
+>
+> **Verified against the live endpoint, not the code.** The risk in a model/server pair is a key name
+> that does not match, which produces a silently empty field rather than an error. So the contract was
+> asserted directly: the JSON key set returned by `/api/cells` was compared to the keys
+> `HomeCellInfo.fromJson` reads, and the `path_label` separator was checked to be the middle dot the
+> app splits on. Nine assertions, all passing, on a real fixture that was then restored.
+>
+> **Not built yet in Phase 6:** duty roster / service planning, newcomer follow-up automation and
+> giving campaigns.
 >
 > **A finding worth carrying forward:** the first HTTP run showed the number leaking on three checks,
 > and the cause was the test harness — a fixture helper called with a missing argument fatally errored

@@ -48,6 +48,77 @@ const List<UnitLevel> kFallbackUnitLevels = <UnitLevel>[
   UnitLevel(type: 'parish', label: 'Parish', plural: 'Parishes'),
 ];
 
+/// One home cell — a midweek gathering, from /api/cells.
+///
+/// [leaderPhone] is only ever populated when the church marked that number as
+/// publishable. The API omits it otherwise, so nothing on this side has to
+/// remember to hide it — there is simply nothing to hide.
+class HomeCellInfo {
+  final int id;
+  final String name;
+  final String? slug;
+  final String pathLabel;
+  final String? meetingDay;
+  final String? meetingTime;
+  final String? meetingAddress;
+  final String? leaderName;
+  final String? leaderPhone;
+  final String? leaderPhoneDisplay;
+  final int? capacity;
+
+  HomeCellInfo({
+    required this.id,
+    required this.name,
+    required this.pathLabel,
+    this.slug,
+    this.meetingDay,
+    this.meetingTime,
+    this.meetingAddress,
+    this.leaderName,
+    this.leaderPhone,
+    this.leaderPhoneDisplay,
+    this.capacity,
+  });
+
+  /// Ancestor names, root → this cell.
+  ///
+  /// Split from the label the API already sends rather than reassembled from
+  /// the hierarchy, so the app shows the church's own level names without
+  /// needing to know them.
+  List<String> get pathParts => pathLabel
+      .split(' · ')
+      .map((part) => part.trim())
+      .where((part) => part.isNotEmpty)
+      .toList();
+
+  /// "Tuesday, 6:30 PM", or just the day when no time was recorded.
+  String? get whenLabel {
+    final day = meetingDay;
+    if (day == null || day.isEmpty) return null;
+    final time = meetingTime;
+    return time == null || time.isEmpty ? day : '$day, $time';
+  }
+
+  String? get capacityLabel {
+    final seats = capacity;
+    return seats == null || seats <= 0 ? null : 'Space for about $seats';
+  }
+
+  factory HomeCellInfo.fromJson(Map<String, dynamic> json) => HomeCellInfo(
+        id: int.tryParse(json['id'].toString()) ?? 0,
+        name: json['name'] as String? ?? '',
+        slug: json['slug'] as String?,
+        pathLabel: json['path_label'] as String? ?? '',
+        meetingDay: json['meeting_day'] as String?,
+        meetingTime: json['meeting_time'] as String?,
+        meetingAddress: json['meeting_address'] as String?,
+        leaderName: json['leader_name'] as String?,
+        leaderPhone: json['leader_phone'] as String?,
+        leaderPhoneDisplay: json['leader_phone_display'] as String?,
+        capacity: json['capacity'] != null ? int.tryParse(json['capacity'].toString()) : null,
+      );
+}
+
 class MediaItem {
   final String type; // 'image' | 'video'
   final String source; // 'upload' | 'youtube'

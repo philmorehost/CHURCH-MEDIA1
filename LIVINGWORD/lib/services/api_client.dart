@@ -121,6 +121,20 @@ class ApiClient {
     return (unit: unitMap != null ? UnitInfo.fromJson(unitMap) : null, posts: posts);
   }
 
+  /// The home cells the website's finder shows.
+  ///
+  /// [query] is free text. The website can also narrow by branch of the
+  /// hierarchy, which the app does not offer — a picker listing every area is
+  /// unusable on a phone, so searching is the filter that works here.
+  Future<List<HomeCellInfo>> fetchCells({String? query}) async {
+    final json = await _get('/api/cells', {
+      if (query != null && query.trim().isNotEmpty) 'q': query.trim(),
+    });
+    return (json['data'] as List<dynamic>? ?? [])
+        .map((e) => HomeCellInfo.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
   Future<void> pingView(int postId) => _get('/api/post', {'id': postId});
 
   Future<({bool liked, int likesCount})> toggleLike(int postId) async {

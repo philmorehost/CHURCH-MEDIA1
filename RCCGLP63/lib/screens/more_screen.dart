@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import 'about_screen.dart';
+import 'cells_screen.dart';
 import 'contact_screen.dart';
 import 'downloads_screen.dart';
 import 'events_screen.dart';
@@ -17,6 +18,7 @@ class MoreScreen extends StatelessWidget {
     final items = <_MoreItem>[
       _MoreItem('Events', Icons.event, const EventsScreen()),
       _MoreItem('Live', Icons.live_tv, const LiveScreen()),
+      _MoreItem('Home Cells', Icons.groups_outlined, const CellsScreen()),
       _MoreItem('Prayer Wall', Icons.favorite_outline, const PrayerScreen()),
       _MoreItem('Downloads', Icons.download_done, const DownloadsScreen()),
       _MoreItem('About Us', Icons.info_outline, const AboutScreen()),
