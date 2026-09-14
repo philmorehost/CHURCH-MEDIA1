@@ -63,8 +63,8 @@
 | **2** | **Messaging Hub — SMS** (explicit request) | Contacts address book, groups/segments, sender-ID management, compose + scheduling, templates, campaigns/history, wallet, worker, full guide | 8–10 sessions | Per-SMS (wallet) | ✅ shipped |
 | **3** | Sermons: series + podcast | Sermon series, series pages, podcast RSS feed + Spotify/Apple submission | 3–4 sessions | None | ✅ shipped (3.1–3.6) |
 | **4** | WhatsApp channel | Official Cloud API integration (templates, 24-h window, webhooks) | 5–7 sessions | Per-conversation | ✅ closed (4.1–4.3; 4.4 rejected) |
-| **5** | Members & daily engagement | Member accounts, daily devotional, Bible reading plans + streaks, offline sermon downloads | 10–12 sessions | None | ⬜ **next** |
-| **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ⬜ |
+| **5** | Members & daily engagement | Member accounts, daily devotional, Bible reading plans + streaks, offline sermon downloads | 10–12 sessions | None | ✅ shipped (S1–S6) |
+| **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ⬜ **next** |
 | **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ partly advanced — the second church's app is built |
 
 **Confirmed 2026-09-12:** multi-tenant **SaaS is a real goal**. That is why **Phase 0
@@ -915,6 +915,31 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
   size/wipe controls.
 - **Verify**: reading progress survives app restart and works offline; devotional push
   respects quiet hours and preferences; member sessions cannot reach `/admin/*`.
+
+> **Phase 5 is shipped (S1–S6).** Member accounts with their own auth guard, giving history, saved
+> posts and home cell; the daily devotional with its push worker; Bible reading plans with streaks,
+> the member flow and the evening reminder; and offline sermon downloads in both apps.
+>
+> **The switch panels are now honest.** Three notification preferences existed and controlled nothing
+> before this phase: WhatsApp consent (S3), the devotional tick (S4b) and the reading-plan tick
+> (S5b). Each is now wired to the worker it claims to govern. `Member::wantsNotification()` is the
+> single shared check, so the devotional and the reading reminder cannot drift apart and start
+> disagreeing about what a member switched off.
+>
+> **Not verified:** no Flutter build was run against a real device for the download feature. The
+> download path was reasoned about and analysed, not exercised — it has never fetched an actual
+> sermon file, so progress reporting, the `.part` rename and the size arithmetic are unproven against
+> a real server. Running it once on a phone with a sermon is the first thing worth doing.
+> `flutter analyze` is clean on both apps, which catches syntax and type errors and nothing else.
+>
+> **Also not verified this phase:** the reminder workers are tested at the decision layer — who is
+> eligible and whether the claim is honoured — but nothing has been delivered through FCM to a real
+> handset from these specific jobs.
+>
+> **Left for later, deliberately:** app login screens (the `device_tokens.member_id` binding they need
+> was already done in S4b, so this is now UI alone). The `reading_plan`-style audit should be repeated
+> for `notification_prefs` as more workers appear, because a preference that silently does nothing is
+> harder to notice than a missing feature.
 
 ## 8. Phase 6 — Operations
 

@@ -30,6 +30,35 @@ class LoadingView extends StatelessWidget {
   Widget build(BuildContext context) => const Center(child: CircularProgressIndicator(color: AppColors.gold));
 }
 
+/// Asks before something is removed from the device.
+///
+/// Deleting a download cannot be undone from inside the app — the only way back
+/// is downloading again, which on a metered connection costs the user money. So
+/// every deletion asks, and only an explicit confirm returns true.
+Future<bool> confirmDestructive(
+  BuildContext context, {
+  required String title,
+  required String body,
+  required String action,
+}) async {
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: AppColors.panel,
+      title: Text(title),
+      content: Text(body, style: const TextStyle(color: AppColors.inkDim, height: 1.5)),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, true),
+          child: Text(action, style: const TextStyle(color: AppColors.danger)),
+        ),
+      ],
+    ),
+  );
+  return ok ?? false;
+}
+
 class EmptyState extends StatelessWidget {
   final String message;
   const EmptyState({super.key, required this.message});

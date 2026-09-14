@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'app.dart';
 import 'services/analytics_beacon.dart';
+import 'services/download_store.dart';
 import 'services/in_app_update_service.dart';
 import 'services/offline_bible_service.dart';
 import 'services/push_service.dart';
@@ -17,5 +18,8 @@ void main() {
   // Warm the offline Bible into memory so it opens & searches instantly —
   // decoding the bundled JSON on first tap is what made it feel slow.
   OfflineBibleService.instance.warmUp();
+  // Open the downloads index now rather than on first tap of a sermon, so the
+  // detail screen already knows whether a message is saved.
+  DownloadStore.instance.init();
   runApp(const ChurchMediaApp());
 }
