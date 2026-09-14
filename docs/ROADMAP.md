@@ -65,7 +65,7 @@
 | **4** | WhatsApp channel | Official Cloud API integration (templates, 24-h window, webhooks) | 5–7 sessions | Per-conversation | ✅ closed (4.1–4.3; 4.4 rejected) |
 | **5** | Members & daily engagement | Member accounts, daily devotional, Bible reading plans + streaks, offline sermon downloads | 10–12 sessions | None | ✅ shipped (S1–S6) |
 | **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ✅ **complete** — 6a–6g shipped |
-| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings), 7b shipped (an account belongs to one church), 7c shipped (a unit belongs to one church), 7d-i shipped (worker tenancy plumbing), 7d-ii parts 1–2 and 4 shipped (the SMS worker, the sender-ID poller and the daily publisher report act as one church at a time), 7d-iii shipped (the SMS screens only touch their own church), 7d-iv shipped (the ads tables carry a church), 7d-v shipped (the public advert flow was driven over HTTP, clearing 7d-iv's verification debt) |
+| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings), 7b shipped (an account belongs to one church), 7c shipped (a unit belongs to one church), 7d-i shipped (worker tenancy plumbing), 7d-ii parts 1–2 and 4 shipped (the SMS worker, the sender-ID poller and the daily publisher report act as one church at a time), 7d-iii shipped (the SMS screens only touch their own church), 7d-iv shipped (the ads tables carry a church), 7d-v shipped (the public advert flow was driven over HTTP, clearing 7d-iv's verification debt), 7d-ii part 3 shipped (the devotional push and the reading reminder act as one church at a time) |
 
 **Confirmed 2026-09-12:** multi-tenant **SaaS is a real goal**. That is why **Phase 0
 (tenancy foundation) runs before everything else** — the SMS token, sender IDs, country
@@ -1643,8 +1643,9 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > there are eleven workers, not the six named here first, and the first version of this list missed
 > `media_worker.php` and `reading_worker.php` entirely. Ordered by who gets hurt when the wrong church is
 > used: `media_worker` (emails a publisher a daily report whose subject carries
-> `setting('site_title')` — from cron, the default church's name), then `devotional_worker` and
-> `reading_worker` (push to devices; both need the new `device_tokens.tenant_id`), then `followup_worker`
+> `setting('site_title')` — from cron, the default church's name — **shipped as part 4**), then
+> `devotional_worker` and `reading_worker` (push to devices; both needed the new
+> `device_tokens.tenant_id` — **shipped as part 3**), then `followup_worker`
 > and `roster_worker` (email), then `wa_worker` (partly converted already — it stamps `Tenant::id()` on
 > new conversations), and finally `analytics_rollup` and `backup`, which send nothing and need reading
 > rather than rewriting. `sms_maintenance` is already correct: it deliberately uses the un-scoped
@@ -1837,6 +1838,53 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > **Not verified:** no payment is taken (the free package keeps the flow offline and Payhub is
 > unconfigured), no email is delivered (no SMTP), and no browser was used — "the handler behaves
 > correctly" is established, "the page looks right" is not.
+
+> **7d-ii part 3 shipped — the devotional push and the reading reminder act as one church at a time.**
+> Two runners, `core/DevotionalPush.php` and `core/ReadingReminder.php`, and their two cron scripts. Both
+> had the same defect: one run for the whole install, reading the switch, the sending window, the entry and
+> the sending credentials of whichever church resolved first — the default one, from a cron — and pushing
+> it to every device in the install. A cron skips the host step in `Tenant::resolve()`, so "whichever church
+> resolved first" was never the church whose devotional had been written for the day.
+>
+> - `dueToday()`, `devices()`, `audienceSize()` and the claim in the devotional runner are scoped to
+>   `devotionals.tenant_id` / `device_tokens.tenant_id`; the same four in the reading reminder, whose
+>   `targets()` also scopes its join on `reading_plans.tenant_id`.
+> - The token prune — the one place these runners **delete** — is scoped too, so a device id from another
+>   church's list cannot be removed by a pass that should never have seen it.
+> - Both cron scripts run `Tenant::each()`, and a pass that throws is held, reported on STDERR and turned
+>   into a non-zero exit at the end, so one church cannot stop the others. Both `--status` modes report per
+>   church, with the install-wide `Pusher::configured()` line printed **once** rather than repeated inside
+>   every church's block as though it were a per-church fact.
+> - A church with the notification switched off now stops only itself. Before this, one church switching it
+>   off in Settings stopped the whole install's devotional.
+>
+> **Verified (7d-ii part 3): 54 assertions, 0 failures.** Two fixture churches with their own devotional for
+> today, their own plans, members and devices, plus a device with `tenant_id = 0` and a member of one church
+> on the other church's plan. Everything is a dry run or a direct read — **no FCM request is made and no
+> push is sent**: `targets()` and `audienceSize()` are pure, the claims are called through reflection, and
+> the CLI workers are only ever invoked with `--dry-run`, which by design claims nothing.
+>
+> Mutation checks, each reverted and re-verified green:
+> - Reverting `DevotionalPush::dueToday()` and `devices()` to church-blind (keeping the bind parameter, so
+>   PDO cannot throw on a placeholder mismatch) → **8 failures**, the one that names the defect being *"each
+>   church is sent its own devotional — alpha got 41, beta got 41"*, plus the unattributable device being
+>   reached by every pass.
+> - Making `ReadingPlan::find()` church-blind → **1 failure** (the assertion that pins the mechanism).
+> - Breaking **both** that and the `targets()` join → **4 failures**, including a cross-church reminder.
+>
+> **One mutation was not detected, and that is the interesting result.** Breaking the `targets()` join
+> *alone* changed nothing: with `ReadingPlan::find()` scoped, `nextDay()` cannot resolve another church's
+> plan and returns `null`, so the member is skipped there instead. Each guard is independently sufficient.
+> The **harness** was weak, not the code — the assertion could not tell which of the two was holding the
+> line — so a second assertion was added that drives `ReadingPlan::nextDay()` directly for a borrowed plan
+> from the wrong church (`null`) and from the church that owns it (day 1). The comment in `targets()` now
+> says both guards are load-bearing and that neither may be removed on the grounds that the other covers it,
+> because that reasoning is how a pair becomes one, and then none.
+>
+> **Not verified:** the push itself. `Pusher` is install-wide — one `config/firebase.php` and one service
+> account — this harness makes no FCM request, and a dry run claims nothing by design. What is established
+> is *who would be reached and with which church's entry*, not that a notification arrives. No device
+> received anything.
 
 > **Not built yet in Phase 7 (beyond 7d):** letting a church admin edit its own branding
 > (`admin/settings.php` is super-admin only, and letting one in needs a decision about which fields are

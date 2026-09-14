@@ -29,8 +29,16 @@ declare(strict_types=1);
  * worse than one that is not texted at all, because the second one is visible and re-runnable
  * and the first one is not.
  *
- * This assumes the install serves one tenant: `device_tokens` has no `tenant_id` to filter on, and
- * a cron run has no request host to resolve one from. True for every deployment so far.
+ * **One church at a time.** `devotionals.tenant_id` is the church an entry was written for and
+ * `device_tokens.tenant_id` is the church a device belongs to, so both the text and the audience are
+ * scoped to the church being served. The caller — `cli/devotional_worker.php` — makes one pass per
+ * church through `Tenant::each()`; a cron has no request host, so without that the church being served
+ * is only ever the default one. Before this, a single run read the switch, the sending window and the
+ * entry of whichever church resolved first and pushed it to every device in the install.
+ *
+ * A device with `tenant_id = 0` ("no church assigned") is reached by nobody rather than by everybody.
+ * Another church's devotional arriving on a church's phones is the worse failure of the two, and it is
+ * the one nobody can undo.
  */
 final class DevotionalPush
 {
@@ -39,6 +47,12 @@ final class DevotionalPush
      * church with more devices than this has bigger problems than a truncated send.
      */
     public const BATCH_LIMIT = 2000;
+
+    /** The church being served. 0 never matches a row, so an unresolvable church reaches nobody. */
+    private static function tenantId(): int
+    {
+        return (class_exists('Tenant') ? Tenant::id() : null) ?? 0;
+    }
 
     /**
      * Runs one send.
@@ -119,8 +133,10 @@ final class DevotionalPush
             $summary['failed']++;
             if (self::tokenIsGone(Pusher::getLastError())) {
                 // FCM itself says this token is gone, so keeping it would mean a failed request
-                // on every future run and a permanently misleading device count.
-                $pdo->prepare('DELETE FROM device_tokens WHERE id = ?')->execute(array((int) $device['id']));
+                // on every future run and a permanently misleading device count. Scoped, so a token
+                // id from another church's list could never be deleted by this pass.
+                $pdo->prepare('DELETE FROM device_tokens WHERE id = ? AND tenant_id = ?')
+                    ->execute(array((int) $device['id'], self::tenantId()));
                 $summary['pruned']++;
             }
         }
@@ -214,26 +230,30 @@ final class DevotionalPush
         return null;
     }
 
-    /** Today's published entries that have not been announced yet. */
+    /** Today's published entries for the church being served that have not been announced yet. */
     private static function dueToday(PDO $pdo): array
     {
         $sql = 'SELECT id, org_unit_id, title, scripture_reference, body, publish_on
                 FROM devotionals
-                WHERE publish_on = CURDATE() AND is_published = 1 AND push_sent_at IS NULL
+                WHERE tenant_id = ? AND publish_on = CURDATE() AND is_published = 1 AND push_sent_at IS NULL
                 ORDER BY org_unit_id ASC';
-        return $pdo->query($sql)->fetchAll();
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute(array(self::tenantId()));
+        return $stmt->fetchAll();
     }
 
     /**
-     * Every device we could send to.
+     * Every device we could send to, in the church being served.
      *
      * Ordered by id so a truncated run is at least deterministic rather than arbitrary.
      */
     private static function devices(PDO $pdo): array
     {
         $sql = "SELECT id, token, org_unit_id, member_id FROM device_tokens
-                WHERE token <> '' ORDER BY id ASC LIMIT " . self::BATCH_LIMIT;
-        return $pdo->query($sql)->fetchAll();
+                WHERE tenant_id = ? AND token <> '' ORDER BY id ASC LIMIT " . self::BATCH_LIMIT;
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute(array(self::tenantId()));
+        return $stmt->fetchAll();
     }
 
     /**
@@ -241,12 +261,13 @@ final class DevotionalPush
      *
      * The `push_sent_at IS NULL` in the WHERE is what makes this safe to run from a cron that
      * might overlap itself: only one caller can change the row, and the loser is told so by
-     * rowCount() rather than by luck.
+     * rowCount() rather than by luck. The church in the WHERE is belt and braces — the id came from a
+     * query this run already scoped — and it is the shape every other claim in this codebase uses.
      */
     private static function claim(PDO $pdo, int $devotionalId): bool
     {
-        $stmt = $pdo->prepare('UPDATE devotionals SET push_sent_at = NOW() WHERE id = ? AND push_sent_at IS NULL');
-        $stmt->execute(array($devotionalId));
+        $stmt = $pdo->prepare('UPDATE devotionals SET push_sent_at = NOW() WHERE id = ? AND tenant_id = ? AND push_sent_at IS NULL');
+        $stmt->execute(array($devotionalId, self::tenantId()));
         return $stmt->rowCount() === 1;
     }
 
@@ -312,10 +333,12 @@ final class DevotionalPush
         return false;
     }
 
-    /** How many devices would receive today's notification, for the admin screen. */
+    /** How many devices in the church being served would receive today's notification. */
     public static function audienceSize(): int
     {
-        $pdo = Database::getInstance()->getConnection();
-        return (int) $pdo->query("SELECT COUNT(*) FROM device_tokens WHERE token <> ''")->fetchColumn();
+        $stmt = Database::getInstance()->getConnection()
+            ->prepare("SELECT COUNT(*) FROM device_tokens WHERE tenant_id = ? AND token <> ''");
+        $stmt->execute(array(self::tenantId()));
+        return (int) $stmt->fetchColumn();
     }
 }

@@ -20,6 +20,11 @@ declare(strict_types=1);
  * design is for. See core/DevotionalPush.php for why it sends per device rather than to a topic,
  * and why it claims before sending rather than recording each outcome like the SMS worker.
  *
+ * **One pass per church.** The switch, the sending window, today's entry and the devices are all per
+ * church, and a cron has no request host to resolve one from — so `Tenant::each()` is what makes this
+ * run as each church in turn instead of as whichever one resolves first (the default one). A pass that
+ * throws is held so the other churches still run, then turned into a non-zero exit at the end.
+ *
  * Usage:
  *   php cli/devotional_worker.php                 send today's devotional
  *   php cli/devotional_worker.php --dry-run       say who would receive it, send nothing
@@ -71,37 +76,66 @@ function say(string $line): void
 /* --------------------------------------------------------------- status mode */
 
 if ($statusOnly) {
-    $pdo = Database::getInstance()->getConnection();
+    // One report per church. The switch, the sending window and today's entry are all per church, and
+    // from a shell the church being served is only ever the default one — so reporting once would print
+    // one church's status and call it the install's.
+    $status = Tenant::each(static function (int $tenantId): array {
+        $statement = Database::getInstance()->getConnection()->prepare(
+            'SELECT id, org_unit_id, title, is_published, push_sent_at
+             FROM devotionals WHERE tenant_id = ? AND publish_on = CURDATE() ORDER BY org_unit_id ASC'
+        );
+        $statement->execute(array($tenantId));
 
-    $enabled = (int) setting('devotional_push_enabled', 1) === 1;
-    fwrite(STDOUT, 'Daily notification : ' . ($enabled ? 'on' : 'off') . "\n");
-    fwrite(STDOUT, 'Sending window     : ' . SmsCampaign::quietHoursLabel()
-        . ' (now within it: ' . (SmsCampaign::withinQuietHours() ? 'yes' : 'no') . ")\n");
+        return array(
+            'enabled' => (int) setting('devotional_push_enabled', 1) === 1,
+            'quiet' => SmsCampaign::quietHoursLabel(),
+            'within' => SmsCampaign::withinQuietHours(),
+            'devices' => DevotionalPush::audienceSize(),
+            'rows' => $statement->fetchAll(),
+        );
+    });
+
+    // Installation-wide, not per church: `Pusher` reads one service account for the whole install, so
+    // printing this inside every church's block would print the same sentence a dozen times.
     fwrite(STDOUT, 'Push configured    : ' . (Pusher::configured() ? 'yes' : 'no')
         . (Pusher::configured() ? '' : ' — ' . (string) Pusher::getLastError()) . "\n");
-    fwrite(STDOUT, 'Devices registered : ' . DevotionalPush::audienceSize() . "\n");
 
-    $statement = $pdo->query(
-        "SELECT id, org_unit_id, title, is_published, push_sent_at
-         FROM devotionals WHERE publish_on = CURDATE() ORDER BY org_unit_id ASC"
-    );
-    $rows = $statement->fetchAll();
-    if (!$rows) {
-        fwrite(STDOUT, "\nToday: no devotional has been written.\n");
-        exit(0);
-    }
+    $several = count($status) > 1;
+    foreach ($status as $tenantId => $entry) {
+        if ($entry['ok'] !== true || !is_array($entry['result'])) {
+            fwrite(STDERR, 'devotional_worker: status failed for church ' . $tenantId
+                . ' — ' . (string) ($entry['error'] ?? 'unknown error') . "\n");
+            continue;
+        }
+        $report = $entry['result'];
 
-    fwrite(STDOUT, "\nToday:\n");
-    foreach ($rows as $row) {
-        $unit = (int) $row['org_unit_id'];
-        fwrite(STDOUT, sprintf(
-            "  #%-4d %-14s %-40s %s%s\n",
-            (int) $row['id'],
-            $unit === 0 ? 'church-wide' : 'unit ' . $unit,
-            mb_strimwidth((string) $row['title'], 0, 40, '…'),
-            ((int) $row['is_published'] === 1 ? 'published' : 'draft'),
-            $row['push_sent_at'] !== null ? ', sent ' . (string) $row['push_sent_at'] : ''
-        ));
+        if ($several) {
+            $church = Tenant::find((int) $tenantId);
+            fwrite(STDOUT, "\n" . (string) ($church['name'] ?? ('Church ' . $tenantId)) . "\n");
+        }
+
+        fwrite(STDOUT, 'Daily notification : ' . ($report['enabled'] ? 'on' : 'off') . "\n");
+        fwrite(STDOUT, 'Sending window     : ' . (string) $report['quiet']
+            . ' (now within it: ' . ($report['within'] ? 'yes' : 'no') . ")\n");
+        fwrite(STDOUT, 'Devices registered : ' . (int) $report['devices'] . "\n");
+
+        if (!$report['rows']) {
+            fwrite(STDOUT, "\nToday: no devotional has been written.\n");
+            continue;
+        }
+
+        fwrite(STDOUT, "\nToday:\n");
+        foreach ($report['rows'] as $row) {
+            $unit = (int) $row['org_unit_id'];
+            fwrite(STDOUT, sprintf(
+                "  #%-4d %-14s %-40s %s%s\n",
+                (int) $row['id'],
+                $unit === 0 ? 'church-wide' : 'unit ' . $unit,
+                mb_strimwidth((string) $row['title'], 0, 40, '…'),
+                ((int) $row['is_published'] === 1 ? 'published' : 'draft'),
+                $row['push_sent_at'] !== null ? ', sent ' . (string) $row['push_sent_at'] : ''
+            ));
+        }
     }
     exit(0);
 }
@@ -123,43 +157,81 @@ if (!flock($lock, LOCK_EX | LOCK_NB)) {
 }
 
 $startedAt = microtime(true);
-$summary = DevotionalPush::run($force, $dryRun);
 
-foreach ($summary['reasons'] as $reason) {
-    say($reason);
+// One pass per church, because the switch, the sending window, today's entry and the devices are all per
+// church. A single run for the whole install read whichever church resolved first — the default one, from
+// a cron — and pushed its devotional to every church's phones.
+$runs = Tenant::each(static function (int $tenantId) use ($force, $dryRun): array {
+    return DevotionalPush::run($force, $dryRun);
+});
+
+$several = count($runs) > 1;
+$totals = ['sent' => 0, 'skipped' => 0, 'failed' => 0, 'claimed' => 0, 'pruned' => 0, 'touched' => 0];
+$stoppedSomewhere = false;
+$failedPasses = 0;
+
+foreach ($runs as $tenantId => $entry) {
+    $church = $several ? Tenant::find((int) $tenantId) : null;
+    $label = $several ? ((string) ($church['name'] ?? ('Church ' . $tenantId)) . ': ') : '';
+
+    if ($entry['ok'] !== true || !is_array($entry['result'])) {
+        // The pass threw. Tenant::each held it so the other churches still ran, so this is where it has
+        // to become visible — silently skipping a church is how a daily notification quietly stops.
+        $failedPasses++;
+        fwrite(STDERR, 'devotional_worker: ' . $label . 'the run failed — '
+            . (string) ($entry['error'] ?? 'unknown error') . "\n");
+        continue;
+    }
+
+    $summary = $entry['result'];
+
+    foreach ($summary['reasons'] as $reason) {
+        say($label . $reason);
+    }
+
+    // A stopped church is not a failure and has no totals to add: it printed its reason and that is the
+    // whole of its report. One church being switched off must not stop the others.
+    if ($summary['stopped'] !== null) {
+        say($label . $summary['stopped']);
+        $stoppedSomewhere = true;
+        continue;
+    }
+
+    $totals['sent'] += (int) $summary['sent'];
+    $totals['skipped'] += (int) $summary['skipped'];
+    $totals['failed'] += (int) $summary['failed'];
+    $totals['claimed'] += (int) $summary['claimed'];
+    $totals['pruned'] += (int) $summary['pruned'];
+    $totals['touched'] += (int) $summary['sent'] + (int) $summary['failed'];
 }
 
-if ($summary['stopped'] !== null) {
-    say($summary['stopped']);
+if ($totals['claimed'] === 0 && $totals['touched'] === 0) {
+    // Only when no church stopped: "nothing to send" next to a reason why nothing was sent would read as
+    // a contradiction.
+    if (!$stoppedSomewhere) {
+        say('Nothing to send.');
+    }
     flock($lock, LOCK_UN);
     fclose($lock);
-    exit(0);
-}
-
-$touched = $summary['sent'] + $summary['failed'];
-
-if ($summary['claimed'] === 0 && $touched === 0) {
-    say('Nothing to send.');
-    flock($lock, LOCK_UN);
-    fclose($lock);
-    exit(0);
+    exit($failedPasses > 0 ? 1 : 0);
 }
 
 say(sprintf(
     '%s finished in %.1fs: %d notification(s) sent, %d skipped, %d failed%s.',
     $dryRun ? 'Dry run' : 'Run',
     microtime(true) - $startedAt,
-    $summary['sent'],
-    $summary['skipped'],
-    $summary['failed'],
-    $summary['pruned'] > 0 ? ', ' . $summary['pruned'] . ' dead token(s) removed' : ''
+    $totals['sent'],
+    $totals['skipped'],
+    $totals['failed'],
+    $totals['pruned'] > 0 ? ', ' . $totals['pruned'] . ' dead token(s) removed' : ''
 ));
 
 if ($dryRun) {
     say('This was a dry run: nothing was sent and push_sent_at was not changed.');
 }
 
-// Failures are worth a non-zero exit so cron mails somebody. A run that had nothing to do is not.
+// Failures are worth a non-zero exit so cron mails somebody. A run that had nothing to do is not — and
+// neither is a church that is switched off, which is a setting rather than a fault.
 flock($lock, LOCK_UN);
 fclose($lock);
-exit($summary['failed'] > 0 ? 1 : 0);
+exit(($failedPasses > 0 || $totals['failed'] > 0) ? 1 : 0);

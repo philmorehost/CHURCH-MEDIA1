@@ -16,6 +16,11 @@ declare(strict_types=1);
  * The switch on the member dashboard is what makes this worker's audience what it is — before this
  * existed, that checkbox turned nothing off. See core/ReadingReminder.php.
  *
+ * **One pass per church.** The switch, the sending window, the members and the plan the nudge quotes are
+ * all per church, and a cron has no request host to resolve one from — so `Tenant::each()` is what makes
+ * this run as each church in turn instead of as whichever one resolves first (the default one). A pass
+ * that throws is held so the other churches still run, then turned into a non-zero exit at the end.
+ *
  * Usage:
  *   php cli/reading_worker.php                 remind members who have not read today
  *   php cli/reading_worker.php --dry-run       say who would be reminded, send nothing
@@ -67,18 +72,50 @@ function say(string $line): void
 /* --------------------------------------------------------------- status mode */
 
 if ($statusOnly) {
-    fwrite(STDOUT, 'Reminder      : ' . ((int) setting('reading_reminder_enabled', 1) === 1 ? 'on' : 'off') . "\n");
-    fwrite(STDOUT, 'Sending window: ' . SmsCampaign::quietHoursLabel()
-        . ' (now within it: ' . (SmsCampaign::withinQuietHours() ? 'yes' : 'no') . ")\n");
-    fwrite(STDOUT, 'Push configured: ' . (Pusher::configured() ? 'yes' : 'no') . "\n");
-    fwrite(STDOUT, 'Members on a published plan: ' . ReadingReminder::audienceSize() . "\n");
+    // One report per church. The switch, the sending window and the audience are all per church, and from
+    // a shell the church being served is only ever the default one — so reporting once would print one
+    // church's audience and call it the install's.
+    $status = Tenant::each(static function (int $tenantId): array {
+        $targets = ReadingReminder::targets(Database::getInstance()->getConnection());
+        $devices = 0;
+        foreach ($targets as $group) {
+            $devices += count($group['devices']);
+        }
+        return array(
+            'enabled' => (int) setting('reading_reminder_enabled', 1) === 1,
+            'quiet' => SmsCampaign::quietHoursLabel(),
+            'within' => SmsCampaign::withinQuietHours(),
+            'audience' => ReadingReminder::audienceSize(),
+            'members' => count($targets),
+            'devices' => $devices,
+        );
+    });
 
-    $targets = ReadingReminder::targets(Database::getInstance()->getConnection());
-    $devices = 0;
-    foreach ($targets as $group) {
-        $devices += count($group['devices']);
+    $several = count($status) > 1;
+    foreach ($status as $tenantId => $entry) {
+        if ($entry['ok'] !== true || !is_array($entry['result'])) {
+            fwrite(STDERR, 'reading_worker: status failed for church ' . $tenantId
+                . ' — ' . (string) ($entry['error'] ?? 'unknown error') . "\n");
+            continue;
+        }
+        $report = $entry['result'];
+
+        if ($several) {
+            $church = Tenant::find((int) $tenantId);
+            fwrite(STDOUT, "\n" . (string) ($church['name'] ?? ('Church ' . $tenantId)) . "\n");
+        }
+
+        fwrite(STDOUT, 'Reminder      : ' . ($report['enabled'] ? 'on' : 'off') . "\n");
+        fwrite(STDOUT, 'Sending window: ' . (string) $report['quiet']
+            . ' (now within it: ' . ($report['within'] ? 'yes' : 'no') . ")\n");
+        fwrite(STDOUT, 'Members on a published plan: ' . (int) $report['audience'] . "\n");
+        fwrite(STDOUT, 'Would be reminded now: ' . (int) $report['members'] . ' member(s) on '
+            . (int) $report['devices'] . " device(s)\n");
     }
-    fwrite(STDOUT, 'Would be reminded now: ' . count($targets) . ' member(s) on ' . $devices . " device(s)\n");
+
+    // Installation-wide: `Pusher` reads one service account for the whole install, so this is not a
+    // per-church fact and must not be repeated inside every church's block as though it were.
+    fwrite(STDOUT, 'Push configured: ' . (Pusher::configured() ? 'yes' : 'no') . "\n");
     fwrite(STDOUT, "\nSuggested cron, once a day in the evening:\n  30 18 * * * php " . ROOT_PATH . "/cli/reading_worker.php\n");
     exit(0);
 }
@@ -99,35 +136,73 @@ if (!flock($lock, LOCK_EX | LOCK_NB)) {
 }
 
 $startedAt = microtime(true);
-$summary = ReadingReminder::run($force, $dryRun);
 
-foreach ($summary['reasons'] as $reason) {
-    say($reason);
+// One pass per church, because the switch, the sending window, the members and the plan each nudge quotes
+// are all per church. A single run for the whole install read whichever church resolved first — the
+// default one, from a cron — and nudged every church's members about another church's plan.
+$runs = Tenant::each(static function (int $tenantId) use ($force, $dryRun): array {
+    return ReadingReminder::run($force, $dryRun);
+});
+
+$several = count($runs) > 1;
+$totals = ['claimed' => 0, 'sent' => 0, 'skipped' => 0, 'failed' => 0, 'pruned' => 0];
+$stoppedSomewhere = false;
+$failedPasses = 0;
+
+foreach ($runs as $tenantId => $entry) {
+    $church = $several ? Tenant::find((int) $tenantId) : null;
+    $label = $several ? ((string) ($church['name'] ?? ('Church ' . $tenantId)) . ': ') : '';
+
+    if ($entry['ok'] !== true || !is_array($entry['result'])) {
+        // The pass threw. Tenant::each held it so the other churches still ran, so this is where it has
+        // to become visible — silently skipping a church is how a daily reminder quietly stops.
+        $failedPasses++;
+        fwrite(STDERR, 'reading_worker: ' . $label . 'the run failed — '
+            . (string) ($entry['error'] ?? 'unknown error') . "\n");
+        continue;
+    }
+
+    $summary = $entry['result'];
+
+    foreach ($summary['reasons'] as $reason) {
+        say($label . $reason);
+    }
+
+    // A stopped church is not a failure and has no totals to add: it printed its reason and that is the
+    // whole of its report. One church being switched off must not stop the others.
+    if ($summary['stopped'] !== null) {
+        say($label . $summary['stopped']);
+        $stoppedSomewhere = true;
+        continue;
+    }
+
+    $totals['claimed'] += (int) $summary['claimed'];
+    $totals['sent'] += (int) $summary['sent'];
+    $totals['skipped'] += (int) $summary['skipped'];
+    $totals['failed'] += (int) $summary['failed'];
+    $totals['pruned'] += (int) $summary['pruned'];
 }
 
-if ($summary['stopped'] !== null) {
-    say($summary['stopped']);
+if ($totals['claimed'] === 0 && $totals['sent'] === 0 && $totals['failed'] === 0) {
+    // Only when no church stopped: "nobody to remind" next to a reason why nobody was reminded would read
+    // as a contradiction.
+    if (!$stoppedSomewhere) {
+        say('Nobody to remind right now.');
+    }
     flock($lock, LOCK_UN);
     fclose($lock);
-    exit(0);
-}
-
-if ($summary['claimed'] === 0 && $summary['sent'] === 0 && $summary['failed'] === 0) {
-    say('Nobody to remind right now.');
-    flock($lock, LOCK_UN);
-    fclose($lock);
-    exit(0);
+    exit($failedPasses > 0 ? 1 : 0);
 }
 
 say(sprintf(
     '%s finished in %.1fs: %d member(s) reminded, %d notification(s) sent, %d skipped, %d failed%s.',
     $dryRun ? 'Dry run' : 'Run',
     microtime(true) - $startedAt,
-    $summary['claimed'],
-    $summary['sent'],
-    $summary['skipped'],
-    $summary['failed'],
-    $summary['pruned'] > 0 ? ', ' . $summary['pruned'] . ' dead token(s) removed' : ''
+    $totals['claimed'],
+    $totals['sent'],
+    $totals['skipped'],
+    $totals['failed'],
+    $totals['pruned'] > 0 ? ', ' . $totals['pruned'] . ' dead token(s) removed' : ''
 ));
 
 if ($dryRun) {
@@ -136,4 +211,4 @@ if ($dryRun) {
 
 flock($lock, LOCK_UN);
 fclose($lock);
-exit($summary['failed'] > 0 ? 1 : 0);
+exit(($failedPasses > 0 || $totals['failed'] > 0) ? 1 : 0);
