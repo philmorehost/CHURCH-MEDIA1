@@ -38,6 +38,7 @@ $navTree = [
         'children' => [
             ['href' => '/sermons', 'label' => 'Sermons'],
             ['href' => '/bible', 'label' => 'Holy Bible'],
+            ['href' => '/devotional', 'label' => 'Daily Devotional'],
         ],
     ],
     [

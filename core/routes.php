@@ -1456,6 +1456,31 @@ $router->post('/member', function () {
     redirect('/member');
 });
 
+$router->get('/devotional', function () {
+    render('devotional', [
+        'metaTitle' => 'Daily Devotional',
+        'metaDescription' => 'A short devotional for each day from ' . setting('site_title') . '.',
+        'date' => null,
+    ]);
+});
+
+// A permalink per day, so a devotional can be shared on WhatsApp or read again later without
+// hunting through the archive. A malformed date is a 404 rather than a page for today, which
+// would quietly hand back the wrong entry under the right-looking URL.
+$router->get('/devotional/{date}', function (array $params) {
+    $date = (string) ($params['date'] ?? '');
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) || strtotime($date) === false) {
+        http_response_code(404);
+        render('404');
+        return;
+    }
+    render('devotional', [
+        'metaTitle' => 'Devotional for ' . date('j F Y', strtotime($date)),
+        'metaRobots' => 'noindex, follow',
+        'date' => $date,
+    ]);
+});
+
 // The site icon. A route rather than a file on disk on purpose: a real
 // public/favicon.ico is served by the web server ahead of the front controller
 // (.htaccess and public/router.php both skip existing files), which is why every

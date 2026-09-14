@@ -1705,6 +1705,42 @@ class Database
                 self::addColumnIfMissing($pdo, 'donations', 'member_id', 'INT NULL', 'donor_phone');
                 self::addIndexIfMissing($pdo, 'donations', 'idx_donation_member', 'INDEX `idx_donation_member` (`member_id`, `payment_status`)');
             },
+
+            // Daily devotionals.
+            //
+            // `tenant_id` and `org_unit_id` are NOT NULL DEFAULT 0 rather than the NULL that
+            // `sermon_series` uses for "shared", because this table needs
+            // `UNIQUE (tenant_id, org_unit_id, publish_on)` — two devotionals for the same day
+            // would both show up, and MySQL treats every NULL as distinct, so a nullable column
+            // would silently allow exactly that. 0 means "church-wide", and reads ask for
+            // `org_unit_id IN (0, :unit)`. The NULL-means-shared convention cannot carry a
+            // unique constraint, which is worth knowing before copying it into a new table.
+            //
+            // `push_sent_at` anticipates the daily notification: it is what stops a re-run of
+            // the cron from texting the whole church twice.
+            '2026_27_devotionals' => function (PDO $pdo): void {
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `devotionals` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `tenant_id` INT NOT NULL DEFAULT 0,
+                    `org_unit_id` INT NOT NULL DEFAULT 0 COMMENT '0 = church-wide, otherwise the church it belongs to',
+                    `publish_on` DATE NOT NULL COMMENT 'The day this devotional is for',
+                    `title` VARCHAR(180) NOT NULL,
+                    `scripture_reference` VARCHAR(160) NULL COMMENT 'e.g. Psalm 23:1-6',
+                    `scripture_text` TEXT NULL COMMENT 'The passage itself, so the reader need not leave the page',
+                    `body` MEDIUMTEXT NULL,
+                    `audio_path` VARCHAR(500) NULL,
+                    `sermon_id` INT NULL COMMENT 'Set when this was generated from a sermon',
+                    `is_published` TINYINT(1) NOT NULL DEFAULT 1,
+                    `push_sent_at` DATETIME NULL COMMENT 'When the daily notification went out',
+                    `created_by` INT NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY `uniq_devotional_day` (`tenant_id`, `org_unit_id`, `publish_on`),
+                    INDEX `idx_devotional_day` (`publish_on`, `is_published`),
+                    FOREIGN KEY (`sermon_id`) REFERENCES `sermons`(`id`) ON DELETE SET NULL,
+                    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+            },
         ];
     }
 

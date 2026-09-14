@@ -919,3 +919,29 @@ CREATE TABLE IF NOT EXISTS `members` (
   INDEX `idx_member_reset` (`reset_token_hash`),
   FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Daily devotionals. `tenant_id` and `org_unit_id` are NOT NULL DEFAULT 0 rather than
+the NULL that `sermon_series` uses for "shared", because this table needs
+UNIQUE (tenant_id, org_unit_id, publish_on) and MySQL treats every NULL as distinct,
+which would silently allow two devotionals for the same day. 0 means church-wide.
+CREATE TABLE IF NOT EXISTS `devotionals` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NOT NULL DEFAULT 0,
+  `org_unit_id` INT NOT NULL DEFAULT 0 COMMENT '0 = church-wide, otherwise the church it belongs to',
+  `publish_on` DATE NOT NULL COMMENT 'The day this devotional is for',
+  `title` VARCHAR(180) NOT NULL,
+  `scripture_reference` VARCHAR(160) NULL COMMENT 'e.g. Psalm 23:1-6',
+  `scripture_text` TEXT NULL COMMENT 'The passage itself, so the reader need not leave the page',
+  `body` MEDIUMTEXT NULL,
+  `audio_path` VARCHAR(500) NULL,
+  `sermon_id` INT NULL COMMENT 'Set when this was generated from a sermon',
+  `is_published` TINYINT(1) NOT NULL DEFAULT 1,
+  `push_sent_at` DATETIME NULL COMMENT 'When the daily notification went out',
+  `created_by` INT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_devotional_day` (`tenant_id`, `org_unit_id`, `publish_on`),
+  INDEX `idx_devotional_day` (`publish_on`, `is_published`),
+  FOREIGN KEY (`sermon_id`) REFERENCES `sermons`(`id`) ON DELETE SET NULL,
+  FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

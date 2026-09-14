@@ -47,6 +47,7 @@ $navGroups = [
         'items' => [
             ['key' => 'sermons', 'href' => '/admin/sermons', 'label' => 'Sermons'],
             ['key' => 'series', 'href' => '/admin/series', 'label' => 'Series & Podcast'],
+            ['key' => 'devotionals', 'href' => '/admin/devotionals', 'label' => 'Daily Devotionals'],
         ],
     ],
     [
