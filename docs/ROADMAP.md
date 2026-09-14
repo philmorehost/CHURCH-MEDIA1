@@ -1574,9 +1574,18 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > from a real cron; and `--status` was read but never rendered in a browser. There is still no second
 > church in production, so every multi-church result here is from local fixtures.
 >
-> **7d-ii — the rest, still to do.** `sms_sender_check`, then `devotional_worker` (needs the new
-> `device_tokens.tenant_id`), then `roster_worker`, `followup_worker` and `wa_worker`. Each becomes
-> `Tenant::each(...)` with the pass body unchanged, so a failure in one church cannot stop another's run.
+> **7d-ii — the rest, still to do.** Corrected by listing `cli/` instead of reciting from memory:
+> there are eleven workers, not the six named here first, and the first version of this list missed
+> `media_worker.php` and `reading_worker.php` entirely. Ordered by who gets hurt when the wrong church is
+> used: `sms_sender_check` (polls the gateway and emails a church's media team using whatever token is
+> ambient), then `media_worker` (emails a publisher a daily report whose subject carries
+> `setting('site_title')` — from cron, the default church's name), then `devotional_worker` and
+> `reading_worker` (push to devices; both need the new `device_tokens.tenant_id`), then `followup_worker`
+> and `roster_worker` (email), then `wa_worker` (partly converted already — it stamps `Tenant::id()` on
+> new conversations), and finally `analytics_rollup` and `backup`, which send nothing and need reading
+> rather than rewriting. `sms_maintenance` is already correct: it deliberately uses the un-scoped
+> `activeAll()`. Each of the rest becomes `Tenant::each(...)` with the pass body unchanged, so a failure
+> in one church cannot stop another's run.
 >
 > **Still not tested against a second church** — there is none in production, and every claim in this
 > audit is from reading the code, not from a run.
@@ -1586,6 +1595,13 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > theirs — name, logo, service times — and which belong to the platform: SMTP, the Payment Gateway, SMS
 > credentials, backups and the licence key). Then self-service tenant provisioning with plan limits,
 > per-tenant upload/cache namespacing, and tenant-scoped analytics and reporting.
+>
+> **"7d-ii part 1 shipped" must not be read as Phase 7 being nearly done.** That commit is one worker of
+> eleven. Phase 7's own scope line is *multi-tenant onboarding, localisation, PWA, app widgets*, and of
+> those, localisation (`lang/` + a `t()` helper + Flutter ARB), the PWA (manifest, service worker, offline
+> page) and the app widgets/shortcuts have not been started at all. 7d-ii and 7e come first because they
+> are correctness rather than features: until every worker runs one pass per church, onboarding a second
+> church is not safe, whatever else is finished.
 
 - **Multi-tenant SaaS** — *the foundation is already built in Phase 0*. Phase 7 finishes the
   job: tenant-aware settings UI, per-tenant branding (logo, colours, domain) applied across
