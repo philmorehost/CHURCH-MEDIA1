@@ -185,6 +185,25 @@ if (($action === 'unassign' || $action === 'respond') && $_SERVER['REQUEST_METHO
     redirect('/admin/roster?action=roster&id=' . $planId);
 }
 
+/* ============================================================== email switch == */
+if ($action === 'notify' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    Csrf::requireValid();
+
+    // One switch for the whole install, like the daily devotional notification, so it belongs to
+    // head office rather than to whichever church an admin happens to be scoped to.
+    if (!Auth::isSuperAdmin()) {
+        flash('error', 'Only a head-office admin can change the rota emails.');
+        redirect('/admin/roster');
+    }
+
+    $enabled = !empty($_POST['enabled']);
+    settingSave(array('roster_reminder_enabled' => $enabled ? 1 : 0));
+    flash('success', $enabled
+        ? 'Rota emails are on — people will be told when they are put on a service.'
+        : 'Rota emails are off. The roster still works; nobody is emailed about it.');
+    redirect('/admin/roster');
+}
+
 /* ==================================================================== load view == */
 $editing = null;
 if ($action === 'edit' && $id > 0) {
@@ -536,6 +555,60 @@ require __DIR__ . '/partials/layout-open.php';
       <?php endif; ?>
     </p>
   <?php endif; ?>
+
+  <h2 style="font-size:16px;margin:26px 0 10px 0;">Automatic emails</h2>
+
+  <?php
+  // The state of the rota emails, so an admin can answer "was anybody told?" without opening cron
+  // or the database. $smtpReady is the honest half: Mailer falls back to PHP's mail(), which on most
+  // hosts is silently dropped or filed as spam, so "On" alone would be a promise the code cannot keep.
+  $rotaEmailsOn = (int) setting('roster_reminder_enabled', 1) === 1;
+  $smtpReady = Mailer::configured();
+  $rotaDue = RosterNotifier::audienceSize();
+  $cronPath = ROOT_PATH . '/cli/roster_worker.php';
+  ?>
+
+  <div style="border:1px solid rgba(0,0,0,0.12);border-radius:12px;padding:16px;max-width:780px;">
+    <p style="margin:0 0 10px 0;">
+      <?php if ($rotaEmailsOn): ?>
+        <strong style="color:var(--ok,#3fbf7f);">On</strong> — a member added to a service is emailed, and everyone still on the rota is reminded the day before.
+      <?php else: ?>
+        <strong style="color:var(--danger,#ff6b6b);">Off</strong> — nobody is emailed. The roster itself still works, and members still see their invitation on their own account.
+      <?php endif; ?>
+    </p>
+
+    <?php if ($rotaEmailsOn): ?>
+      <p style="margin:0 0 10px 0;font-size:13px;opacity:0.85;">
+        <?= (int) $rotaDue ?> message<?= $rotaDue === 1 ? '' : 's' ?> due the next time the worker runs
+      </p>
+
+      <?php if (!$smtpReady): ?>
+        <p style="margin:0 0 10px 0;padding:10px 12px;border-radius:8px;background:rgba(217,164,65,0.14);font-size:12.5px;">
+          <strong>No SMTP host is set</strong>, so these emails fall back to the server's own mail
+          function — which many hosts quietly drop, and which often lands in spam even when it works.
+          Set up email under <a href="/admin/settings">Settings</a> before trusting this.
+        </p>
+      <?php endif; ?>
+
+      <p style="margin:0 0 6px 0;font-size:13px;">Add this to cron, hourly is fine:</p>
+      <pre style="background:#0f0d1f;border:1px solid var(--border);border-radius:10px;padding:12px;overflow:auto;font-size:12.5px;">5 * * * * php <?= e($cronPath) ?> --quiet</pre>
+      <p style="margin:6px 0 0 0;font-size:12.5px;opacity:0.7;">
+        Running it twice is harmless — each message is claimed before it is sent, so nobody is emailed
+        twice. Unlike texts, these go out at any hour: an email does not ring in somebody's bedroom.
+      </p>
+    <?php endif; ?>
+
+    <?php if (Auth::isSuperAdmin()): ?>
+      <form method="post" action="/admin/roster?action=notify" style="margin-top:14px;">
+        <?= Csrf::field() ?>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;">
+          <input type="checkbox" name="enabled" value="1" <?= $rotaEmailsOn ? 'checked' : '' ?>>
+          Email people about the rota
+        </label>
+        <button class="btn sm" type="submit" style="margin-top:10px;">Save</button>
+      </form>
+    <?php endif; ?>
+  </div>
 <?php endif; ?>
 
 <?php require __DIR__ . '/partials/layout-close.php'; ?>

@@ -64,7 +64,7 @@
 | **3** | Sermons: series + podcast | Sermon series, series pages, podcast RSS feed + Spotify/Apple submission | 3–4 sessions | None | ✅ shipped (3.1–3.6) |
 | **4** | WhatsApp channel | Official Cloud API integration (templates, 24-h window, webhooks) | 5–7 sessions | Per-conversation | ✅ closed (4.1–4.3; 4.4 rejected) |
 | **5** | Members & daily engagement | Member accounts, daily devotional, Bible reading plans + streaks, offline sermon downloads | 10–12 sessions | None | ✅ shipped (S1–S6) |
-| **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ⬜ **next** — 6a–6d shipped |
+| **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ⬜ **next** — 6a–6e shipped |
 | **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ partly advanced — the second church's app is built |
 
 **Confirmed 2026-09-12:** multi-tenant **SaaS is a real goal**. That is why **Phase 0
@@ -1051,10 +1051,38 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > appearing on the dashboard, accepting it, changing their mind, being refused when answering another
 > member's slot, and a POST without a CSRF token changing nothing.
 >
-> **Not built yet in Phase 6:** the automatic SMS/WhatsApp reminder 24 h before a service, newcomer
-> follow-up automation, and giving campaigns. Until the reminder lands, a member only sees an
-> invitation if they happen to open their account — so **notifying them when they are put on a rota is
-> the natural next step**, because an invitation nobody sees is an invitation nobody answers.
+> **6e shipped — rota notices and the day-before reminder.** `core/RosterNotifier.php` and
+> `cli/roster_worker.php`: a member added to a service is emailed once, and everyone still on the
+> rota is reminded the day before. `notified_at` and `reminded_at` are separate columns on purpose —
+> one shared "last message sent" would let the reminder suppress the first notice, so a rota filled in
+> on a Saturday would tell everybody about Sunday and then never mention it again.
+>
+> **Email only, and that is a deliberate deviation from this bullet's "SMS/WhatsApp".** An automatic
+> text message spends the church's SMS wallet per message. Switching that on belongs in an explicit
+> decision with a cost attached, not in the same change as a free email — so the channel is email,
+> the seam is `setMailer()`, and adding SMS is a follow-up with its own setting rather than something
+> that quietly starts billing.
+>
+> **A bug the tests caught, not the reviewer.** The first implementation reminded anyone on tomorrow's
+> service — including somebody who had been added that morning, who therefore got "you have been asked
+> to serve" immediately followed by "still waiting to hear from you". Two emails, the second reading
+> as a reproach for not answering something sent a minute earlier. The reminder now requires the
+> notice to have gone out on an *earlier day*.
+>
+> **A failed send is retried, not lost.** The claim is taken before sending so two runs cannot both
+> send it, and released again if the mail fails — a duplicate email is merely annoying, while a notice
+> that silently never arrives leaves a slot nobody knows about.
+>
+> **Verified:** 34 assertions against the real database with a substituted mail transport, so nothing
+> was actually sent: who is and is not reachable (no account, suspended, no address, cancelled
+> service, past service, beyond a 60-day horizon), the off switch and `--force`, a dry run marking
+> nothing, running twice sending once, the reminder reaching tomorrow's rota but not next month's,
+> wording changing with the member's answer, and a failed send being counted, released and retried.
+> **Not verified:** no email has been delivered — there is no SMTP configured here, and the worker's
+> own status line says so rather than pretending otherwise.
+>
+> **Not built yet in Phase 6:** newcomer follow-up automation and giving campaigns. SMS/WhatsApp for
+> rota messages is also still open, deliberately, for the cost reason above.
 >
 > **A finding worth carrying forward:** the first HTTP run showed the number leaking on three checks,
 > and the cause was the test harness — a fixture helper called with a missing argument fatally errored

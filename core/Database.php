@@ -1969,6 +1969,7 @@ class Database
                     `person_phone` VARCHAR(32) NULL,
                     `status` ENUM('invited','accepted','declined') NOT NULL DEFAULT 'invited',
                     `invited_at` TIMESTAMP NULL,
+                    `notified_at` DATETIME NULL,
                     `responded_at` DATETIME NULL,
                     `reminded_at` DATETIME NULL,
                     `notes` VARCHAR(255) NULL,
@@ -1978,6 +1979,21 @@ class Database
                     FOREIGN KEY (`role_id`) REFERENCES `service_roles`(`id`) ON DELETE CASCADE,
                     FOREIGN KEY (`member_id`) REFERENCES `members`(`id`) ON DELETE SET NULL
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+            },
+
+            // Telling people they are on the rota, and reminding them the day before.
+            //
+            // `notified_at` is separate from `reminded_at` rather than one "last message sent" column,
+            // because the two answer different questions: has this person been told at all, and has
+            // the day-before nudge gone. Sharing one column would let the second silently suppress the
+            // first — a rota populated on a Friday would produce no reminder for Sunday.
+            //
+            // `roster_reminder_enabled` defaults ON because these are emails, which cost nothing and
+            // are expected. It exists so a church that finds the volume annoying can stop it in one
+            // place rather than by turning off cron.
+            '2026_35_roster_notices' => function (PDO $pdo): void {
+                self::addColumnIfMissing($pdo, 'service_assignments', 'notified_at', 'DATETIME NULL', 'invited_at');
+                self::addColumnIfMissing($pdo, 'settings', 'roster_reminder_enabled', 'TINYINT(1) NOT NULL DEFAULT 1', 'reading_reminder_enabled');
             },
         ];
     }
