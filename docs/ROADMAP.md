@@ -65,7 +65,7 @@
 | **4** | WhatsApp channel | Official Cloud API integration (templates, 24-h window, webhooks) | 5–7 sessions | Per-conversation | ✅ closed (4.1–4.3; 4.4 rejected) |
 | **5** | Members & daily engagement | Member accounts, daily devotional, Bible reading plans + streaks, offline sermon downloads | 10–12 sessions | None | ✅ shipped (S1–S6) |
 | **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ✅ **complete** — 6a–6g shipped |
-| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings), 7b shipped (an account belongs to one church), 7c shipped (a unit belongs to one church), 7d-i shipped (worker tenancy plumbing), 7d-ii parts 1–2 and 4 shipped (the SMS worker, the sender-ID poller and the daily publisher report act as one church at a time), 7d-iii shipped (the SMS screens only touch their own church), 7d-iv shipped (the ads tables carry a church) |
+| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings), 7b shipped (an account belongs to one church), 7c shipped (a unit belongs to one church), 7d-i shipped (worker tenancy plumbing), 7d-ii parts 1–2 and 4 shipped (the SMS worker, the sender-ID poller and the daily publisher report act as one church at a time), 7d-iii shipped (the SMS screens only touch their own church), 7d-iv shipped (the ads tables carry a church), 7d-v shipped (the public advert flow was driven over HTTP, clearing 7d-iv's verification debt) |
 
 **Confirmed 2026-09-12:** multi-tenant **SaaS is a real goal**. That is why **Phase 0
 (tenancy foundation) runs before everything else** — the SMS token, sender IDs, country
@@ -1795,6 +1795,48 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 >
 > **Still not tested against a second church** — there is none in production, and every claim in this
 > audit is from reading the code, not from a run.
+
+> **7d-v shipped — the public advert flow was driven over HTTP.** This is the debt from 7d-iv, not a new
+> feature: the three church stamps in `core/routes.php` had been carried across two stages without ever
+> being executed. They now are. There is no second church in production and the local dev server is one
+> host, so the harness speaks HTTP over a raw socket and sets an arbitrary `Host:` header
+> (`ad-alpha.test`, `ad-beta.test`, then none) — which is how `Tenant::resolve()` is reached for a second
+> church from one server. Three multipart submissions were made with a real 1x1 PNG, a free
+> `ad_durations` fixture (so the flow stays offline) and a real CSRF token from a real session:
+>
+> 1. `POST /advertise` on `ad-alpha.test` — one publisher created, stamped with the alpha church.
+> 2. `POST /ad-manager?action=request_token` for that address on `ad-beta.test` — the address is **not**
+>    found; asked on `ad-alpha.test` it **is** found. The pair is what makes the negative meaningful.
+> 3. The same address on `ad-beta.test` — a **second** publisher, one per church, and the second advert
+>    stamped with the beta church and filed against that church's own publisher row.
+> 4. `POST /advertise` with no church-bearing `Host` — lands on the church being served (tenant 1).
+> 5. `SELECT COUNT(*) FROM ads a JOIN ad_publishers p ON p.id = a.publisher_id WHERE a.tenant_id <> p.tenant_id`
+>    is `0`, so no advert can be filed against another church's account within one request.
+>
+> **Verified (7d-v): 25 assertions, 0 failures**, plus two mutation checks. Removing the church filter
+> from the publisher lookup by email &rarr; **5 failures**, the headline being *"there are now two accounts
+> for that address, one per church — found 1"*, which is exactly the cross-church leak that fix closed.
+> Binding `0` instead of the publisher's church on the public ad insert &rarr; **4 failures**, including the
+> orphan query reporting `1 mismatched`.
+>
+> **Two harness defects found while chasing those failures, both worth remembering.** The rate limiter
+> names its counter file after a **hash** of `action:key`, so a `*advertise_submit*` glob matches nothing
+> and the counter silently carried over between runs — the sixth submission inside the window was
+> throttled, and the assertions after it failed for a reason that had nothing to do with the code under
+> test. And the harness never asserted that the **third** submission was accepted, so those two failures
+> surfaced only as "no publisher was created". A negative assertion is worth exactly as much as the
+> acceptance control standing next to it.
+>
+> **Also found, and fixed here:** 246 rate-limit counter files were **tracked** in the repo.
+> `.gitignore` declares `/storage/cache/ratelimit/` ignored, but the files had been committed before that
+> rule existed and were never removed from the index, so every deployment's counters churned in git.
+> They are now untracked; the files stay on disk and are regenerated on demand. Two smaller instances of
+> the same class — `storage/cache/bible/*` (5 files) and `storage/logs/media_worker.log` — are **still
+> tracked** and still churn. They were left alone deliberately rather than widening this commit.
+>
+> **Not verified:** no payment is taken (the free package keeps the flow offline and Payhub is
+> unconfigured), no email is delivered (no SMTP), and no browser was used — "the handler behaves
+> correctly" is established, "the page looks right" is not.
 
 > **Not built yet in Phase 7 (beyond 7d):** letting a church admin edit its own branding
 > (`admin/settings.php` is super-admin only, and letting one in needs a decision about which fields are
