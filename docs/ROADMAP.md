@@ -65,7 +65,7 @@
 | **4** | WhatsApp channel | Official Cloud API integration (templates, 24-h window, webhooks) | 5–7 sessions | Per-conversation | ✅ closed (4.1–4.3; 4.4 rejected) |
 | **5** | Members & daily engagement | Member accounts, daily devotional, Bible reading plans + streaks, offline sermon downloads | 10–12 sessions | None | ✅ shipped (S1–S6) |
 | **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ✅ **complete** — 6a–6g shipped |
-| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ partly advanced — the second church's app is built |
+| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings) |
 
 **Confirmed 2026-09-12:** multi-tenant **SaaS is a real goal**. That is why **Phase 0
 (tenancy foundation) runs before everything else** — the SMS token, sender IDs, country
@@ -1207,6 +1207,53 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > time in this project that a broken harness looked exactly like a broken feature.
 
 ## 9. Phase 7 — Reach & platform
+
+> **7a shipped — the settings screen is tenant-aware.** This was the one item in this phase that was
+> actively *wrong* rather than merely unbuilt, so it went first.
+>
+> **The bug:** `admin/settings.php` read and wrote `SELECT * FROM settings ORDER BY id ASC LIMIT 1`.
+> That "first row" is the shared defaults row, which belongs to nobody. So on an installation serving
+> two churches, the form showed every church the *platform defaults* — a church that had set its own
+> name would see somebody else's in the box — and saving wrote to the shared row, changing **every**
+> other church's site for any value they had not overridden themselves. Two more places had the same
+> shape: `admin/ads.php` wrote the Payhub keys to the first row, and `api/bible.php` read the Bible
+> source and api.bible token from it, so a church that pasted its own token was silently served the
+> platform default and the setting appeared not to save.
+>
+> **The fix is small because `helpers.php` was already right.** `settings()` resolves config defaults →
+> shared row → tenant row, and `settingSave()` writes the current tenant's row (creating it on first
+> write). The screens now use those instead of talking to the table directly: the form reads
+> `settings()` and writes `settingSave()`. Any column the resolution never supplied is filled with null
+> first, so a field that is empty everywhere renders as an empty box rather than an undefined-index
+> notice — which is what reading the resolved set rather than a full row would otherwise cause.
+>
+> **Reading the resolved set also fixes a display lie.** The form used to show the raw stored row; it
+> now shows what the site actually uses, inherited values included.
+>
+> **`settings` carries `UNIQUE (tenant_id)`**, so a church has at most one row and re-saving updates it
+> rather than accumulating rows. `tenant_id` is nullable and MySQL treats NULLs as distinct, which is
+> what allows the single shared defaults row alongside per-church rows.
+>
+> **There is deliberately no screen for editing the shared defaults.** Changing every church's branding
+> at once is a different act from editing one church's, and it deserves its own deliberate screen rather
+> than a checkbox on a page full of name-and-logo fields. The installer writes that row; per-church rows
+> override it.
+>
+> **Verified:** 47 domain assertions — resolution per church, that a value one church has not set still
+> inherits, that saving writes that church's row only, clearing a field storing NULL rather than being
+> skipped, `setCurrent()` being honoured only when the session was authorised and ignored for a
+> deactivated church, and the no-tenant path where `settingSave()` must fall back to the shared row.
+> Plus 35 HTTP assertions through a real super-admin login: the form showing the current church's name,
+> saving as church A leaving church B's row and the shared row untouched, switching churches through the
+> real switcher and the form following, saving as church B leaving A's work intact, the Payhub keys
+> landing on the current church only, and the public site rendering the right name.
+> Both harnesses removed afterwards; the settings and tenants tables are snapshotted and restored
+> exactly, and the harness asserts its own restore landed.
+>
+> **Not built yet in Phase 7:** per-church admin accounts (settings is still super-admin only, so a
+> church cannot yet edit its own branding without the platform owner), self-service tenant
+> provisioning with plan limits, per-tenant upload/cache namespacing, and tenant-scoped analytics and
+> reporting.
 
 - **Multi-tenant SaaS** — *the foundation is already built in Phase 0*. Phase 7 finishes the
   job: tenant-aware settings UI, per-tenant branding (logo, colours, domain) applied across

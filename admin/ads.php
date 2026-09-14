@@ -24,8 +24,16 @@ if ($action === 'settings' || $action === 'durations') {
         $manualEnabled = isset($_POST['manual_payment_enabled']) ? 1 : 0;
         $manualInstructions = trim((string) ($_POST['manual_payment_instructions'] ?? ''));
 
-        $pdo->prepare('UPDATE settings SET payhub_enabled = ?, payhub_public_key = ?, payhub_secret_key = ?, manual_payment_enabled = ?, manual_payment_instructions = ? WHERE id = (SELECT id FROM (SELECT id FROM settings LIMIT 1) t)')
-            ->execute([$payhubEnabled, $payhubPub, $payhubSec, $manualEnabled, $manualInstructions]);
+        // Written through settingSave() so the keys land on the church they were entered for. The old
+        // UPDATE targeted "the first settings row", which is the shared defaults row — so one church
+        // entering its Payhub keys would have replaced every other church's.
+        settingSave([
+            'payhub_enabled' => $payhubEnabled,
+            'payhub_public_key' => $payhubPub,
+            'payhub_secret_key' => $payhubSec,
+            'manual_payment_enabled' => $manualEnabled,
+            'manual_payment_instructions' => $manualInstructions,
+        ]);
 
         flash('success', 'Ad settings updated successfully.');
         redirect('/admin/ads?action=settings');

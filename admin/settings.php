@@ -9,8 +9,35 @@ if (!Auth::isSuperAdmin()) {
 $pdo = Database::getInstance()->getConnection();
 $errors = [];
 
-$row = $pdo->query('SELECT * FROM settings ORDER BY id ASC LIMIT 1')->fetch();
-$serviceTimes = $row && $row['service_times'] ? (json_decode($row['service_times'], true) ?: []) : [];
+/**
+ * The values this site actually uses.
+ *
+ * `settings()` resolves config defaults → the shared `settings` row (tenant_id IS NULL) → this
+ * church's own row, and that resolution is the whole point of the settings table. Reading "the first
+ * row" instead — which is what this screen used to do — shows the *platform defaults* to every
+ * church, so a church that had set its own name would see somebody else's in the form, and saving
+ * would write to the shared row and change every other church's site.
+ *
+ * Any column the resolution never supplied is filled with null so a field that is empty everywhere
+ * renders as an empty box rather than an undefined-index notice.
+ */
+$settingsRow = static function (): array {
+    $resolved = settings();
+    try {
+        $stmt = Database::getInstance()->getConnection()->query('SHOW COLUMNS FROM settings');
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $column) {
+            if (!array_key_exists($column, $resolved)) {
+                $resolved[$column] = null;
+            }
+        }
+    } catch (Throwable $e) {
+        // A pre-install database has no settings table; the form will render from config alone.
+    }
+    return $resolved;
+};
+
+$row = $settingsRow();
+$serviceTimes = $row['service_times'] ? (json_decode((string) $row['service_times'], true) ?: []) : [];
 
 // Run media worker on demand
 if (($_GET['action'] ?? '') === 'run_worker' && $_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -168,9 +195,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-        $setSql = implode(', ', array_map(fn ($k) => "$k = :$k", array_keys($fields)));
-        $executeParams = array_merge($fields, ['id' => $row['id']]);
-        $pdo->prepare("UPDATE settings SET $setSql WHERE id = :id")->execute($executeParams);
+        // Through settingSave(), which writes the current church's own row (creating it on first save)
+        // and leaves the shared defaults — and every other church — untouched. Column names come from
+        // our own code, never from request input.
+        settingSave($fields);
         if ($imageErrors) {
             flash('error', implode(' ', $imageErrors) . ' Other settings were still saved.');
         } else {
@@ -180,8 +208,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$row = $pdo->query('SELECT * FROM settings ORDER BY id ASC LIMIT 1')->fetch();
-$serviceTimes = $row['service_times'] ? (json_decode($row['service_times'], true) ?: []) : [];
+$row = $settingsRow();
+$serviceTimes = $row['service_times'] ? (json_decode((string) $row['service_times'], true) ?: []) : [];
 while (count($serviceTimes) < 4) {
     $serviceTimes[] = ['label' => '', 'time' => ''];
 }
@@ -192,6 +220,27 @@ require __DIR__ . '/partials/layout-open.php';
 ?>
 
 <?php foreach ($errors as $error): ?><div class="alert error"><?= e($error) ?></div><?php endforeach; ?>
+
+<?php
+// Say whose settings these are. On a single-church install this reads as reassurance; on an
+// installation serving several churches it is the difference between believing you changed your own
+// site and having actually changed everybody's.
+$currentTenant = class_exists('Tenant') ? Tenant::current() : null;
+?>
+<div class="card" style="margin-bottom:18px;">
+  <p style="margin:0;font-size:13.5px;">
+    <?php if ($currentTenant !== null): ?>
+      These are the settings for <strong><?= e((string) $currentTenant['name']) ?></strong>.
+      Saving changes this church only — other churches on this installation keep their own.
+    <?php else: ?>
+      These are the default settings for this installation, used by every church until a church saves its own.
+    <?php endif; ?>
+  </p>
+  <p class="sub" style="margin:8px 0 0;font-size:12.5px;">
+    Values fall back in order: the shipped defaults, then the installation defaults, then anything set
+    here. A field left empty is inherited rather than blanked.
+  </p>
+</div>
 
 <form method="post" enctype="multipart/form-data">
   <?= Csrf::field() ?>
