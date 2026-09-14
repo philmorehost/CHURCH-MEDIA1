@@ -225,7 +225,7 @@ require __DIR__ . '/partials/layout-open.php';
           <label for="manual_payment_enabled" style="margin:0;">Enable Manual Payment Method</label>
         </div>
         <label for="manual_payment_instructions">Bank Account Details &amp; Payment Instructions</label>
-        <textarea id="manual_payment_instructions" name="manual_payment_instructions" rows="3" placeholder="Bank Name: GTBank&#10;Account Name: Grace & Life Church&#10;Account Number: 0123456789"><?= e((string) setting('manual_payment_instructions')) ?></textarea>
+        <textarea id="manual_payment_instructions" name="manual_payment_instructions" rows="3" placeholder="Bank Name: GTBank&#10;Account Name: Your Church Name&#10;Account Number: 0123456789"><?= e((string) setting('manual_payment_instructions')) ?></textarea>
 
         <button type="submit" class="btn" style="margin-top:16px;">Save Gateway Settings</button>
       </form>

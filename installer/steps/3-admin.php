@@ -27,7 +27,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $email = trim($_POST['email'] ?? '');
     $password = (string) ($_POST['password'] ?? '');
     $confirm = (string) ($_POST['password_confirm'] ?? '');
-    $siteTitle = trim($_POST['site_title'] ?? '') ?: 'Grace & Life Church';
+    $siteTitle = trim($_POST['site_title'] ?? '') ?: 'Church Media';
     $siteTagline = trim($_POST['site_tagline'] ?? '');
     $contactEmail = trim($_POST['contact_email'] ?? '');
     $timezone = trim($_POST['timezone'] ?? 'Africa/Lagos');
@@ -115,7 +115,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   </div>
 
   <label for="site_title" style="margin-top:8px;">Site / Church Name</label>
-  <input type="text" id="site_title" name="site_title" value="<?= old('site_title', 'Grace & Life Church') ?>" required>
+  <input type="text" id="site_title" name="site_title" value="<?= old('site_title', 'Church Media') ?>" required>
   <label for="site_tagline">Tagline</label>
   <input type="text" id="site_tagline" name="site_tagline" value="<?= old('site_tagline', 'A place to belong, believe, and become') ?>">
   <div class="row">

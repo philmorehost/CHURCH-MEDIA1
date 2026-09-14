@@ -30,7 +30,7 @@ VALUES (1, 'Default Church', 'default', 1);
 CREATE TABLE IF NOT EXISTS `settings` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `tenant_id` INT NULL COMMENT 'NULL = shared defaults; otherwise this row overrides them for one tenant',
-  `site_title` VARCHAR(255) NOT NULL DEFAULT 'Grace & Life Church',
+  `site_title` VARCHAR(255) NOT NULL DEFAULT 'Church Media',
   `site_tagline` VARCHAR(255) NULL,
   `logo_path` VARCHAR(255) NULL,
   `favicon_path` VARCHAR(255) NULL,
@@ -610,7 +610,7 @@ CREATE TABLE IF NOT EXISTS `pages` (
 -- Seed the About page so the existing /about link has CMS content.
 INSERT INTO `pages` (`title`, `slug`, `eyebrow`, `content`, `meta_description`, `in_nav`, `nav_label`, `sort_order`)
 SELECT 'About Us', 'about', 'Our Story',
-  '[{"type":"text","heading":"Welcome to Grace & Life Church","body":"We are a family of believers on a journey together — growing in faith, building community, and serving our city with the love of Christ.","align":"center"},{"type":"columns","heading":"Why We Exist","columns":[{"heading":"Our Mission","body":"To lead people into a growing relationship with God, build authentic community, and serve our city with the love of Christ."},{"heading":"Our Vision","body":"A church without walls — reaching every generation, in the room and online, with hope that lasts."},{"heading":"Our Values","body":"Grace first. People over programs. Faith in action. Generosity, humility, and love in everything we do."}]},{"type":"quote","quote":"Wherever you are on your journey, you are welcome here — exactly as you are.","source":"Grace & Life Church"},{"type":"cta","title":"Come worship with us this weekend","subtitle":"Every Sunday — in the room and online.","label":"Plan a Visit","url":"/contact"}]',
+  '[{"type":"text","heading":"Welcome to Church Media","body":"We are a family of believers on a journey together — growing in faith, building community, and serving our city with the love of Christ.","align":"center"},{"type":"columns","heading":"Why We Exist","columns":[{"heading":"Our Mission","body":"To lead people into a growing relationship with God, build authentic community, and serve our city with the love of Christ."},{"heading":"Our Vision","body":"A church without walls — reaching every generation, in the room and online, with hope that lasts."},{"heading":"Our Values","body":"Grace first. People over programs. Faith in action. Generosity, humility, and love in everything we do."}]},{"type":"quote","quote":"Wherever you are on your journey, you are welcome here — exactly as you are.","source":"Church Media"},{"type":"cta","title":"Come worship with us this weekend","subtitle":"Every Sunday — in the room and online.","label":"Plan a Visit","url":"/contact"}]',
   'Learn about our story, mission, vision, and values.', 1, 'About',
   (SELECT COUNT(*) FROM `pages` WHERE `slug` = 'about')
 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `pages` WHERE `slug` = 'about');

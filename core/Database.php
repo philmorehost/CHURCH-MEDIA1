@@ -270,13 +270,13 @@ class Database
                 $check->execute(['about']);
                 if (!(int) $check->fetchColumn()) {
                     $content = json_encode([
-                        ['type' => 'text', 'heading' => 'Welcome to Grace & Life Church', 'body' => 'We are a family of believers on a journey together — growing in faith, building community, and serving our city with the love of Christ.', 'align' => 'center'],
+                        ['type' => 'text', 'heading' => 'Welcome to Church Media', 'body' => 'We are a family of believers on a journey together — growing in faith, building community, and serving our city with the love of Christ.', 'align' => 'center'],
                         ['type' => 'columns', 'heading' => 'Why We Exist', 'columns' => [
                             ['heading' => 'Our Mission', 'body' => 'To lead people into a growing relationship with God, build authentic community, and serve our city with the love of Christ.'],
                             ['heading' => 'Our Vision', 'body' => 'A church without walls — reaching every generation, in the room and online, with hope that lasts.'],
                             ['heading' => 'Our Values', 'body' => 'Grace first. People over programs. Faith in action. Generosity, humility, and love in everything we do.'],
                         ]],
-                        ['type' => 'quote', 'quote' => 'Wherever you are on your journey, you are welcome here — exactly as you are.', 'source' => 'Grace & Life Church'],
+                        ['type' => 'quote', 'quote' => 'Wherever you are on your journey, you are welcome here — exactly as you are.', 'source' => 'Church Media'],
                         ['type' => 'cta', 'title' => 'Come worship with us this weekend', 'subtitle' => 'Every Sunday — in the room and online.', 'label' => 'Plan a Visit', 'url' => '/contact'],
                     ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
                     $pdo->prepare('INSERT INTO pages (title, slug, eyebrow, content, meta_description, in_nav, nav_label, sort_order) VALUES (?, ?, ?, ?, ?, 1, ?, 10)')
@@ -1852,6 +1852,38 @@ class Database
             '2026_31_reading_reminder' => function (PDO $pdo): void {
                 self::addColumnIfMissing($pdo, 'members', 'reading_reminded_on', 'DATE NULL', 'reading_plan_id');
                 self::addColumnIfMissing($pdo, 'settings', 'reading_reminder_enabled', 'TINYINT(1) NOT NULL DEFAULT 1', 'devotional_push_enabled');
+            },
+
+            // The name this project was seeded with was one church's own, which meant every other
+            // church that never renamed itself was advertising a different church. The placeholder
+            // is now "Church Media" — obviously generic, so it reads as "you have not set this yet"
+            // rather than as somebody else's name.
+            //
+            // This has to be a migration and not only a change to config/site.php. settings()
+            // resolves config → shared row → this tenant's row, and array_filter drops NULLs, so a
+            // non-NULL site_title on the settings row always beats the config file. Any install
+            // that has ever saved settings has the old name stored, and would have kept showing it.
+            //
+            // Each statement is matched on the exact old seed string, so a church that typed its own
+            // name is untouched. The one honest edge case: a church genuinely called "Grace & Life
+            // Church" that left the seed value in place is renamed along with everyone else — it
+            // shows as "Church Media" in settings and can be typed back in seconds.
+            '2026_32_church_media_default' => function (PDO $pdo): void {
+                $old = 'Grace & Life Church';
+                $new = 'Church Media';
+
+                // The site title is a single unambiguous value, so an exact match is enough.
+                $pdo->prepare('UPDATE settings SET site_title = ? WHERE site_title = ?')
+                    ->execute([$new, $old]);
+
+                // The meta description is free text that may wrap the name in a sentence.
+                $pdo->prepare('UPDATE settings SET meta_description = REPLACE(meta_description, ?, ?) WHERE meta_description LIKE ?')
+                    ->execute([$old, $new, '%' . $old . '%']);
+
+                // The seeded About page says the name too. Both replacements are of the seed strings
+                // exactly, so a page a church has written itself is left alone.
+                $pdo->prepare('UPDATE pages SET content = REPLACE(REPLACE(content, ?, ?), ?, ?) WHERE content LIKE ?')
+                    ->execute(['Welcome to ' . $old, 'Welcome to ' . $new, $old, $new, '%' . $old . '%']);
             },
         ];
     }
