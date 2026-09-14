@@ -2236,6 +2236,48 @@ class Database
                     // No tenants table yet — nothing to attribute the units to.
                 }
             },
+
+            // Which church a push device belongs to.
+            //
+            // The last piece the 7d plumbing needs. `device_tokens` was built before tenancy and has no
+            // church of its own, which `core/DevotionalPush.php` says outright in a comment. So the
+            // daily devotional had no way to send one church's devotional to one church's phones: it
+            // read the switch, the text and the Firebase credentials of whichever church resolved
+            // first and pushed to every device in the install. Its two neighbours — `member_id` and
+            // `org_unit_id` — only hint at the answer, which is why the backfill uses them in that
+            // order.
+            //
+            // 0 means "no church assigned", and no tenant resolves to 0, so a device that cannot be
+            // attributed is reached by nobody rather than by everybody. That is the right way round for
+            // a push: a church's notice arriving on another church's phones is worse than it not
+            // arriving.
+            '2026_40_device_tenants' => function (PDO $pdo): void {
+                self::addColumnIfMissing($pdo, 'device_tokens', 'tenant_id', "INT NOT NULL DEFAULT 0 COMMENT '0 = no church assigned; otherwise Tenant::id()'", 'org_unit_id');
+                self::addIndexIfMissing($pdo, 'device_tokens', 'idx_device_tenant', 'INDEX `idx_device_tenant` (`tenant_id`)');
+
+                // Most specific first: a signed-in member's own church is a fact, the church whose unit
+                // the device last reported is a good guess, and only then the church the install serves.
+                // Each step is guarded on `tenant_id = 0`, so re-running this — which happens on every
+                // bootstrap — cannot overwrite an attribution the app has made since.
+                try {
+                    $pdo->exec('UPDATE device_tokens d JOIN members m ON m.id = d.member_id SET d.tenant_id = m.tenant_id WHERE d.tenant_id = 0 AND m.tenant_id > 0');
+                    $pdo->exec('UPDATE device_tokens d JOIN org_units u ON u.id = d.org_unit_id SET d.tenant_id = u.tenant_id WHERE d.tenant_id = 0 AND u.tenant_id > 0');
+                } catch (Throwable $e) {
+                    // members or org_units not present — the fallback below still applies.
+                }
+
+                try {
+                    $target = (int) $pdo->query('SELECT id FROM tenants WHERE is_default = 1 AND is_active = 1 ORDER BY id ASC LIMIT 1')->fetchColumn();
+                    if ($target === 0) {
+                        $target = (int) $pdo->query('SELECT id FROM tenants WHERE is_active = 1 ORDER BY id ASC LIMIT 1')->fetchColumn();
+                    }
+                    if ($target > 0) {
+                        $pdo->prepare('UPDATE device_tokens SET tenant_id = ? WHERE tenant_id = 0')->execute([$target]);
+                    }
+                } catch (Throwable $e) {
+                    // No tenants table yet — nothing to attribute the devices to.
+                }
+            },
         ];
     }
 

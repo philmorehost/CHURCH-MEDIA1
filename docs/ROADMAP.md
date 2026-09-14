@@ -65,7 +65,7 @@
 | **4** | WhatsApp channel | Official Cloud API integration (templates, 24-h window, webhooks) | 5–7 sessions | Per-conversation | ✅ closed (4.1–4.3; 4.4 rejected) |
 | **5** | Members & daily engagement | Member accounts, daily devotional, Bible reading plans + streaks, offline sermon downloads | 10–12 sessions | None | ✅ shipped (S1–S6) |
 | **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ✅ **complete** — 6a–6g shipped |
-| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings), 7b shipped (an account belongs to one church), 7c shipped (a unit belongs to one church) |
+| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings), 7b shipped (an account belongs to one church), 7c shipped (a unit belongs to one church), 7d-i shipped (worker tenancy plumbing) |
 
 **Confirmed 2026-09-12:** multi-tenant **SaaS is a real goal**. That is why **Phase 0
 (tenancy foundation) runs before everything else** — the SMS token, sender IDs, country
@@ -1414,8 +1414,9 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > both own `grace-zone` — the second silently gets `grace-zone-2` from the `uniqueSlug()` loop. Making
 > slugs per-church means changing that key, which is its own job.
 
-> **7d — PLANNED, not started (audited 2026-09-14). The background workers read one church's settings
-> while serving every church.** This block is the audit and the plan, written before any code.
+> **7d — PLANNED (audited 2026-09-14). 7d-i is shipped; 7d-ii is not.** The background workers read
+> one church's settings while serving every church. The audit below is written down before the code, as
+> a record of what was found.
 >
 > **First, a correction to what this document said after 7c.** It claimed `Devotional` and
 > `GivingCampaign` "act on the default church alone" in a cron. That is wrong for the workers: the
@@ -1457,26 +1458,70 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 >
 > **What is missing is a way to ask "as church X".** `setting()`/`settings()` resolve for *the* church
 > being served and take no church argument, and `Tenant::setCurrent()` is a *user* action — it writes
-> the session behind an authorisation flag — so a worker must not use it. 7d adds:
->   1. `Tenant::runAs(int $tenantId, callable $work)` — an in-process override that is set, used and
->      restored, with no session involvement, so it cannot leak into a request.
->   2. `settingFor(int $tenantId, string $key, $default)` (and whatever `settings()` equivalent the
->      implementation needs), since there is no other way to read another church's switch.
->   3. `device_tokens.tenant_id` — a migration with the same three-branch backfill as 7b/7c — so a
->      device can be attributed to a church at all. Stamped on registration and when the app reports
->      the church it is browsing.
+> the session behind an authorisation flag — so a worker must not use it.
 >
-> **Planned as two halves, each verifiable on its own.**
-> **7d-i — the plumbing:** the `device_tokens` migration, `Tenant::runAs()` and `settingFor()`, with
-> domain assertions that the override restores the ambient church, that it cannot outlive its
-> `callable`, and that a worker reading a switch sees the church it was told to.
-> **7d-ii — the conversions, one worker per commit, cheapest to riskiest:** `sms_worker` first (wrong
-> credentials), then `sms_sender_check` and `sms_maintenance`, then `devotional_worker` (needs the new
-> column), then `roster_worker` and `followup_worker`, then `wa_worker`. Each conversion loops the
-> churches and runs one pass per church, so a failure in one church cannot stop another's run.
+> **7d-i shipped — the plumbing.** Two pieces, both in `core/Tenant.php`, plus a migration.
 >
-> **Not verified yet: none of it, and none of the above can be tested here** — there is no second
-> church in production, and every claim in this audit is from reading the code, not from a run.
+> **`Tenant::runAs(int $tenantId, callable $work)`** runs a block of work as one named church and puts
+> the previous one back in a `finally`, so an exception inside the block cannot leave the process acting
+> as the wrong church, and nesting unwinds in order. It is deliberately **not** `setCurrent()`: a cron
+> must never touch a session. The override takes the first slot in `resolve()`, ahead of the session
+> switcher and the host, because the caller is stating the subject of the work.
+>
+> **`runAs(0, …)` acts as no church at all**, which is the case a worker hits for a row that belongs to
+> no church. That needs a separate `$overrideActive` flag rather than "is `$override` set": without it,
+> a `tenant_id = 0` row would fall through to the ambient church — the default one, in a cron — and be
+> sent under a church it does not belong to. That is the exact fault this stage exists to remove.
+>
+> **`Tenant::each(callable $work)`** is the only correct answer to "which churches does this run
+> cover?": one pass per active church from a cron, and a single pass as the church being served from a
+> web request, because a screen must never act on churches the person looking at it cannot see. It owns
+> the `runAs()` wrapper, so no caller can forget the restore, and it **holds each church's failure**
+> rather than throwing — a cron that stops at the first church with a problem stops being a schedule and
+> becomes a complaint, since the other churches' reminders would silently not go out. Each pass returns
+> `['ok' => bool, 'result' => mixed, 'error' => ?string]`.
+>
+> **`device_tokens.tenant_id`** (migration `2026_40_device_tenants`, mirrored in `installer/schema.sql`)
+> with an index and an attribution ladder rather than a plain backfill: the signed-in member's own
+> church first, then the church whose unit the device last reported, then the church the install serves.
+> Each step is guarded on `tenant_id = 0`, so re-running it — which happens on every bootstrap — cannot
+> overwrite an attribution the app has made since. 0 means "no church assigned", and a push to a device
+> nobody can attribute reaches nobody rather than everybody: a church's notice arriving on another
+> church's phones is worse than it not arriving.
+> `api/devices.php` stamps the church on both the insert and the update path.
+>
+> **`settingFor()` was in the plan and was NOT written.** On implementing `runAs()`, a worker that wraps
+> a whole pass in it reads every switch, credential and message substitution as that church already, so
+> `settingFor()` would be a helper with no caller. An unused helper is worse than a missing one, because
+> the next person cannot tell whether it is load-bearing. If a real need for "read one value as another
+> church, outside a pass" turns up, it is a three-line wrapper over `runAs()`.
+>
+> **Verified (7d-i): 70 assertions** — 51 domain and 19 over HTTP. The domain half: the column, its type
+> and default, the index, `schema.sql` mirroring both; the attribution ladder in all three cases and
+> that a re-run leaves a set attribution alone; that `runAs()` takes effect inside and restores outside;
+> that it restores after an exception; that nesting unwinds inner-then-outer; that a missing or
+> deactivated church leaves the block with **no** church rather than a different one; that `runAs(0)` is
+> the same; that `setting()` reads the church asked for inside a pass and the serving church outside;
+> and that `each()` visits every active church in id order, skips a deactivated one, gives each pass its
+> own church and its own settings, and holds one church's failure while the next still runs. The HTTP
+> half drives the app's `POST /api/devices` for real — the insert path, then the update path for the
+> same token — because that endpoint runs on every app launch and the change added a column and two bind
+> parameters to both statements, so a miscount there would break every launch rather than one screen.
+> Both harnesses snapshotted and restored exactly, asserting their own restore landed.
+>
+> **Not verified:** the member-bound branch of `api/devices.php` was not exercised — it needs a member
+> session and a login flow — though its failure mode is benign (an unreadable `members.tenant_id` leaves
+> the ambient church in place rather than picking a wrong one). `each()`'s web-request branch is also
+> unexercised, because every runner is still called only from `cli/`; it is kept anyway as a guard,
+> since without it a future "send now" button would loop every church.
+>
+> **7d-ii — the conversions, still to do.** One worker per commit, cheapest to riskiest: `sms_worker`
+> first (wrong credentials), then `sms_sender_check` and `sms_maintenance`, then `devotional_worker`
+> (needs the new column), then `roster_worker` and `followup_worker`, then `wa_worker`. Each becomes
+> `Tenant::each(...)` with the pass body unchanged, so a failure in one church cannot stop another's run.
+>
+> **Still not tested against a second church** — there is none in production, and every claim in this
+> audit is from reading the code, not from a run.
 
 > **Not built yet in Phase 7 (beyond 7d):** letting a church admin edit its own branding
 > (`admin/settings.php` is super-admin only, and letting one in needs a decision about which fields are

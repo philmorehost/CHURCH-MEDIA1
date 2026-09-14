@@ -997,12 +997,14 @@ CREATE TABLE IF NOT EXISTS `device_tokens` (
   `token` VARCHAR(512) NOT NULL,
   `platform` VARCHAR(30) NULL,
   `org_unit_id` INT NULL,
+  `tenant_id` INT NOT NULL DEFAULT 0 COMMENT '0 = no church assigned; otherwise Tenant::id(). The church whose app this device belongs to.',
   `member_id` INT NULL COMMENT 'NULL = anonymous device, no stated preferences',
   `user_agent` VARCHAR(255) NULL,
   `last_seen_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY `uniq_device_token` (`token`(255)),
   INDEX `idx_device_member` (`member_id`),
+  INDEX `idx_device_tenant` (`tenant_id`),
   FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL,
   FOREIGN KEY (`member_id`) REFERENCES `members`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

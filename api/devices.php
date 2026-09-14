@@ -65,12 +65,26 @@ $existing = $stmt->fetchColumn();
 // plain assignment would unbind a device every time it was opened by a signed-out user.
 $memberId = MemberAuth::check() ? MemberAuth::id() : null;
 
+// Which church this device belongs to (2026_40). The signed-in member's own church when there is one,
+// because that is a fact the app cannot get wrong; otherwise the church whose host this request
+// reached, which is the church the app was built for. A device that has never signed in is the
+// majority case and is answered by the host alone.
+$tenantId = (int) (Tenant::id() ?? 0);
+if ($memberId !== null) {
+    $ownTenant = $pdo->prepare('SELECT tenant_id FROM members WHERE id = ? LIMIT 1');
+    $ownTenant->execute([(int) $memberId]);
+    $own = (int) $ownTenant->fetchColumn();
+    if ($own > 0) {
+        $tenantId = $own;
+    }
+}
+
 if ($existing) {
-    $pdo->prepare('UPDATE device_tokens SET platform = ?, org_unit_id = ?, user_agent = ?, member_id = COALESCE(?, member_id) WHERE id = ?')
-        ->execute([$platform, $unitId, $ua, $memberId, (int) $existing]);
+    $pdo->prepare('UPDATE device_tokens SET platform = ?, org_unit_id = ?, user_agent = ?, member_id = COALESCE(?, member_id), tenant_id = ? WHERE id = ?')
+        ->execute([$platform, $unitId, $ua, $memberId, $tenantId, (int) $existing]);
 } else {
-    $pdo->prepare('INSERT INTO device_tokens (token, platform, org_unit_id, user_agent, member_id) VALUES (?, ?, ?, ?, ?)')
-        ->execute([$token, $platform, $unitId, $ua, $memberId]);
+    $pdo->prepare('INSERT INTO device_tokens (token, platform, org_unit_id, tenant_id, user_agent, member_id) VALUES (?, ?, ?, ?, ?, ?)')
+        ->execute([$token, $platform, $unitId, $tenantId, $ua, $memberId]);
 }
 
 jsonResponse(['status' => 'success', 'member_bound' => $memberId !== null]);

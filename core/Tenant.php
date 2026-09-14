@@ -25,6 +25,25 @@ final class Tenant
     private static bool $resolved = false;
     private static ?array $allCache = null;
 
+    /**
+     * A church forced for the duration of one `runAs()` block, or null when the block forces none.
+     *
+     * Deliberately separate from the session switcher: this is a background worker saying "act as
+     * this church for the next few statements", and it must never be written to a session or trusted
+     * across requests.
+     */
+    private static ?int $override = null;
+
+    /**
+     * True while a `runAs()` block is in force — including when it forces **no** church.
+     *
+     * The flag matters because `runAs(0, …)` is a real case: it is what a worker gets for a row that
+     * belongs to no church (`tenant_id = 0`). Without the flag that would silently fall through to the
+     * ambient church — which in a cron is the default one — and the row would be sent under a church it
+     * does not belong to. That is the exact fault this whole stage exists to remove.
+     */
+    private static bool $overrideActive = false;
+
     /** The tenant serving this request, or null before install / on failure. */
     public static function current(): ?array
     {
@@ -57,6 +76,114 @@ final class Tenant
         self::$resolved = false;
         self::$current = null;
         self::$allCache = null;
+    }
+
+    /**
+     * Runs `$work` as one named church, then puts the previous one back.
+     *
+     * This is how a background worker acts as one church at a time. It is deliberately **not**
+     * `setCurrent()`: that is a user action — it writes the session, and later requests trust it only
+     * because the caller authorised it — and a cron must never touch a session. The override lives for
+     * the length of the callable and is restored in a `finally`, so an exception inside `$work` cannot
+     * leave the process acting as the wrong church. Nested calls unwind in order.
+     *
+     * The override takes precedence over the session switcher and the host, because the caller is
+     * stating which church this block of work is about. In a web request it is used at most to re-state
+     * the church already being served — see `each()` — so a super admin who has switched church is
+     * never overridden behind their back.
+     *
+     * @param callable $work
+     * @return mixed whatever $work returned
+     */
+    public static function runAs(int $tenantId, callable $work)
+    {
+        $hadOverride = self::$overrideActive;
+        $previous = self::$override;
+
+        self::$overrideActive = true;
+        self::$override = $tenantId > 0 ? $tenantId : null;
+        self::forget();
+        try {
+            return $work($tenantId, self::current());
+        } finally {
+            self::$overrideActive = $hadOverride;
+            self::$override = $previous;
+            self::forget();
+        }
+    }
+
+    /**
+     * Runs `$work` once per church, passing `(int $tenantId, array $tenant)`.
+     *
+     * For the background workers, and it is the only correct answer to "which churches does this run
+     * cover?":
+     *
+     *  - From a **cron** there is no host to resolve from, so one pass per active church.
+     *  - From a **web request** — an admin clicking a "send now" button — just the church being served,
+     *    because a screen must never act on churches the person looking at it cannot see.
+     *
+     * On a single-church install both cases are one pass as that church, so converting a worker to this
+     * changes nothing there. The pass is wrapped in `runAs()`, so the restore is owned here and no
+     * caller can forget it.
+     *
+     * @param callable $work
+     * @return array<int, array{ok:bool,result:mixed,error:?string}> one entry per church, keyed by id
+     */
+    public static function each(callable $work): array
+    {
+        $results = [];
+
+        if (PHP_SAPI !== 'cli') {
+            $serving = self::id();
+            if ($serving !== null) {
+                $results[$serving] = self::pass($serving, $work);
+            }
+            return $results;
+        }
+
+        foreach (self::activeTenants() as $tenant) {
+            $results[(int) $tenant['id']] = self::pass((int) $tenant['id'], $work);
+        }
+        return $results;
+    }
+
+    /**
+     * One church's pass, with its failure held rather than thrown.
+     *
+     * A cron that stops at the first church with a problem stops being a schedule and becomes a
+     * complaint: the other churches' reminders would simply not go out, and nothing would say so. So the
+     * exception is logged, returned in the entry for that church, and the run carries on to the next.
+     * The caller decides what a failure means for its exit code — this only guarantees that the failure
+     * is visible and that nobody else is skipped.
+     *
+     * @param callable $work
+     * @return array{ok:bool,result:mixed,error:?string}
+     */
+    private static function pass(int $tenantId, callable $work): array
+    {
+        try {
+            return ['ok' => true, 'result' => self::runAs($tenantId, $work), 'error' => null];
+        } catch (Throwable $e) {
+            error_log('Tenant::each pass failed for church ' . $tenantId . ': ' . $e->getMessage());
+            return ['ok' => false, 'result' => null, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Every active church, lowest id first, as plain rows.
+     *
+     * Reads the table directly rather than going through `all()`/`forget()` so a run being made as one
+     * church cannot change which churches are left to visit.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private static function activeTenants(): array
+    {
+        try {
+            return self::db()->query('SELECT * FROM tenants WHERE is_active = 1 ORDER BY id ASC')->fetchAll();
+        } catch (Throwable $e) {
+            return [];
+        }
     }
 
     /** Every tenant: default first, then alphabetical. */
@@ -177,6 +304,27 @@ final class Tenant
     private static function resolve(): void
     {
         self::$resolved = true;
+
+        // 0. A background worker acting as a named church (see runAs()). This comes first because it is
+        //    the caller stating the subject of the work, and a cron has neither a session nor a host.
+        if (self::$overrideActive) {
+            if (self::$override !== null) {
+                try {
+                    $forced = self::find(self::$override);
+                    if ($forced && (int) $forced['is_active'] === 1) {
+                        self::$current = $forced;
+                        return;
+                    }
+                } catch (Throwable $e) {
+                    error_log('Tenant runAs failed: ' . $e->getMessage());
+                }
+            }
+            // A church that has gone away, been deactivated, or was never named (0) leaves the run with
+            // no church at all, rather than silently acting as a different one.
+            self::$current = null;
+            return;
+        }
+
         if (!defined('APP_IS_INSTALLED') || !APP_IS_INSTALLED) {
             return;
         }
