@@ -121,8 +121,12 @@ $router->post('/ad-manager', function () {
         }
 
         $pdo = Database::getInstance()->getConnection();
-        $stmt = $pdo->prepare('SELECT * FROM ad_publishers WHERE email = ? LIMIT 1');
-        $stmt->execute([$email]);
+        // Scoped to the church being served. Without this, typing an address into one church's site
+        // emailed another church's publisher a portal link — and that link carries the token that opens
+        // their Ad Manager.
+        [$tenantClause, $tenantParams] = tenantScope();
+        $stmt = $pdo->prepare('SELECT * FROM ad_publishers WHERE email = ? AND ' . $tenantClause . ' LIMIT 1');
+        $stmt->execute(array_merge([$email], $tenantParams));
         $pub = $stmt->fetch();
 
         if ($pub && !empty($pub['token'])) {
@@ -154,7 +158,10 @@ $router->post('/ad-manager', function () {
     }
 
     $pdo = Database::getInstance()->getConnection();
-    $stmt = $pdo->prepare('SELECT id FROM ad_publishers WHERE token = ? LIMIT 1');
+    // The token is the credential, so this is deliberately not church-scoped: an advert created here
+    // belongs to the publisher's own church, whichever host the portal was opened on, so a publisher's
+    // adverts can never end up attributed to a church they do not advertise for.
+    $stmt = $pdo->prepare('SELECT id, tenant_id FROM ad_publishers WHERE token = ? LIMIT 1');
     $stmt->execute([$token]);
     $pub = $stmt->fetch();
 
@@ -210,8 +217,8 @@ $router->post('/ad-manager', function () {
     $displayFreq = $dur ? (string) ($dur['display_frequency'] ?? '5_min') : '5_min';
     if ($isFree) { $displayFreq = 'once_daily'; }
 
-    $stmt = $pdo->prepare('INSERT INTO ads (publisher_id, title, media_type, file_path, thumbnail_path, destination_url, target_platform, duration_days, price, is_free, display_frequency, payment_status, payment_method, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "pending")');
-    $stmt->execute([(int) $pub['id'], $title, $mediaType, $filePath, $thumbPath, $destUrl ?: null, $targetPlatform, $durationDays, $price, $isFree, $displayFreq, $isFree ? 'paid' : 'unpaid', $isFree ? 'free' : 'online']);
+    $stmt = $pdo->prepare('INSERT INTO ads (publisher_id, tenant_id, title, media_type, file_path, thumbnail_path, destination_url, target_platform, duration_days, price, is_free, display_frequency, payment_status, payment_method, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "pending")');
+    $stmt->execute([(int) $pub['id'], (int) $pub['tenant_id'], $title, $mediaType, $filePath, $thumbPath, $destUrl ?: null, $targetPlatform, $durationDays, $price, $isFree, $displayFreq, $isFree ? 'paid' : 'unpaid', $isFree ? 'free' : 'online']);
 
     flash('pub_success', 'Your new advertisement has been submitted and is pending admin approval.');
     redirect('/ad-manager?token=' . rawurlencode($token));
@@ -420,17 +427,22 @@ $router->post('/advertise', function () {
         redirect('/advertise');
     }
 
-    // Find or create publisher
-    $stmt = $pdo->prepare('SELECT id, token FROM ad_publishers WHERE email = ? LIMIT 1');
-    $stmt->execute([$pubEmail]);
+    // Find or create publisher, within the church being served. The same advertiser buying space on two
+    // churches gets an account on each rather than one account whose adverts belong to a church it does
+    // not — and each account needs its own portal token anyway.
+    [$tenantClause, $tenantParams] = tenantScope();
+    $stmt = $pdo->prepare('SELECT id, token, tenant_id FROM ad_publishers WHERE email = ? AND ' . $tenantClause . ' LIMIT 1');
+    $stmt->execute(array_merge([$pubEmail], $tenantParams));
     $pub = $stmt->fetch();
     if ($pub) {
         $publisherId = (int) $pub['id'];
         $pubToken = $pub['token'];
+        $publisherTenant = (int) $pub['tenant_id'];
     } else {
         $pubToken = bin2hex(random_bytes(24));
-        $stmt = $pdo->prepare('INSERT INTO ad_publishers (name, email, phone, token) VALUES (?, ?, ?, ?)');
-        $stmt->execute([$pubName, $pubEmail, $pubPhone ?: null, $pubToken]);
+        $publisherTenant = (int) (Tenant::id() ?? 0);
+        $stmt = $pdo->prepare('INSERT INTO ad_publishers (name, email, phone, token, tenant_id) VALUES (?, ?, ?, ?, ?)');
+        $stmt->execute([$pubName, $pubEmail, $pubPhone ?: null, $pubToken, $publisherTenant]);
         $publisherId = (int) $pdo->lastInsertId();
     }
 
@@ -461,9 +473,9 @@ $router->post('/advertise', function () {
 
     $reference = 'PH_AD_' . time() . '_' . mt_rand(1000, 9999);
 
-    $stmt = $pdo->prepare('INSERT INTO ads (publisher_id, title, media_type, file_path, thumbnail_path, destination_url, target_platform, duration_days, price, is_free, display_frequency, payment_status, payment_method, payment_proof_path, payment_reference, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "pending")');
+    $stmt = $pdo->prepare('INSERT INTO ads (publisher_id, tenant_id, title, media_type, file_path, thumbnail_path, destination_url, target_platform, duration_days, price, is_free, display_frequency, payment_status, payment_method, payment_proof_path, payment_reference, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "pending")');
     $stmt->execute([
-        $publisherId, $title, $mediaType, $filePath, $thumbPath, $destUrl ?: null, $targetPlatform,
+        $publisherId, $publisherTenant, $title, $mediaType, $filePath, $thumbPath, $destUrl ?: null, $targetPlatform,
         $durationDays, $price, $isFree ? 1 : 0, $displayFreq, $paymentStatus, $paymentMethod, $proofPath, $reference
     ]);
     $adId = (int) $pdo->lastInsertId();

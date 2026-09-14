@@ -65,7 +65,7 @@
 | **4** | WhatsApp channel | Official Cloud API integration (templates, 24-h window, webhooks) | 5–7 sessions | Per-conversation | ✅ closed (4.1–4.3; 4.4 rejected) |
 | **5** | Members & daily engagement | Member accounts, daily devotional, Bible reading plans + streaks, offline sermon downloads | 10–12 sessions | None | ✅ shipped (S1–S6) |
 | **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ✅ **complete** — 6a–6g shipped |
-| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings), 7b shipped (an account belongs to one church), 7c shipped (a unit belongs to one church), 7d-i shipped (worker tenancy plumbing), 7d-ii parts 1–2 shipped (the SMS worker and the sender-ID poller act as one church at a time), 7d-iii shipped (the SMS screens only touch their own church) |
+| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings), 7b shipped (an account belongs to one church), 7c shipped (a unit belongs to one church), 7d-i shipped (worker tenancy plumbing), 7d-ii parts 1–2 shipped (the SMS worker and the sender-ID poller act as one church at a time), 7d-iii shipped (the SMS screens only touch their own church), 7d-iv shipped (the ads tables carry a church) |
 
 **Confirmed 2026-09-12:** multi-tenant **SaaS is a real goal**. That is why **Phase 0
 (tenancy foundation) runs before everything else** — the SMS token, sender IDs, country
@@ -1708,6 +1708,46 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > **Still outstanding, and separate:** `core/SmsCampaign.php:409` reads a campaign by id with no church
 > filter, and the dashboard's 30-day / "this month" spend tiles query `sms_campaign_recipients` with none
 > either. Both are reads on screens, so they belong with the rest of the settings/screens pass.
+>
+> **7d-iv shipped — the ads tables carry a church.** The enabler for `media_worker`, which cannot be
+> converted without it. Same shape as the `device_tokens` column 7d-i added.
+>
+> **What it was.** `ad_publishers` and `ads` predate tenancy completely: no church column, no unit, no
+> member to infer one from. So `cli/media_worker.php`'s daily "your advert performance" email read every
+> publisher on the install and sent each one under whichever church's name happened to resolve. Its
+> once-a-day stamp file is global as well, so **the first church to run in a day suppresses every other
+> church's report** — and the report it does send quotes the default church's `site_title` and links to
+> the default church's site. `media_post_items` has no church either, and that is fine: the video
+> conversion is file work whose only setting is `ffmpeg_path`, a platform binary path, so that half needs
+> no change at all.
+>
+> **What shipped:** `tenant_id INT NOT NULL DEFAULT 0` on both tables, indexed, with the same backfill
+> ladder used for units and devices — an advert inherits its publisher's church, and an existing publisher
+> can only be attributed to the church the install serves, because nothing else about it was ever
+> recorded. 0 still means "no church", so an advertiser nobody can attribute is reached by nobody rather
+> than by everybody.
+>
+> **The writers now stamp it.** The three inserts in `core/routes.php` carry it — and two lookups that
+> were as dangerous as the worker itself were closed with it. "Email me my portal link" looked a
+> publisher up **by email across every church**, so typing an address into one church's site emailed
+> another church's publisher a link carrying the token that opens their Ad Manager. The `/advertise`
+> find-or-create is scoped too, so an advertiser buying space on two churches gets an account on each;
+> the alternative was one publisher row whose adverts belong to a church it does not advertise for. The
+> token-based portal lookup is deliberately **not** scoped: a token is a credential, and an advert created
+> through it takes the publisher's own church, so a publisher's adverts can never straddle two.
+>
+> **Verified (7d-iv): 15 assertions.** The columns, their type, nullability, default and index; that a
+> fresh row really does start unattributed, which is what makes the stamping necessary rather than
+> decorative; the backfill in all three of its states, re-run through a real bootstrap in a subprocess
+> **because that is how it actually runs on every request**; that an advert follows its publisher rather
+> than the install's church, which is the only assertion that can tell the two backfill steps apart; and
+> that a re-run leaves a later attribution alone. The mutation check — neutering the inherit step — fails
+> exactly that assertion (`got 1, expected 80`).
+>
+> **Not verified:** the three stamps in `core/routes.php` are lint-clean and pass the reference sweep but
+> were **not driven**. The public `/advertise` flow needs a multipart upload and reaches the payment path,
+> so driving it is the next stage's work rather than something to claim here. Nothing reads the new column
+> yet, so no behaviour changed — which is also why this is safe to ship ahead of the worker conversion.
 >
 > **Still not tested against a second church** — there is none in production, and every claim in this
 > audit is from reading the code, not from a run.

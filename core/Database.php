@@ -2278,6 +2278,62 @@ class Database
                     // No tenants table yet — nothing to attribute the devices to.
                 }
             },
+
+            // Which church a publisher, and the advert they bought, belong to.
+            //
+            // These two tables predate tenancy altogether and carry no church at all — not a column, not
+            // a unit, not a member to infer one from. That is why `cli/media_worker.php`'s daily
+            // "your advert performance" email reads every publisher in the install and sends it under
+            // whichever church's name happens to resolve, and why its once-a-day stamp file is global:
+            // the first church to run in a day suppresses every other church's report, and the report it
+            // does send quotes the default church's `site_title` and links to the default church's site.
+            //
+            // A publisher is the best available evidence for an advert, so an existing advert inherits
+            // from its publisher and only falls back to the church the install serves.
+            //
+            // 0 means "no church assigned" and no tenant resolves to 0, so an unattributable advertiser
+            // is reached by nobody rather than by everybody — the same choice `device_tokens` made.
+            '2026_41_ads_tenants' => function (PDO $pdo): void {
+                self::addColumnIfMissing($pdo, 'ad_publishers', 'tenant_id', "INT NOT NULL DEFAULT 0 COMMENT '0 = no church assigned; otherwise Tenant::id()'", 'token');
+                self::addIndexIfMissing($pdo, 'ad_publishers', 'idx_pub_tenant', 'INDEX `idx_pub_tenant` (`tenant_id`)');
+
+                self::addColumnIfMissing($pdo, 'ads', 'tenant_id', "INT NOT NULL DEFAULT 0 COMMENT '0 = no church assigned; otherwise Tenant::id()'", 'publisher_id');
+                self::addIndexIfMissing($pdo, 'ads', 'idx_ad_tenant', 'INDEX `idx_ad_tenant` (`tenant_id`)');
+
+                try {
+                    $target = (int) $pdo->query('SELECT id FROM tenants WHERE is_default = 1 AND is_active = 1 ORDER BY id ASC LIMIT 1')->fetchColumn();
+                    if ($target === 0) {
+                        $target = (int) $pdo->query('SELECT id FROM tenants WHERE is_active = 1 ORDER BY id ASC LIMIT 1')->fetchColumn();
+                    }
+
+                    // A publisher has nothing to infer a church from, so the church the install serves is
+                    // the only honest answer. Guarded on 0, so re-running this — every bootstrap — cannot
+                    // overwrite an attribution the app has made since.
+                    if ($target > 0) {
+                        $pdo->prepare('UPDATE ad_publishers SET tenant_id = ? WHERE tenant_id = 0')->execute([$target]);
+                    }
+                } catch (Throwable $e) {
+                    // No tenants table yet — nothing to attribute the publishers to.
+                }
+
+                try {
+                    $pdo->exec('UPDATE ads a JOIN ad_publishers p ON p.id = a.publisher_id SET a.tenant_id = p.tenant_id WHERE a.tenant_id = 0 AND p.tenant_id > 0');
+                } catch (Throwable $e) {
+                    // ad_publishers not present — the fallback below still applies.
+                }
+
+                try {
+                    $target = (int) $pdo->query('SELECT id FROM tenants WHERE is_default = 1 AND is_active = 1 ORDER BY id ASC LIMIT 1')->fetchColumn();
+                    if ($target === 0) {
+                        $target = (int) $pdo->query('SELECT id FROM tenants WHERE is_active = 1 ORDER BY id ASC LIMIT 1')->fetchColumn();
+                    }
+                    if ($target > 0) {
+                        $pdo->prepare('UPDATE ads SET tenant_id = ? WHERE tenant_id = 0')->execute([$target]);
+                    }
+                } catch (Throwable $e) {
+                    // No tenants table yet — nothing to attribute the adverts to.
+                }
+            },
         ];
     }
 

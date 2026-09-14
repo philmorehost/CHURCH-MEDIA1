@@ -831,13 +831,16 @@ CREATE TABLE IF NOT EXISTS `ad_publishers` (
   `email` VARCHAR(150) NOT NULL,
   `phone` VARCHAR(45) NULL,
   `token` VARCHAR(64) NOT NULL UNIQUE,
+  `tenant_id` INT NOT NULL DEFAULT 0 COMMENT '0 = no church assigned; otherwise Tenant::id()',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  INDEX `idx_pub_email` (`email`)
+  INDEX `idx_pub_email` (`email`),
+  INDEX `idx_pub_tenant` (`tenant_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `ads` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `publisher_id` INT NOT NULL,
+  `tenant_id` INT NOT NULL DEFAULT 0 COMMENT '0 = no church assigned; otherwise Tenant::id()',
   `title` VARCHAR(200) NOT NULL,
   `media_type` ENUM('image','video') NOT NULL,
   `file_path` VARCHAR(255) NOT NULL,
