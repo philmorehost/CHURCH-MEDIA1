@@ -1414,16 +1414,75 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > both own `grace-zone` — the second silently gets `grace-zone-2` from the `uniqueSlug()` loop. Making
 > slugs per-church means changing that key, which is its own job.
 
-> **Not built yet in Phase 7:** letting a church admin edit its own branding (`admin/settings.php` is
-> super-admin only, and letting one in needs a decision about which fields are theirs — name, logo,
-> service times — and which belong to the platform: SMTP, the Payment Gateway, SMS credentials, backups
-> and the licence key). **And the cron workers only serve one church:** a worker has no host to resolve
-> from, so `Tenant::id()` is the default church on every CLI run, which means `Devotional`,
-> `GivingCampaign` and the roster and follow-up workers already act on the default church alone. Where a
-> worker is holding a row of its own — a campaign, a sender id — it now names that church, but the
-> general fix is to loop the workers per tenant, and that is unbuilt. Then self-service tenant
-> provisioning with plan limits, per-tenant upload/cache namespacing, and tenant-scoped analytics and
-> reporting.
+> **7d — PLANNED, not started (audited 2026-09-14). The background workers read one church's settings
+> while serving every church.** This block is the audit and the plan, written before any code.
+>
+> **First, a correction to what this document said after 7c.** It claimed `Devotional` and
+> `GivingCampaign` "act on the default church alone" in a cron. That is wrong for the workers: the
+> runners query their source tables with **no church filter at all**, so they do pick up every
+> church's rows. (`GivingCampaign` has no worker whatsoever — it is a web screen.) The real fault is
+> the opposite pairing: **each runner works for everyone and reads the settings of whoever is first.**
+>
+> **How it fails.** `Tenant::resolve()` skips the host lookup when `PHP_SAPI === 'cli'`, so in a cron
+> `Tenant::id()` is always the **default** church. So at 07:00 on an install with two churches the
+> devotional worker reads `setting('devotional_push_enabled')` — church 1's switch, so church 1
+> turning it off stops church 2's too; selects the devotional text through `Devotional`, which filters
+> `tenant_id` on **every** read, so church 2's members are sent **church 1's** devotional; and sends
+> through `Pusher`, whose Firebase credentials come from the settings row, and the two churches have
+> **different Firebase projects** — so church 2 may receive nothing at all rather than the wrong thing.
+> `core/DevotionalPush.php` already carries a comment saying it assumes one tenant: "`device_tokens`
+> has no `tenant_id` to filter on, and a cron run has no request host to resolve one from. True for
+> every deployment so far."
+>
+> **The audit — what each worker reads that belongs to a church:**
+>
+> | Worker | Reads (tenant-scoped) | Rows it processes |
+> |---|---|---|
+> | `devotional_worker` → `DevotionalPush` | the on/off switch, the devotional text, `site_title`, the FCM credentials | every device, because `device_tokens` has **no `tenant_id`** |
+> | `reading_worker` → `ReadingReminder` | the on/off switch, the plan/member reads | members of every church |
+> | `roster_worker` → `RosterNotifier` | the on/off switch, `site_title`, SMTP | assignments of every church |
+> | `followup_worker` → `FollowUpRunner` | SMTP, `site_title`, the church placeholders | enrolments of every church |
+> | `sms_worker` → `SmsRunner`, `SmsCampaign` | **the gateway token**, the default sender ID, `site_title` | every church's queued and due campaigns (the queries carry no church filter) |
+> | `sms_sender_check` | the gateway token, the default sender ID | every church's pending sender IDs |
+> | `sms_maintenance` | the log retention days | the whole table |
+> | `wa_worker` | stamps new conversation rows with the ambient church | every church's recipients |
+> | `media_worker` | `site_title` in an email (cosmetic) | by media id |
+> | `analytics_rollup` | — (aggregates rows that already carry their own `tenant_id`) | needs confirming while implementing |
+> | `backup` | — (dumps the whole database) | n/a |
+>
+> **Two things make this worse than a mis-read setting.** The SMS one is the most damaging because the
+> **gateway token is per-church**: a two-church install would send church 2's messages on church 1's
+> account, or fail. And WAF-style: `device_tokens` cannot be attributed to a church at all today — only
+> its `member_id` (→ `members.tenant_id`) or `org_unit_id` (the last church browsed) even hint at one.
+>
+> **What is missing is a way to ask "as church X".** `setting()`/`settings()` resolve for *the* church
+> being served and take no church argument, and `Tenant::setCurrent()` is a *user* action — it writes
+> the session behind an authorisation flag — so a worker must not use it. 7d adds:
+>   1. `Tenant::runAs(int $tenantId, callable $work)` — an in-process override that is set, used and
+>      restored, with no session involvement, so it cannot leak into a request.
+>   2. `settingFor(int $tenantId, string $key, $default)` (and whatever `settings()` equivalent the
+>      implementation needs), since there is no other way to read another church's switch.
+>   3. `device_tokens.tenant_id` — a migration with the same three-branch backfill as 7b/7c — so a
+>      device can be attributed to a church at all. Stamped on registration and when the app reports
+>      the church it is browsing.
+>
+> **Planned as two halves, each verifiable on its own.**
+> **7d-i — the plumbing:** the `device_tokens` migration, `Tenant::runAs()` and `settingFor()`, with
+> domain assertions that the override restores the ambient church, that it cannot outlive its
+> `callable`, and that a worker reading a switch sees the church it was told to.
+> **7d-ii — the conversions, one worker per commit, cheapest to riskiest:** `sms_worker` first (wrong
+> credentials), then `sms_sender_check` and `sms_maintenance`, then `devotional_worker` (needs the new
+> column), then `roster_worker` and `followup_worker`, then `wa_worker`. Each conversion loops the
+> churches and runs one pass per church, so a failure in one church cannot stop another's run.
+>
+> **Not verified yet: none of it, and none of the above can be tested here** — there is no second
+> church in production, and every claim in this audit is from reading the code, not from a run.
+
+> **Not built yet in Phase 7 (beyond 7d):** letting a church admin edit its own branding
+> (`admin/settings.php` is super-admin only, and letting one in needs a decision about which fields are
+> theirs — name, logo, service times — and which belong to the platform: SMTP, the Payment Gateway, SMS
+> credentials, backups and the licence key). Then self-service tenant provisioning with plan limits,
+> per-tenant upload/cache namespacing, and tenant-scoped analytics and reporting.
 
 - **Multi-tenant SaaS** — *the foundation is already built in Phase 0*. Phase 7 finishes the
   job: tenant-aware settings UI, per-tenant branding (logo, colours, domain) applied across
