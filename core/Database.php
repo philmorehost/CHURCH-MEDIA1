@@ -1995,6 +1995,92 @@ class Database
                 self::addColumnIfMissing($pdo, 'service_assignments', 'notified_at', 'DATETIME NULL', 'invited_at');
                 self::addColumnIfMissing($pdo, 'settings', 'roster_reminder_enabled', 'TINYINT(1) NOT NULL DEFAULT 1', 'reading_reminder_enabled');
             },
+
+            // Following up a first-time visitor.
+            //
+            // **`newcomers` had nowhere to put an email address**, only `whatsapp_phone`. So an
+            // automatic email sequence could not reach a single visitor: every step would be created
+            // and then skipped, which is the worst kind of broken — it looks like it ran. The column
+            // comes first for that reason.
+            //
+            // A sequence is a named list of steps, and every step is either an **email** (free, goes
+            // out on its own) or a **task** (something a person has to do — ring them, visit them).
+            // Both kinds are recorded in the same table, so "what is outstanding for this newcomer"
+            // is one question with one answer rather than a union of two.
+            //
+            // `follow_up_actions` carries `UNIQUE (enrolment_id, step_id)`. That single key is what
+            // makes the worker idempotent: writing the row *is* the claim, so a double-run cron and a
+            // double-clicked page both lose the race in the database rather than in the code.
+            //
+            // `channel` is copied onto the action rather than read through the step, so changing a
+            // step from email to task does not rewrite the history of what was already sent.
+            '2026_36_follow_up' => function (PDO $pdo): void {
+                self::addColumnIfMissing($pdo, 'newcomers', 'email', 'VARCHAR(190) NULL', 'whatsapp_phone');
+
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `follow_up_sequences` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `tenant_id` INT NOT NULL DEFAULT 0 COMMENT '0 = no tenant resolved; otherwise Tenant::id()',
+                    `org_unit_id` INT NULL COMMENT 'The church this sequence belongs to',
+                    `name` VARCHAR(150) NOT NULL,
+                    `description` VARCHAR(255) NULL COMMENT 'Shown under the name in the list',
+                    `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+                    `created_by` INT NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    INDEX `idx_fuseq_unit` (`org_unit_id`, `is_active`),
+                    FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `follow_up_steps` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `sequence_id` INT NOT NULL,
+                    `day_offset` INT NOT NULL DEFAULT 0 COMMENT 'Days after enrolment, not a calendar date',
+                    `channel` ENUM('email','task') NOT NULL DEFAULT 'email',
+                    `subject` VARCHAR(200) NULL COMMENT 'Email only',
+                    `body` TEXT NULL COMMENT 'Email only',
+                    `task_label` VARCHAR(200) NULL COMMENT 'Task only — what the person is being asked to do',
+                    `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    INDEX `idx_fstep_seq` (`sequence_id`, `day_offset`),
+                    FOREIGN KEY (`sequence_id`) REFERENCES `follow_up_sequences`(`id`) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `follow_up_enrolments` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `sequence_id` INT NOT NULL,
+                    `newcomer_id` INT NOT NULL,
+                    `enrolled_on` DATE NOT NULL COMMENT 'Day 0 for every day_offset on this sequence',
+                    `status` ENUM('active','stopped','finished') NOT NULL DEFAULT 'active',
+                    `stopped_reason` VARCHAR(255) NULL,
+                    `stopped_at` DATETIME NULL,
+                    `enrolled_by` INT NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY `uniq_enrol` (`newcomer_id`, `sequence_id`),
+                    INDEX `idx_enrol_status` (`sequence_id`, `status`),
+                    FOREIGN KEY (`sequence_id`) REFERENCES `follow_up_sequences`(`id`) ON DELETE CASCADE,
+                    FOREIGN KEY (`newcomer_id`) REFERENCES `newcomers`(`id`) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `follow_up_actions` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `enrolment_id` INT NOT NULL,
+                    `step_id` INT NOT NULL,
+                    `channel` ENUM('email','task') NOT NULL COMMENT 'Copied from the step so history survives an edit',
+                    `due_on` DATE NOT NULL,
+                    `claimed_at` DATETIME NULL COMMENT 'Taken before sending, so two runs cannot both send',
+                    `sent_at` DATETIME NULL,
+                    `done_at` DATETIME NULL COMMENT 'A task somebody ticked off',
+                    `done_by` INT NULL,
+                    `note` VARCHAR(255) NULL,
+                    `attempts` INT NOT NULL DEFAULT 0 COMMENT 'Send attempts so far; a bad address must not retry for ever',
+                    `error` VARCHAR(255) NULL COMMENT 'Last send failure, cleared when a retry succeeds',
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY `uniq_action` (`enrolment_id`, `step_id`),
+                    INDEX `idx_action_open` (`channel`, `due_on`),
+                    FOREIGN KEY (`enrolment_id`) REFERENCES `follow_up_enrolments`(`id`) ON DELETE CASCADE,
+                    FOREIGN KEY (`step_id`) REFERENCES `follow_up_steps`(`id`) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+            },
         ];
     }
 

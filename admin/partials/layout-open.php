@@ -60,6 +60,7 @@ $navGroups = [
             ['key' => 'prayer', 'href' => '/admin/prayer', 'label' => 'Prayer Wall'],
             ['key' => 'testimonies', 'href' => '/admin/testimonies', 'label' => 'Testimonies'],
             ['key' => 'newcomers', 'href' => '/admin/newcomers', 'label' => 'Newcomers'],
+            ['key' => 'follow-up', 'href' => '/admin/follow-up', 'label' => 'Follow-up'],
             ['key' => 'team', 'href' => '/admin/team', 'label' => 'Team'],
         ],
     ],

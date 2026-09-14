@@ -51,6 +51,7 @@ require __DIR__ . '/partials/layout-open.php';
     <a href="#notifications">Notifications</a>
     <a href="#attendance">Attendance</a>
     <a href="#newcomers">Newcomers</a>
+    <a href="#followup">Follow-up</a>
     <a href="#pages">Pages</a>
     <a href="#units">Units</a>
     <a href="#home-cells">Home Cells</a>
@@ -339,7 +340,29 @@ require __DIR__ . '/partials/layout-open.php';
       <li><strong>⬇ Export CSV</strong> exports the current filtered list (or everyone), or <strong>🔗 Save &amp; Share Link</strong> saves it on the server and gives you a shareable link.</li>
       <li>Add newcomers straight from an attendance row via the <strong>+ Newcomer</strong> shortcut.</li>
     </ul>
-    <p>Newcomers are private too — only your church's admins/editors can see them.</p>
+    <p>Newcomers are private too — only your church's admins/editors can see them. Add an <strong>email address</strong> if you want the automatic follow-up emails to reach them; without one the sequence still sets tasks for you, and the Follow-up page lists who is affected.</p>
+  </div>
+
+  <div class="card" style="margin-bottom:18px;">
+    <h2 id="followup">Follow-up (<code>/admin/follow-up</code>) <span class="pill role">ADMIN/EDITOR</span></h2>
+    <p>What happens after somebody visits for the first time — and whether it is actually happening. A <strong>sequence</strong> is a list of <strong>steps</strong>, and a step is one of two things:</p>
+    <ul>
+      <li>an <strong>email</strong>, which goes out on its own and costs nothing; or</li>
+      <li>a <strong>task</strong>, which appears on this page for a person to do — ring them, visit them, introduce them to a home cell.</li>
+    </ul>
+    <p>Both kinds show up in the same place, so “what is outstanding for this visitor” is one list rather than two.</p>
+    <p><strong>Days are counted from the day you enrol them</strong>, not from the calendar, so one sequence works for a visitor who arrives on any day of the year. There is a <strong>four-step starting plan</strong> you can drop into an empty sequence and then reword: a thank-you the same day, a phone call on day 3, an invitation on day 7, and a home cell invitation on day 14.</p>
+    <p>Use <code>{{first_name}}</code>, <code>{{name}}</code> or <code>{{church}}</code> anywhere in an email and it is filled in for each person. A misspelled placeholder is left visible on purpose, so it is obvious and gets fixed rather than quietly turning into “Dear ,”.</p>
+    <p><strong>The hub leads with the two things that go wrong quietly.</strong> <em>Needing attention</em> lists visitors nobody has managed to move — never contacted within <?= FollowUp::STALL_NEW_DAYS ?> days of arriving, or nothing done for <?= FollowUp::STALL_CONTACTED_DAYS ?> days after first contact. <em>Emails the mail server refused</em> lists sends that bounced; they are retried after an hour, up to <?= FollowUpRunner::MAX_ATTEMPTS ?> times, and a wrong address sits there rather than failing in silence.</p>
+    <p><strong>Nothing is sent until the worker runs.</strong> Add this to cron — hourly is plenty, and safe at any hour, because an email does not ring in somebody's bedroom the way a text message does:</p>
+    <pre style="background:#0f0d1f;border:1px solid var(--border);border-radius:10px;padding:12px;overflow:auto;font-size:12.5px;">20 * * * * php <?= e(ROOT_PATH) ?>/cli/followup_worker.php --quiet</pre>
+    <p>At most <strong>one email per person per run</strong>. If you enrol somebody against last month's visits, the steps that are already due catch up over the next few runs instead of arriving as one burst.</p>
+    <ul>
+      <li><strong>Stopping is immediate.</strong> Mark a newcomer <em>Inactive</em> and their sequence stops there and then — not whenever the worker next runs — and the tasks come off the list.</li>
+      <li><strong>Enrolling twice does nothing.</strong> Somebody is in a sequence once, however many times the button is pressed.</li>
+      <li><strong>A sequence people are already in cannot be deleted</strong>, and neither can a step that has already reached somebody. Switch either off instead: that stops the work and keeps the record of what was sent.</li>
+      <li><strong>Text messages are deliberately not sent.</strong> An automatic SMS spends your SMS wallet per message, so that is a decision with a price on it rather than something that should ride along with free email.</li>
+    </ul>
   </div>
 
   <div class="card" style="margin-bottom:18px;">

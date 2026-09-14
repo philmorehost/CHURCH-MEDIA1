@@ -732,6 +732,7 @@ CREATE TABLE IF NOT EXISTS `newcomers` (
   `org_unit_id` INT NULL,
   `name` VARCHAR(150) NOT NULL,
   `whatsapp_phone` VARCHAR(40) NULL,
+  `email` VARCHAR(190) NULL COMMENT 'Needed for automatic follow-up email; NULL for a visitor who only left a number',
   `address` VARCHAR(255) NULL,
   `gender` ENUM('male','female','other') NULL,
   `age_group` ENUM('adult','children','youth') NOT NULL DEFAULT 'adult',
@@ -1015,6 +1016,98 @@ CREATE TABLE IF NOT EXISTS `service_assignments` (
   INDEX `idx_assign_member` (`member_id`),
   FOREIGN KEY (`role_id`) REFERENCES `service_roles`(`id`) ON DELETE CASCADE,
   FOREIGN KEY (`member_id`) REFERENCES `members`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Following up a first-time visitor.
+--
+-- `newcomers` originally had nowhere to put an email address, only `whatsapp_phone`, so an automatic
+-- email sequence could not have reached a single visitor: every step would have been created and then
+-- skipped, which is the worst kind of broken because it looks like it ran. Hence `newcomers.email`.
+--
+-- A step is either an **email** (free, sends itself) or a **task** (something a person must do — ring
+-- them, visit them). Both land in `follow_up_actions`, so "what is outstanding for this newcomer" is
+-- one question with one answer instead of a union of two tables.
+CREATE TABLE IF NOT EXISTS `follow_up_sequences` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NOT NULL DEFAULT 0 COMMENT '0 = no tenant resolved; otherwise Tenant::id()',
+  `org_unit_id` INT NULL COMMENT 'The church this sequence belongs to',
+  `name` VARCHAR(150) NOT NULL,
+  `description` VARCHAR(255) NULL COMMENT 'Shown under the name in the list',
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `created_by` INT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_fuseq_unit` (`org_unit_id`, `is_active`),
+  FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- `day_offset` is days after enrolment, not a calendar date, so one sequence works for visitors who
+-- arrive on any day of the year. Two steps may share an offset — a "text and a task on day 3" is a
+-- reasonable thing to want, and a UNIQUE key here would refuse it for no good reason.
+CREATE TABLE IF NOT EXISTS `follow_up_steps` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `sequence_id` INT NOT NULL,
+  `day_offset` INT NOT NULL DEFAULT 0,
+  `channel` ENUM('email','task') NOT NULL DEFAULT 'email',
+  `subject` VARCHAR(200) NULL COMMENT 'Email only',
+  `body` TEXT NULL COMMENT 'Email only',
+  `task_label` VARCHAR(200) NULL COMMENT 'Task only — what the person is being asked to do',
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_fstep_seq` (`sequence_id`, `day_offset`),
+  FOREIGN KEY (`sequence_id`) REFERENCES `follow_up_sequences`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- One newcomer in one sequence.
+--
+-- `UNIQUE (newcomer_id, sequence_id)` is what stops somebody being enrolled twice — by a second click,
+-- by an import, or by an admin who forgot. Re-enrolling is a no-op rather than a second stream of
+-- messages.
+--
+-- `stopped` is a distinct state from `finished`: one means a person asked us to stop or the church
+-- gave up, the other means the sequence ran to its end. Collapsing them would lose why it ended.
+CREATE TABLE IF NOT EXISTS `follow_up_enrolments` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `sequence_id` INT NOT NULL,
+  `newcomer_id` INT NOT NULL,
+  `enrolled_on` DATE NOT NULL COMMENT 'Day 0 for every day_offset on this sequence',
+  `status` ENUM('active','stopped','finished') NOT NULL DEFAULT 'active',
+  `stopped_reason` VARCHAR(255) NULL,
+  `stopped_at` DATETIME NULL,
+  `enrolled_by` INT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_enrol` (`newcomer_id`, `sequence_id`),
+  INDEX `idx_enrol_status` (`sequence_id`, `status`),
+  FOREIGN KEY (`sequence_id`) REFERENCES `follow_up_sequences`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`newcomer_id`) REFERENCES `newcomers`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- One row per step per enrolment: either an email that went out, or a task still owed.
+--
+-- `UNIQUE (enrolment_id, step_id)` is the whole idempotency story. The worker writes this row to
+-- claim the work *before* it sends, so a cron that fires twice and an admin who clicks twice both lose
+-- the race in the database rather than in a PHP check that a future edit could remove.
+--
+-- `channel` is copied from the step rather than joined, so switching a step from email to task does
+-- not silently rewrite the record of what was already sent to people.
+CREATE TABLE IF NOT EXISTS `follow_up_actions` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `enrolment_id` INT NOT NULL,
+  `step_id` INT NOT NULL,
+  `channel` ENUM('email','task') NOT NULL,
+  `due_on` DATE NOT NULL,
+  `claimed_at` DATETIME NULL COMMENT 'Taken before sending, so two runs cannot both send',
+  `sent_at` DATETIME NULL,
+  `done_at` DATETIME NULL COMMENT 'A task somebody ticked off',
+  `done_by` INT NULL,
+  `note` VARCHAR(255) NULL,
+  `attempts` INT NOT NULL DEFAULT 0 COMMENT 'Send attempts so far; a bad address must not retry for ever',
+  `error` VARCHAR(255) NULL COMMENT 'Last send failure, cleared when a retry succeeds',
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_action` (`enrolment_id`, `step_id`),
+  INDEX `idx_action_open` (`channel`, `due_on`),
+  FOREIGN KEY (`enrolment_id`) REFERENCES `follow_up_enrolments`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`step_id`) REFERENCES `follow_up_steps`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Daily devotionals. `tenant_id` and `org_unit_id` are NOT NULL DEFAULT 0 rather than

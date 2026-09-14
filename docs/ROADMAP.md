@@ -64,7 +64,7 @@
 | **3** | Sermons: series + podcast | Sermon series, series pages, podcast RSS feed + Spotify/Apple submission | 3–4 sessions | None | ✅ shipped (3.1–3.6) |
 | **4** | WhatsApp channel | Official Cloud API integration (templates, 24-h window, webhooks) | 5–7 sessions | Per-conversation | ✅ closed (4.1–4.3; 4.4 rejected) |
 | **5** | Members & daily engagement | Member accounts, daily devotional, Bible reading plans + streaks, offline sermon downloads | 10–12 sessions | None | ✅ shipped (S1–S6) |
-| **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ⬜ **next** — 6a–6e shipped |
+| **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ⬜ **next** — 6a–6f shipped |
 | **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ partly advanced — the second church's app is built |
 
 **Confirmed 2026-09-12:** multi-tenant **SaaS is a real goal**. That is why **Phase 0
@@ -1081,8 +1081,75 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > **Not verified:** no email has been delivered — there is no SMTP configured here, and the worker's
 > own status line says so rather than pretending otherwise.
 >
-> **Not built yet in Phase 6:** newcomer follow-up automation and giving campaigns. SMS/WhatsApp for
-> rota messages is also still open, deliberately, for the cost reason above.
+> **Not built yet in Phase 6:** giving campaigns. SMS/WhatsApp for rota and follow-up messages is also
+> still open, deliberately, for the cost reason above.
+
+> **6f shipped — newcomer follow-up automation.** `follow_up_sequences` + `follow_up_steps` +
+> `follow_up_enrolments` + `follow_up_actions`, `core/FollowUp.php`, `core/FollowUpRunner.php`,
+> `cli/followup_worker.php`, `admin/follow-up.php`, and a Follow-up section in the guide.
+>
+> **`newcomers` had nowhere to put an email address.** Only `whatsapp_phone` existed — `SmsContacts`
+> had been selecting `NULL AS email` for newcomers since Phase 5. So this feature could not have
+> reached a single visitor: every email step would have been created and then skipped, which is the
+> worst kind of broken because it looks like it ran. `newcomers.email` came first for that reason.
+>
+> **A step is an email or a task, and both land in one table.** An email sends itself; a task is
+> something a person has to do. Putting both in `follow_up_actions` means "what is outstanding for
+> this visitor" is one question with one answer instead of a union of two tables. Most visitors leave
+> a phone number and nothing else, so the tasks are the part of a sequence that works for everybody.
+>
+> **Idempotency is the unique key, not a PHP check.** `UNIQUE (enrolment_id, step_id)` means the row
+> *is* the claim, written before sending. A cron that fires twice and an admin who double-clicks both
+> lose the race in the database rather than in a branch a future edit could remove. `UNIQUE
+> (newcomer_id, sequence_id)` does the same for enrolment.
+>
+> **One email per person per run**, deliberately. A church catching up on last month's visitors
+> backdates `enrolled_on`, which makes every step up to today due at once; without the cap the visitor
+> receives the whole sequence in a minute. The backlog drains over a few runs instead.
+>
+> **A stall is measured from a different clock in each state** — `created_at` for somebody never
+> contacted (how long the church has had their name), `updated_at` for somebody already contacted (how
+> long since anyone did anything). Two thresholds, because a first visit goes cold in three days while
+> a fortnight of silence after contact is a different kind of problem.
+>
+> **No global on/off switch, deliberately.** Every other worker has one; this one's control is each
+> sequence's own switch, which sits on the page an admin already uses. A second, less discoverable
+> switch that did the same thing would be one more control that can be set wrong and then blamed on
+> the software — the same reasoning as the `reading_plan`, WhatsApp-consent and devotional-tick
+> controls that turned out to be dead.
+>
+> **Four bugs the tests caught, not a reviewer:**
+> 1. `FollowUpRunner` passed the `due()` row straight to `render()`, but that query aliases the name to
+>    `newcomer_name` — so every email would have gone out saying **"Dear ,"**. The one personal thing
+>    in the message, missing, in a message that was actually sent.
+> 2. A failed send wrote its action row, and the completion pass read *the existence of a row* as
+>    "this step is done" — so the enrolment was silently closed, the retry never happened, and the
+>    visitor dropped out of the sequence without anybody being told. Completion is now per channel: an
+>    email counts only once `sent_at` is set, a task as soon as it is on somebody's list.
+> 3. `admin/newcomers.php` collected an email error into `$errors` and then ran the INSERT anyway, so a
+>    malformed address was reported **and saved** — leaving a sequence that looked like it was running
+>    while every message bounced. Any error now stops the write.
+> 4. A failed send was counted twice in `attempts` (once at claim, once at failure), so the retry limit
+>    arrived at half the intended number of attempts.
+>
+> **A landmine found on the way, worth knowing:** `core/Database.php` carries a lock-out guard that
+> promotes the lowest-id user back to super admin whenever no super admin exists — and **every migration
+> re-runs on every bootstrap**, so this fires on any request. Clearing `is_super_admin` on the only
+> admin is therefore undone immediately, and a "scoped admin" test fixture built that way silently
+> stays a super admin, making every scope assertion pass for the wrong reason. Scoped fixtures must be
+> a second user.
+>
+> **Verified:** 96 domain assertions (validation, ordering, idempotent enrolment, timeline arithmetic
+> including backdating, per-channel completion, stop semantics, the pipeline and stall rules, and
+> placeholder rendering); 60 runner assertions with a substituted mail transport covering who is and is
+> not due, the one-email-per-run cap, draining to a steady state, the dry run writing nothing, a
+> refusal being recorded and retried once the window passes, giving up after the attempt limit, and a
+> one-step sequence finishing. Plus 49 HTTP assertions through real admin logins for both the hub, the
+> editor, the visitor page, the switch-off path, and scope — including that a scoped admin is sent away
+> from another church's sequence, visitor, and cannot enrol anybody into it. All three harnesses were
+> removed afterwards and the database restored.
+> **Not verified:** no email has actually been delivered — there is no SMTP configured here, and the
+> worker's status line says so rather than pretending otherwise.
 >
 > **A finding worth carrying forward:** the first HTTP run showed the number leaking on three checks,
 > and the cause was the test harness — a fixture helper called with a missing argument fatally errored
