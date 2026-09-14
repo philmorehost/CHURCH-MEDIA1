@@ -2172,12 +2172,25 @@ class Database
                 self::addColumnIfMissing($pdo, 'users', 'tenant_id', "INT NOT NULL DEFAULT 0 COMMENT '0 = no church assigned; otherwise Tenant::id()'", 'org_unit_id');
                 self::addIndexIfMissing($pdo, 'users', 'idx_user_tenant', 'INDEX `idx_user_tenant` (`tenant_id`)');
 
-                // Accounts that predate multi-tenancy belong to the default church, so a plain
-                // `tenant_id = ?` read never has to special-case 0.
+                // Accounts that predate multi-tenancy belong to the church this installation actually
+                // serves, so a plain `tenant_id = ?` read never has to special-case 0.
+                //
+                // The target is chosen with the SAME order `Tenant::resolve()` uses — the default
+                // church if it is active, otherwise the lowest active one. Asking for `is_default = 1`
+                // alone was not good enough: a church deactivated by hand while another one is active
+                // would be stamped onto every legacy account, while the site itself resolves to the
+                // other church, and then those accounts could sign in nowhere at all.
+                //
+                // If nothing is active then `Tenant::id()` is null everywhere and any tenant would
+                // refuse every one of them, so the rows are deliberately left at 0 — the single state
+                // where 0 matches the null and nobody is shut out.
                 try {
-                    $defaultTenant = (int) $pdo->query('SELECT id FROM tenants WHERE is_default = 1 ORDER BY id ASC LIMIT 1')->fetchColumn();
-                    if ($defaultTenant > 0) {
-                        $pdo->prepare('UPDATE users SET tenant_id = ? WHERE tenant_id = 0')->execute([$defaultTenant]);
+                    $target = (int) $pdo->query('SELECT id FROM tenants WHERE is_default = 1 AND is_active = 1 ORDER BY id ASC LIMIT 1')->fetchColumn();
+                    if ($target === 0) {
+                        $target = (int) $pdo->query('SELECT id FROM tenants WHERE is_active = 1 ORDER BY id ASC LIMIT 1')->fetchColumn();
+                    }
+                    if ($target > 0) {
+                        $pdo->prepare('UPDATE users SET tenant_id = ? WHERE tenant_id = 0')->execute([$target]);
                     }
                 } catch (Throwable $e) {
                     // No tenants table yet — nothing to attribute the accounts to.

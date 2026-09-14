@@ -1267,11 +1267,20 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > "No admin account found", which is an enumeration oracle across the whole platform.
 >
 > **The fix is a column and a comparison.** Migration `2026_38_user_tenants` adds `users.tenant_id`
-> (`INT NOT NULL DEFAULT 0`) and backfills 0 → the default church, following the pattern
+> (`INT NOT NULL DEFAULT 0`) and backfills 0 → the church the site actually serves, following the pattern
 > `2026_14_prayer_wall` set for `prayer_requests`. `Auth::allowedOnTenant()` is then the single place
 > that decides: a super admin is platform-wide, everybody else may sign in only where
 > `users.tenant_id` equals `Tenant::id()`. It is consulted in `attempt()` — before a session is opened —
 > and again in `requireLogin()`, so a session cannot outlive an account being moved to another church.
+>
+> **The backfill picks its target with the same order `resolve()` uses**, not simply `is_default = 1`.
+> That distinction is a lockout waiting to happen: deactivate the default church by hand while another is
+> active and the site resolves to the *other* one, so stamping every legacy account with the inactive
+> church would shut every one of them out of the site being served. If nothing is active then
+> `Tenant::id()` is null everywhere and no church would accept them, so the rows are deliberately left at
+> 0 — the one state where 0 matches the null. Verified by driving all three states: a deactivated default
+> beside an active church (the account follows the active one), the normal case (it follows the default),
+> and nothing active at all (it stays 0 and is let in rather than refused).
 >
 > **0 means "no church assigned", and no tenant resolves to 0**, so an account that somehow escaped
 > assignment is refused everywhere rather than let in everywhere. A refusal is the same generic
