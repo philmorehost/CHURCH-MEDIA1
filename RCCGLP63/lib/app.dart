@@ -13,7 +13,7 @@ class ChurchMediaApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'RCCGLP63',
+      title: 'RCCGLP63YAYA',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.dark,
       darkTheme: AppTheme.dark,

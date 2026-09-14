@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.gracelifechurch" "\0"
-            VALUE "FileDescription", "church_media_app" "\0"
+            VALUE "CompanyName", "RCCG LP63 YAYA" "\0"
+            VALUE "FileDescription", "RCCGLP63YAYA" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "church_media_app" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.gracelifechurch. All rights reserved." "\0"
-            VALUE "OriginalFilename", "church_media_app.exe" "\0"
-            VALUE "ProductName", "church_media_app" "\0"
+            VALUE "InternalName", "rccglp63yaya" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 RCCG LP63 YAYA. All rights reserved." "\0"
+            VALUE "OriginalFilename", "rccglp63yaya.exe" "\0"
+            VALUE "ProductName", "RCCGLP63YAYA" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

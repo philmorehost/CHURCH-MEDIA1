@@ -5,10 +5,14 @@
 // 'flutter create' template.
 
 // The application's name. By default this is also the title of the Flutter window.
+// Deliberately left at the template value: PRODUCT_NAME also names the .app bundle,
+// which is referenced by TEST_HOST and the shared scheme, so changing it means
+// rewriting Runner.xcodeproj too. The name users see is set by CFBundleDisplayName
+// in Runner/Info.plist instead.
 PRODUCT_NAME = church_media_app
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = com.gracelifechurch.churchMediaApp
+PRODUCT_BUNDLE_IDENTIFIER = com.rccglp63yaya.churchmediaapp
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2026 com.gracelifechurch. All rights reserved.
+PRODUCT_COPYRIGHT = Copyright © 2026 RCCG LP63 YAYA. All rights reserved.

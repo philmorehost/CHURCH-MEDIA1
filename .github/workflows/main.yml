@@ -2,7 +2,7 @@ name: Build Android apps
 
 # Builds BOTH church apps whenever code is pushed to main:
 #
-#   RCCGLP63   the Grace & Life / RCCG LP63 YAYA app   (com.churchmedia.app)
+#   RCCGLP63   the RCCGLP63YAYA app — RCCG LP63 YAYA   (com.churchmedia.app)
 #   LIVINGWORD the Living Word Gospel Mission app      (com.livingwordgospelmission.app)
 #
 # Downloads live under: Actions -> this run -> Artifacts
@@ -27,7 +27,7 @@ concurrency:
 
 jobs:
   rccglp63:
-    name: RCCGLP63 (Grace & Life)
+    name: RCCGLP63YAYA
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -1,9 +1,10 @@
-# RCCGLP63 — Grace & Life Church app (Flutter)
+# RCCGLP63YAYA — the RCCG LP63 YAYA app (Flutter)
 
 A single Dart codebase that builds to real native Android and iOS apps. Front-end only — no login, no admin surface. Every screen is a client of the same REST API the website uses (`api/*.php`).
 
-This folder is the **first church's** app: Grace & Life Church (RCCG LP63 YAYA), package
-`com.churchmedia.app`. The second church's app sits beside it in `LIVINGWORD/`.
+This folder builds **RCCGLP63YAYA**, the app for RCCG LP63 YAYA — package `com.churchmedia.app`. The
+second church's app sits beside it in `LIVINGWORD/`. The folder is still named `RCCGLP63` because the
+CI workflow and the commands in this file refer to it by path.
 
 The platform folders (`android/`, `ios/`, `web/`, …) already exist and are hand-tuned —
 **do not run `flutter create` over this project**; nothing is missing.
