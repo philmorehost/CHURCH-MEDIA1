@@ -22,17 +22,23 @@ $senderCap = max(0, (int) setting('sms_sender_cap', 0));
 /**
  * Reads one sender row, refusing anything outside this admin's reach.
  *
- * A sender with no unit is shared with the whole church, the same convention the groups
- * and campaigns screens use — so it stays visible either way. Anything with a unit has
- * to fall inside the admin's own subtree, which is what stops church B managing church A's
- * sender IDs by posting their ids.
+ * Two gates, and both are needed. The row has to belong to the church being served — the same rule the
+ * listing below uses — and a row that has a unit additionally has to fall inside this admin's subtree.
+ *
+ * The unit gate alone was not enough, and this docblock used to claim it was: it treats a row with no
+ * unit as shared with the whole church, so a unit-less sender ID belonging to *another* church was
+ * readable and actionable by posting its id, and an admin whose unit scope was empty was handed any row
+ * at all. Only the super admin skips the unit gate; nobody skips the church gate, because a super admin
+ * already has the church switcher for reaching another church.
  */
-$loadSender = static function (int $id) use ($pdo, $isSuper, $scopeUnitIds): ?array {
+$loadSender = static function (int $id) use ($pdo, $isSuper, $scopeUnitIds, $tenantId): ?array {
     if ($id <= 0) {
         return null;
     }
-    $stmt = $pdo->prepare('SELECT * FROM sms_senders WHERE id = ? LIMIT 1');
-    $stmt->execute([$id]);
+
+    [$tenantClause, $tenantParams] = tenantScope($tenantId);
+    $stmt = $pdo->prepare('SELECT * FROM sms_senders WHERE id = ? AND ' . $tenantClause . ' LIMIT 1');
+    $stmt->execute(array_merge([$id], $tenantParams));
     $row = $stmt->fetch();
     if (!$row) {
         return null;
@@ -218,8 +224,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['do'] ?? '') === 'submit') 
 
 $senders = [];
 try {
-    $clauses = [$tenantId === null ? 'tenant_id IS NULL' : 'tenant_id = ?'];
-    $params = $tenantId === null ? [] : [$tenantId];
+    [$tenantClause, $tenantParams] = tenantScope($tenantId);
+    $clauses = [$tenantClause];
+    $params = $tenantParams;
     if (!$isSuper && $scopeUnitIds !== []) {
         $ids = array_map('intval', $scopeUnitIds);
         $clauses[] = '(org_unit_id IS NULL OR org_unit_id IN (' . implode(',', array_fill(0, count($ids), '?')) . '))';

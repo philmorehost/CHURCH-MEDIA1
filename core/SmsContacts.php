@@ -680,14 +680,23 @@ final class SmsContacts
 
     /* --------------------------------------------------------------- groups */
 
+    /**
+     * One group, but only if it belongs to the church being served.
+     *
+     * The church scope lives here rather than at the call sites, because every one of them resolves a
+     * group id that came from the request: the groups screen to edit or delete it, and Compose and
+     * WhatsApp broadcast to turn it into a list of recipients. Unscoped, that last pair meant a group id
+     * from another church resolved fine, and this church's message went to *that* church's members.
+     */
     public static function findGroup(int $id): ?array
     {
         if ($id <= 0) {
             return null;
         }
         try {
-            $stmt = self::db()->prepare('SELECT * FROM sms_groups WHERE id = ? LIMIT 1');
-            $stmt->execute([$id]);
+            [$tenantClause, $tenantParams] = tenantScope(self::tenantId());
+            $stmt = self::db()->prepare('SELECT * FROM sms_groups WHERE id = ? AND ' . $tenantClause . ' LIMIT 1');
+            $stmt->execute(array_merge([$id], $tenantParams));
             return $stmt->fetch() ?: null;
         } catch (Throwable $e) {
             return null;
@@ -772,6 +781,7 @@ final class SmsContacts
 
         $tenantId = self::tenantId();
         $unitId = !empty($extra['org_unit_id']) ? (int) $extra['org_unit_id'] : null;
+        [$tenantClause, $tenantParams] = tenantScope($tenantId);
 
         try {
             $pdo = self::db();
@@ -794,6 +804,14 @@ final class SmsContacts
             }
 
             if ($id > 0) {
+                // Prove the group belongs to this church before writing to it. `rowCount()` cannot answer
+                // that: an update that changes nothing reports 0 as well.
+                $owns = $pdo->prepare('SELECT 1 FROM sms_groups WHERE id = ? AND ' . $tenantClause . ' LIMIT 1');
+                $owns->execute(array_merge([$id], $tenantParams));
+                if (!$owns->fetchColumn()) {
+                    return ['ok' => false, 'error' => 'That group could not be found.'];
+                }
+
                 $pdo->prepare('UPDATE sms_groups SET name = ?, slug = ?, kind = ?, rule = ?, org_unit_id = ? WHERE id = ?')
                     ->execute([$name, $slug, $kind, $rule, $unitId, $id]);
                 // Switching to dynamic makes the stored members meaningless, so they go.
@@ -819,10 +837,14 @@ final class SmsContacts
             return false;
         }
         try {
-            // Members cascade. A campaign that used the group keeps its own recipient
-            // rows, because those are a record of what was sent, not a pointer.
-            self::db()->prepare('DELETE FROM sms_groups WHERE id = ?')->execute([$id]);
-            return true;
+            // Scoped, so posting another church's id deletes nothing and says so. Members cascade; a
+            // campaign that used the group keeps its own recipient rows, because those are a record of
+            // what was sent, not a pointer.
+            [$tenantClause, $tenantParams] = tenantScope(self::tenantId());
+            $stmt = self::db()->prepare('DELETE FROM sms_groups WHERE id = ? AND ' . $tenantClause);
+            $stmt->execute(array_merge([$id], $tenantParams));
+
+            return $stmt->rowCount() > 0;
         } catch (Throwable $e) {
             error_log('SmsContacts deleteGroup failed: ' . $e->getMessage());
             return false;

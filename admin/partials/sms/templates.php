@@ -11,13 +11,21 @@ $scopeUnitIds = $smsContext['scope_unit_ids'];
 $tenantId = Tenant::id();
 $errors = [];
 
-/** Loads a template, refusing anything outside the admin's reach. */
-$loadTemplate = static function (int $id) use ($pdo, $isSuper, $scopeUnitIds): ?array {
+/**
+ * Loads a template, refusing anything outside this admin's reach.
+ *
+ * As on the sender-ID screen, the church gate is what actually stops a template belonging to another
+ * church being edited or deleted by posting its id; the unit gate below it treats a unit-less row as
+ * shared with the whole church, which was never a church check at all.
+ */
+$loadTemplate = static function (int $id) use ($pdo, $isSuper, $scopeUnitIds, $tenantId): ?array {
     if ($id <= 0) {
         return null;
     }
-    $stmt = $pdo->prepare('SELECT * FROM sms_templates WHERE id = ? LIMIT 1');
-    $stmt->execute([$id]);
+
+    [$tenantClause, $tenantParams] = tenantScope($tenantId);
+    $stmt = $pdo->prepare('SELECT * FROM sms_templates WHERE id = ? AND ' . $tenantClause . ' LIMIT 1');
+    $stmt->execute(array_merge([$id], $tenantParams));
     $row = $stmt->fetch();
     if (!$row) {
         return null;
@@ -91,8 +99,9 @@ if ($editId > 0) {
 
 $templates = [];
 try {
-    $clauses = [$tenantId === null ? 'tenant_id IS NULL' : 'tenant_id = ?'];
-    $params = $tenantId === null ? [] : [$tenantId];
+    [$tenantClause, $tenantParams] = tenantScope($tenantId);
+    $clauses = [$tenantClause];
+    $params = $tenantParams;
     if (!$isSuper && $scopeUnitIds !== []) {
         $ids = array_map('intval', $scopeUnitIds);
         $clauses[] = '(org_unit_id IS NULL OR org_unit_id IN (' . implode(',', array_fill(0, count($ids), '?')) . '))';

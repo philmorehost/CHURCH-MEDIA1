@@ -65,7 +65,7 @@
 | **4** | WhatsApp channel | Official Cloud API integration (templates, 24-h window, webhooks) | 5–7 sessions | Per-conversation | ✅ closed (4.1–4.3; 4.4 rejected) |
 | **5** | Members & daily engagement | Member accounts, daily devotional, Bible reading plans + streaks, offline sermon downloads | 10–12 sessions | None | ✅ shipped (S1–S6) |
 | **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ✅ **complete** — 6a–6g shipped |
-| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings), 7b shipped (an account belongs to one church), 7c shipped (a unit belongs to one church), 7d-i shipped (worker tenancy plumbing), 7d-ii parts 1–2 shipped (the SMS worker and the sender-ID poller act as one church at a time) |
+| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings), 7b shipped (an account belongs to one church), 7c shipped (a unit belongs to one church), 7d-i shipped (worker tenancy plumbing), 7d-ii parts 1–2 shipped (the SMS worker and the sender-ID poller act as one church at a time), 7d-iii shipped (the SMS screens only touch their own church) |
 
 **Confirmed 2026-09-12:** multi-tenant **SaaS is a real goal**. That is why **Phase 0
 (tenancy foundation) runs before everything else** — the SMS token, sender IDs, country
@@ -1651,11 +1651,63 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > `activeAll()`. Each of the rest becomes `Tenant::each(...)`, so a failure in one church cannot stop
 > another's run.
 >
-> **Also outstanding, found while doing part 2 and not fixed there:** `admin/partials/sms/sender-ids.php`'s
-> `$loadSender()` guard is **unit-based, not church-based**. It documents the unit rule and enforces it,
-> but when an admin has no unit scope (`$scopeUnitIds === []`) it returns the row for any id — so an admin
-> of one church could act on another church's sender ID by posting its number. It needs a tenant check
-> alongside the unit one, as its own small commit.
+> **Also outstanding, found while doing part 2:** `admin/partials/sms/sender-ids.php`'s `$loadSender()`
+> guard, which was **fixed in 7d-iii below** — along with four identical instances of it.
+>
+> **7d-iii shipped — the SMS admin screens only touch the church being served.** Not a worker, but the
+> same defect found in the screens while doing part 2 — and it turned out to be five instances of one
+> mistake rather than the one.
+>
+> **What it was.** Every SMS screen loaded a single row by id and then checked the admin's **unit** scope
+> only, treating a row with no unit as "shared with the whole church". Nothing ever checked the *church*.
+> So `sms_senders`, `sms_templates`, `sms_campaigns` and `sms_groups` rows belonging to another church
+> could be read, re-checked, renamed and deleted by posting their id — and an admin whose unit scope was
+> empty (`$scopeUnitIds === []`, the non-super branch) was handed **any** row at all. Two docblocks
+> asserted the protection that was not there, in as many words: "which is what stops church B managing
+> church A's sender IDs by posting their ids" and "without it, a church admin could read another church's
+> message and recipient list simply by putting its id in the URL".
+>
+> **The worst instance was not a delete.** `SmsContacts::findGroup()` fed `compose.php` and the WhatsApp
+> broadcast screen, both of which resolve a `group_id` from the request and turn it into a **list of
+> recipients**. A group id from another church resolved fine, so one church could send its message to
+> another church's members. `compose.php` had a guard of its own, and it was the same unit-only check —
+> which a unit-less group (`org_unit_id IS NULL`) skipped entirely.
+>
+> **The rule now lives in one place: `tenantScope()` in `core/helpers.php`.** It returns the clause and
+> the parameters that go with it (`tenant_id = ?`, or `tenant_id IS NULL` when nothing resolves to a
+> church) and every guard and listing is built from it, so the query that *lists* rows and the action that
+> *acts on* one cannot disagree — which is exactly how this drifted.
+>
+> **Scoped:** the row lookups behind sender IDs, templates, campaigns and groups; `SmsContacts::findGroup`,
+> `saveGroup` (ownership is proved before the UPDATE, because `rowCount()` cannot tell "not yours" from
+> "no change") and `deleteGroup` (now returns false when it deleted nothing, which is what its `bool`
+> return always claimed); the campaigns listing and its pagination count; and the dashboard's six recent
+> campaigns, which showed the platform's newest regardless of whose they were. **Only a super admin skips
+> the unit gate; nobody skips the church gate** — a super admin already has the church switcher.
+>
+> **Verified (7d-iii): 61 assertions.** Two fixture churches and three units, with rows in all four tables
+> both unit-less and unit-bound. The real POST handlers were driven **one child process each** — they end
+> in `redirect()`, which exits — with the partial `require`d, a faked session and CSRF token, a fake
+> gateway transport, and the child acting as a chosen church through `Tenant::runAs()`. Asserted: another
+> church's row survives delete, is not re-checked, is not cancelled and is not renamed, through the real
+> handlers; the admin's own row is still deleted, checked and renamed (the paired positive control, without
+> which every refusal could pass because the handler never ran); the unit gate still refuses a row inside
+> the admin's own church but outside their unit; an admin with **no** unit scope cannot reach another
+> church either; and the listing shows one church's rows. A fatal in any child is itself asserted, because
+> a handler that never ran makes "it was refused" meaningless.
+>
+> **The mutation check:** making `tenantScope()` true for every row fails **15 assertions** — church A
+> renamed church B's group (`"Hijacked by Alpha"`), deleted B's sender ID, template and campaign, and the
+> campaign list showed B's campaign — while the positive controls kept passing, which is what shows the
+> failures are the defect rather than blanket breakage.
+>
+> **Not verified:** no browser was used, so these screens were driven as handlers and never rendered; a
+> super admin was not exercised (they get the unit bypass and the church gate only); and the analytics
+> tiles this fix deliberately left alone are still install-wide.
+>
+> **Still outstanding, and separate:** `core/SmsCampaign.php:409` reads a campaign by id with no church
+> filter, and the dashboard's 30-day / "this month" spend tiles query `sms_campaign_recipients` with none
+> either. Both are reads on screens, so they belong with the rest of the settings/screens pass.
 >
 > **Still not tested against a second church** — there is none in production, and every claim in this
 > audit is from reading the code, not from a run.

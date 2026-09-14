@@ -389,6 +389,31 @@ function settingSave(array $values): bool
     return true;
 }
 
+/**
+ * The clause that confines a query to the church being served, plus the parameters that go with it.
+ *
+ * `tenant_id IS NULL` is the platform-wide scope, the same convention `settings()` uses for its shared
+ * row, and it applies only when nothing resolves to a church at all. Every SMS screen builds its
+ * single-row lookups and its listings from this one rule, so the two cannot disagree.
+ *
+ * This exists because they did disagree. Each screen checked the admin's *unit* scope and treated a row
+ * with no unit as "shared with the whole church" — but never checked the church itself, so a unit-less
+ * sender ID, campaign, group or template belonging to another church could be read, re-checked, edited
+ * and deleted simply by posting its id.
+ *
+ * @param  int|null $tenantId  the church, or null to resolve the one being served
+ * @param  string   $column    the tenant column, for a query that aliases its table
+ * @return array{0:string,1:array<int,int>}  the SQL fragment, then the parameters that go with it
+ */
+function tenantScope(?int $tenantId = null, string $column = 'tenant_id'): array
+{
+    $resolved = $tenantId ?? (class_exists('Tenant') ? Tenant::id() : null);
+
+    return $resolved === null
+        ? [$column . ' IS NULL', []]
+        : [$column . ' = ?', [$resolved]];
+}
+
 function flash(string $key, ?string $message = null): ?string
 {
     if ($message !== null) {

@@ -81,10 +81,15 @@ try {
 
 $recent = [];
 try {
-    $recent = $pdo->query(
+    // Scoped to the church being served. This tile used to show the six newest campaigns on the whole
+    // install, whoever they belonged to.
+    [$tenantClause, $tenantParams] = tenantScope();
+    $stmt = $pdo->prepare(
         'SELECT id, title, status, total_recipients, sent_count, failed_count, units_charged, created_at, paused_reason
-         FROM sms_campaigns ORDER BY created_at DESC LIMIT 6'
-    )->fetchAll();
+         FROM sms_campaigns WHERE ' . $tenantClause . ' ORDER BY created_at DESC LIMIT 6'
+    );
+    $stmt->execute($tenantParams);
+    $recent = $stmt->fetchAll();
 } catch (Throwable $e) {
     // No campaigns yet.
 }

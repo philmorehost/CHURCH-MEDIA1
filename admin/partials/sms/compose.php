@@ -57,8 +57,11 @@ $presetTemplateId = (int) ($_GET['template'] ?? 0);
 
 $presetTemplate = null;
 if ($presetTemplateId > 0) {
-    $stmt = $pdo->prepare('SELECT * FROM sms_templates WHERE id = ? LIMIT 1');
-    $stmt->execute([$presetTemplateId]);
+    // Scoped to the church being served: a `?template=` in the URL must not pull in another church's
+    // text, or send it to this church's contacts under this church's name.
+    [$tenantClause, $tenantParams] = tenantScope($tenantId);
+    $stmt = $pdo->prepare('SELECT * FROM sms_templates WHERE id = ? AND ' . $tenantClause . ' LIMIT 1');
+    $stmt->execute(array_merge([$presetTemplateId], $tenantParams));
     $presetTemplate = $stmt->fetch() ?: null;
 }
 

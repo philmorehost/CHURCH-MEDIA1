@@ -19,7 +19,13 @@ $scopeUnitIds = $smsContext['scope_unit_ids'];
 $myUnitId = (int) $smsContext['my_unit_id'];
 $errors = [];
 
-/** Loads a group, refusing anything outside the admin's reach. */
+/**
+ * Loads a group, refusing anything outside the admin's reach.
+ *
+ * The church gate lives inside `SmsContacts::findGroup()`, which is scoped to the church being served,
+ * so this adds the unit rule on top of it. The unit rule alone was never a church check — it treats a
+ * unit-less group as shared with the whole church.
+ */
 $loadGroup = static function (int $id) use ($pdo, $isSuper, $scopeUnitIds): ?array {
     $group = SmsContacts::findGroup($id);
     if ($group === null) {

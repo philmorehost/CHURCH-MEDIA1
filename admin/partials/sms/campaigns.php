@@ -16,6 +16,7 @@ declare(strict_types=1);
 /** @var array<string, mixed> $smsContext */
 $isSuper = (bool) $smsContext['is_super'];
 $scopeUnitIds = $smsContext['scope_unit_ids'];
+$tenantId = Tenant::id();
 $unitLabels = $smsContext['unit_labels'];
 $errors = [];
 $tabUrl = '/admin/sms?tab=campaigns';
@@ -23,16 +24,21 @@ $tabUrl = '/admin/sms?tab=campaigns';
 /**
  * Loads a campaign, refusing anything this admin may not see.
  *
- * The unit check matters as much as the list filter does: without it, a church admin could
- * read another church's message and recipient list simply by putting its id in the URL — and
+ * The church check matters as much as the list filter does: without it, a church admin could
+ * read another church's campaign and recipient list simply by putting its id in the URL — and
  * the action handlers below all go through here, so they would act on it too.
+ *
+ * The unit check underneath it is *not* a church check: a campaign with no unit is treated as
+ * church-wide, which on a multi-church install means any church's.
  */
-$loadCampaign = static function (int $id) use ($pdo, $isSuper, $scopeUnitIds): ?array {
+$loadCampaign = static function (int $id) use ($pdo, $isSuper, $scopeUnitIds, $tenantId): ?array {
     if ($id <= 0) {
         return null;
     }
-    $stmt = $pdo->prepare('SELECT * FROM sms_campaigns WHERE id = ? LIMIT 1');
-    $stmt->execute([$id]);
+
+    [$tenantClause, $tenantParams] = tenantScope($tenantId);
+    $stmt = $pdo->prepare('SELECT * FROM sms_campaigns WHERE id = ? AND ' . $tenantClause . ' LIMIT 1');
+    $stmt->execute(array_merge([$id], $tenantParams));
     $row = $stmt->fetch();
     if (!$row) {
         return null;
@@ -151,6 +157,9 @@ $perPage = 25;
 
 $where = [];
 $params = [];
+[$tenantClause, $tenantParams] = tenantScope($tenantId);
+$where[] = $tenantClause;
+$params = $tenantParams;
 if ($statusFilter !== '' && in_array($statusFilter, SmsCampaign::STATUSES, true)) {
     $where[] = 'status = ?';
     $params[] = $statusFilter;
