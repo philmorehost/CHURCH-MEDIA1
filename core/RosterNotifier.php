@@ -22,6 +22,13 @@ declare(strict_types=1);
  * `notified_at` and `reminded_at` are separate columns. One shared "last message sent" column would
  * let the day-before reminder suppress the first notice: a rota filled in on a Saturday would tell
  * everyone about Sunday and then never tell them again.
+ *
+ * **One church at a time.** `service_plans.tenant_id` is the church a service belongs to, so `targets()`
+ * is scoped to it and the caller — `cli/roster_worker.php` — makes one pass per church through
+ * `Tenant::each()`. A cron has no request host, so without that the church being served is only ever the
+ * default one, and every church's members were emailed a notice carrying the default church's name and
+ * linking to the default church's sign-in page. `service_roles` and `service_assignments` carry no church
+ * of their own — they are reached through the plan, which is also what decides the words of the message.
  */
 final class RosterNotifier
 {
@@ -34,6 +41,12 @@ final class RosterNotifier
 
     /** @var callable|null */
     private static $mailer = null;
+
+    /** The church being served. 0 never matches a row, so an unresolvable church reaches nobody. */
+    private static function tenantId(): int
+    {
+        return (class_exists('Tenant') ? Tenant::id() : null) ?? 0;
+    }
 
     private static function db(): PDO
     {
@@ -80,14 +93,18 @@ final class RosterNotifier
             . ' r.name AS role_name, p.title, p.service_date, p.service_time, p.location';
 
         // Both queries share the same joins and the same reachability rules: a real member account,
-        // not suspended, with an address to send to, on a service that has not been cancelled.
+        // not suspended, with an address to send to, on a service that has not been cancelled — and
+        // on a service belonging to the church being served.
         $from = ' FROM service_assignments a'
             . ' JOIN service_roles r ON r.id = a.role_id'
             . ' JOIN service_plans p ON p.id = r.plan_id'
             . ' JOIN members m ON m.id = a.member_id'
-            . ' WHERE m.is_suspended = 0'
+            . ' WHERE p.tenant_id = ?'
+            . ' AND m.is_suspended = 0'
             . " AND m.email IS NOT NULL AND m.email <> ''"
             . ' AND p.is_cancelled = 0';
+
+        $church = self::tenantId();
 
         $noticeStmt = $pdo->prepare(
             $select . $from
@@ -96,7 +113,7 @@ final class RosterNotifier
             . ' AND p.service_date <= DATE_ADD(CURDATE(), INTERVAL ' . self::NOTICE_HORIZON_DAYS . ' DAY)'
             . ' ORDER BY p.service_date ASC, a.id ASC LIMIT ' . self::BATCH_LIMIT
         );
-        $noticeStmt->execute();
+        $noticeStmt->execute(array($church));
         $notices = $noticeStmt->fetchAll();
 
         $reminderStmt = $pdo->prepare(
@@ -114,7 +131,7 @@ final class RosterNotifier
             . " AND a.status <> 'declined'"
             . ' ORDER BY p.service_time ASC, a.id ASC LIMIT ' . self::BATCH_LIMIT
         );
-        $reminderStmt->execute();
+        $reminderStmt->execute(array($church));
         $reminders = $reminderStmt->fetchAll();
 
         $out = array();
@@ -191,15 +208,30 @@ final class RosterNotifier
 
     private static function claim(PDO $pdo, string $column, int $id): bool
     {
-        // The column name is chosen by this class from two literals, never from input.
-        $stmt = $pdo->prepare('UPDATE service_assignments SET `' . $column . '` = NOW() WHERE id = ? AND `' . $column . '` IS NULL');
-        $stmt->execute(array($id));
+        // The column name is chosen by this class from two literals, never from input. The joins are the
+        // church guard: the id came from a scoped query, and this makes it so even if one did not — a
+        // notice claimed for the wrong church would be marked sent and then never sent, which is how a
+        // slot quietly goes unfilled.
+        $stmt = $pdo->prepare(
+            'UPDATE service_assignments a'
+            . ' JOIN service_roles r ON r.id = a.role_id'
+            . ' JOIN service_plans p ON p.id = r.plan_id'
+            . ' SET a.`' . $column . '` = NOW()'
+            . ' WHERE a.id = ? AND p.tenant_id = ? AND a.`' . $column . '` IS NULL'
+        );
+        $stmt->execute(array($id, self::tenantId()));
         return $stmt->rowCount() > 0;
     }
 
     private static function release(PDO $pdo, string $column, int $id): void
     {
-        $pdo->prepare('UPDATE service_assignments SET `' . $column . '` = NULL WHERE id = ?')->execute(array($id));
+        $pdo->prepare(
+            'UPDATE service_assignments a'
+            . ' JOIN service_roles r ON r.id = a.role_id'
+            . ' JOIN service_plans p ON p.id = r.plan_id'
+            . ' SET a.`' . $column . '` = NULL'
+            . ' WHERE a.id = ? AND p.tenant_id = ?'
+        )->execute(array($id, self::tenantId()));
     }
 
     public static function subjectFor(array $row): string

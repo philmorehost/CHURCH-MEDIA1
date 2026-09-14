@@ -18,6 +18,12 @@ declare(strict_types=1);
  * enough to be worth delaying — so here the cron time *is* the control, and the worker runs whenever
  * it is called.
  *
+ * **One pass per church.** The rota, the people on it and the words of the message all belong to a
+ * church, and a cron has no request host to resolve one from — so `Tenant::each()` is what makes this run
+ * as each church in turn instead of as whichever one resolves first (the default one). A pass that throws
+ * is held so the other churches still run, then turned into a non-zero exit at the end. The switch is per
+ * church too, so one church turning rota messages off no longer silences every other church's rota.
+ *
  * Usage:
  *   php cli/roster_worker.php                 send whatever is due
  *   php cli/roster_worker.php --dry-run       say who would be emailed, send nothing
@@ -69,9 +75,35 @@ function say(string $line): void
 /* --------------------------------------------------------------- status mode */
 
 if ($statusOnly) {
-    fwrite(STDOUT, 'Rota messages : ' . (RosterNotifier::enabled() ? 'on' : 'off') . "\n");
-    fwrite(STDOUT, 'Mail configured: ' . (Mailer::configured() ? 'yes' : 'no') . "\n");
-    fwrite(STDOUT, 'Would be sent now: ' . RosterNotifier::audienceSize() . " message(s)\n");
+    // One report per church. Both the switch and the audience are per church, and from a shell the church
+    // being served is only ever the default one — so reporting once would print one church's audience and
+    // call it the install's.
+    $status = Tenant::each(static function (int $tenantId): array {
+        return array(
+            'enabled' => RosterNotifier::enabled(),
+            'audience' => RosterNotifier::audienceSize(),
+        );
+    });
+
+    $several = count($status) > 1;
+    foreach ($status as $tenantId => $entry) {
+        if ($entry['ok'] !== true || !is_array($entry['result'])) {
+            fwrite(STDERR, 'roster_worker: status failed for church ' . $tenantId
+                . ' — ' . (string) ($entry['error'] ?? 'unknown error') . "\n");
+            continue;
+        }
+        $report = $entry['result'];
+
+        if ($several) {
+            $church = Tenant::find((int) $tenantId);
+            fwrite(STDOUT, "\n" . (string) ($church['name'] ?? ('Church ' . $tenantId)) . "\n");
+        }
+
+        fwrite(STDOUT, 'Rota messages : ' . ($report['enabled'] ? 'on' : 'off') . "\n");
+        fwrite(STDOUT, 'Mail configured: ' . (Mailer::configured() ? 'yes' : 'no') . "\n");
+        fwrite(STDOUT, 'Would be sent now: ' . (int) $report['audience'] . " message(s)\n");
+    }
+
     fwrite(STDOUT, "\nSuggested cron, every hour:\n  5 * * * * php " . ROOT_PATH . "/cli/roster_worker.php --quiet\n");
     exit(0);
 }
@@ -92,30 +124,71 @@ if (!flock($lock, LOCK_EX | LOCK_NB)) {
 }
 
 $startedAt = microtime(true);
-$summary = RosterNotifier::run($force, $dryRun);
 
-if ($summary['skipped'] !== null) {
-    say($summary['skipped'] . ' Use --force to send anyway.');
-    flock($lock, LOCK_UN);
-    fclose($lock);
-    exit(0);
+// One pass per church, because the plans, the people on the rota and the switch that silences it all
+// belong to a church. A single run for the whole install read whichever church resolved first — the
+// default one, from a cron — for the site name in the message and for the switch alike.
+$runs = Tenant::each(static function (int $tenantId) use ($force, $dryRun): array {
+    return RosterNotifier::run($force, $dryRun);
+});
+
+$several = count($runs) > 1;
+$totals = ['sent' => 0, 'notices' => 0, 'reminders' => 0, 'failed' => 0];
+$stoppedSomewhere = false;
+$failedPasses = 0;
+
+foreach ($runs as $tenantId => $entry) {
+    $church = $several ? Tenant::find((int) $tenantId) : null;
+    $label = $several ? ((string) ($church['name'] ?? ('Church ' . $tenantId)) . ': ') : '';
+
+    if ($entry['ok'] !== true || !is_array($entry['result'])) {
+        // The pass threw. Tenant::each held it so the other churches still ran, so this is where it has
+        // to become visible — silently skipping a church is how a rota notice quietly stops arriving.
+        $failedPasses++;
+        fwrite(STDERR, 'roster_worker: ' . $label . 'the run failed — '
+            . (string) ($entry['error'] ?? 'unknown error') . "\n");
+        continue;
+    }
+
+    $summary = $entry['result'];
+
+    // A church with the switch off is not a failure and has no totals to add: it printed its own reason
+    // and that is the whole of its report. One church being switched off must not stop the others.
+    if ($summary['skipped'] !== null) {
+        say($label . $summary['skipped'] . ' Use --force to send anyway.');
+        $stoppedSomewhere = true;
+        continue;
+    }
+
+    $totals['sent'] += (int) $summary['sent'];
+    $totals['notices'] += (int) $summary['notices'];
+    $totals['reminders'] += (int) $summary['reminders'];
+    $totals['failed'] += (int) $summary['failed'];
 }
 
-if ($summary['sent'] === 0 && $summary['failed'] === 0) {
-    say('Nothing due right now.');
+// A dry run counts notices and reminders but sends nothing, so `sent` alone cannot answer "was there
+// work": using it made `--dry-run` print "Nothing due right now." on every run, whatever the rota held.
+$worked = $totals['sent'] + $totals['notices'] + $totals['reminders'];
+
+if ($worked === 0 && $totals['failed'] === 0) {
+    // Only when no church was switched off: "nothing due" next to a reason why nothing was sent would read
+    // as a contradiction.
+    if (!$stoppedSomewhere) {
+        say('Nothing due right now.');
+    }
     flock($lock, LOCK_UN);
     fclose($lock);
-    exit(0);
+    exit($failedPasses > 0 ? 1 : 0);
 }
 
 say(sprintf(
     '%s finished in %.1fs: %d message(s) sent (%d notice(s), %d reminder(s)), %d failed.',
     $dryRun ? 'Dry run' : 'Run',
     microtime(true) - $startedAt,
-    $summary['sent'],
-    $summary['notices'],
-    $summary['reminders'],
-    $summary['failed']
+    $totals['sent'],
+    $totals['notices'],
+    $totals['reminders'],
+    $totals['failed']
 ));
 
 if ($dryRun) {
@@ -124,4 +197,4 @@ if ($dryRun) {
 
 flock($lock, LOCK_UN);
 fclose($lock);
-exit($summary['failed'] > 0 ? 1 : 0);
+exit(($failedPasses > 0 || $totals['failed'] > 0) ? 1 : 0);

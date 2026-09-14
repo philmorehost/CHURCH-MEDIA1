@@ -27,6 +27,13 @@ declare(strict_types=1);
  *    address is not for ever.
  *  - **A newcomer marked inactive is not followed up**, checked here as well as when the status was
  *    set. Somebody has to be able to stop this at 2am without editing a sequence.
+ *
+ * **One church at a time.** `follow_up_sequences.tenant_id` is the church a sequence belongs to, so
+ * `due()` is scoped to it and the caller — `cli/followup_worker.php` — makes one pass per church through
+ * `Tenant::each()`. A cron has no request host, so without that the church being served is only ever the
+ * default one, and the run emailed every church's visitors a sequence belonging to whichever church
+ * resolved first. `newcomers` carries no `tenant_id` of its own, so the sequence is the only church these
+ * rules have to go on — and it is the right one, because the sequence owns the words that get sent.
  */
 final class FollowUpRunner
 {
@@ -47,6 +54,12 @@ final class FollowUpRunner
 
     /** @var callable|null */
     private static $mailer = null;
+
+    /** The church being served. 0 never matches a row, so an unresolvable church reaches nobody. */
+    private static function tenantId(): int
+    {
+        return (class_exists('Tenant') ? Tenant::id() : null) ?? 0;
+    }
 
     private static function db(): PDO
     {
@@ -102,10 +115,18 @@ final class FollowUpRunner
             . ' LEFT JOIN follow_up_actions a ON a.enrolment_id = e.id AND a.step_id = st.id'
             . " WHERE e.status = 'active'"
             . ' AND s.is_active = 1'
+            . ' AND s.tenant_id = ?'
             . ' AND st.is_active = 1'
             // Second guard, not the only one. Setting somebody inactive also stops their enrolments;
             // this is here so a row that was somehow missed still cannot be chased.
             . " AND n.follow_up_status <> 'inactive'"
+            // An email step for a visitor who left no address cannot be sent. Without this the runner
+            // tried to send to an empty string, which the mail server refused — so the attempt was
+            // recorded as a failure, retried five times, and sat on the Follow-up page as a broken
+            // sequence. A task step still comes through, which is the point: a visitor who left only a
+            // phone number is the common case, and the tasks are the part of a sequence that reaches
+            // everybody. `FollowUp::unreachable()` is where these visitors are meant to appear.
+            . " AND (st.channel <> 'email' OR (n.email IS NOT NULL AND n.email <> ''))"
             . ' AND DATE_ADD(e.enrolled_on, INTERVAL st.day_offset DAY) <= CURDATE()'
             . ' AND ('
             // Never attempted: no row yet, so the insert is the claim.
@@ -116,7 +137,9 @@ final class FollowUpRunner
             . ' )'
             . ' ORDER BY e.id ASC, st.day_offset ASC, st.id ASC LIMIT ' . self::BATCH_LIMIT;
 
-        return $pdo->query($sql)->fetchAll();
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute(array(self::tenantId()));
+        return $stmt->fetchAll();
     }
 
     /**
@@ -219,8 +242,10 @@ final class FollowUpRunner
         }
 
         // Enrolments with nothing left to do are closed here rather than in a second command, so a
-        // "finished" count is always current after a run.
-        FollowUp::closeFinished($pdo);
+        // "finished" count is always current after a run. Scoped to the church being served, because a
+        // run made as one church has no business writing another church's enrolment rows — and "the
+        // outcome would have been the same anyway" is the argument that quietly erases the boundary.
+        FollowUp::closeFinished($pdo, self::tenantId());
 
         return $summary;
     }
@@ -237,12 +262,19 @@ final class FollowUpRunner
             // A retry. The claim is refreshed conditionally — so two runners cannot both decide to
             // retry — and the attempt is counted here, at the moment it is made, rather than in the
             // failure branch where a single failure would be counted twice.
+            //
+            // The EXISTS is the church guard. The INSERT path below cannot carry one (the row it
+            // writes has no church of its own — it is reached through the enrolment), so it relies on
+            // `due()` having been scoped; this path can, and does, so an id that somehow arrived from
+            // another church still cannot have its attempt count or its claim touched.
             $stmt = $pdo->prepare(
                 'UPDATE follow_up_actions SET claimed_at = NOW(), attempts = attempts + 1'
                 . ' WHERE id = ? AND sent_at IS NULL AND attempts < ' . self::MAX_ATTEMPTS
                 . ' AND (claimed_at IS NULL OR claimed_at < DATE_SUB(NOW(), INTERVAL ' . self::RETRY_AFTER_MINUTES . ' MINUTE))'
+                . ' AND EXISTS (SELECT 1 FROM follow_up_enrolments e JOIN follow_up_sequences s ON s.id = e.sequence_id'
+                . ' WHERE e.id = follow_up_actions.enrolment_id AND s.tenant_id = ?)'
             );
-            $stmt->execute([$existingActionId]);
+            $stmt->execute(array($existingActionId, self::tenantId()));
             return $stmt->rowCount() === 1 ? $existingActionId : null;
         }
 
@@ -281,9 +313,13 @@ final class FollowUpRunner
      *
      * @return array<int, array<string, mixed>>
      */
-    public static function failures(?array $user, int $limit = 100): array
+    public static function failures(?array $user, int $limit = 100, ?int $tenantId = null): array
     {
         $clause = Unit::scopeClause($user, 'n.org_unit_id');
+
+        // `$tenantId` is for the console, which reports one church at a time. The admin page passes
+        // nothing, so this stays the unit-scoped report it has always been.
+        $churchClause = $tenantId === null ? '' : ' AND s.tenant_id = ?';
 
         $stmt = self::db()->prepare(
             'SELECT a.id, a.attempts, a.error, a.due_on, a.claimed_at,'
@@ -297,9 +333,10 @@ final class FollowUpRunner
             . ' JOIN newcomers n ON n.id = e.newcomer_id'
             . " WHERE a.channel = 'email' AND a.sent_at IS NULL AND a.attempts > 0"
             . ($clause !== '' ? ' AND ' . $clause : '')
+            . $churchClause
             . ' ORDER BY a.attempts DESC, a.due_on ASC LIMIT ' . (int) $limit
         );
-        $stmt->execute();
+        $stmt->execute($tenantId === null ? array() : array($tenantId));
         return $stmt->fetchAll();
     }
 }

@@ -475,13 +475,23 @@ final class FollowUp
      * An enrolment in a sequence with no active steps is deliberately left alone rather than
      * finished: switching every step off is how a church pauses a sequence, and the enrolments should
      * still be there when it switches them back on.
+     *
+     * `$tenantId` narrows it to one church. The only caller is `FollowUpRunner::run()`, which runs one
+     * pass per church, so without it the first church's pass would close every other church's finished
+     * enrolments. Passing null keeps the old install-wide behaviour, which is what an admin screen
+     * would want if one ever calls this.
      */
-    public static function closeFinished(PDO $pdo): int
+    public static function closeFinished(PDO $pdo, ?int $tenantId = null): int
     {
+        $churchClause = $tenantId === null
+            ? ''
+            : ' AND EXISTS (SELECT 1 FROM follow_up_sequences s WHERE s.id = e.sequence_id AND s.tenant_id = ?)';
+
         $sql = "UPDATE follow_up_enrolments e
                 SET e.status = 'finished'
-                WHERE e.status = 'active'
-                  AND EXISTS (SELECT 1 FROM follow_up_steps st WHERE st.sequence_id = e.sequence_id AND st.is_active = 1)
+                WHERE e.status = 'active'"
+            . $churchClause
+            . " AND EXISTS (SELECT 1 FROM follow_up_steps st WHERE st.sequence_id = e.sequence_id AND st.is_active = 1)
                   AND NOT EXISTS (
                       SELECT 1 FROM follow_up_steps st
                       WHERE st.sequence_id = e.sequence_id
@@ -493,7 +503,10 @@ final class FollowUp
                               AND (a.channel = 'task' OR a.sent_at IS NOT NULL)
                         )
                   )";
-        return (int) $pdo->exec($sql);
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($tenantId === null ? array() : array($tenantId));
+        return $stmt->rowCount();
     }
 
     /* ================================================================== actions == */
@@ -682,9 +695,13 @@ final class FollowUp
      *
      * @return array<int, array<string, mixed>>
      */
-    public static function unreachable(?array $user, int $limit = 50): array
+    public static function unreachable(?array $user, int $limit = 50, ?int $tenantId = null): array
     {
         $clause = Unit::scopeClause($user, 'n.org_unit_id');
+
+        // `$tenantId` is for the console, which reports one church at a time. The admin page passes
+        // nothing, so this stays the unit-scoped report it has always been.
+        $churchClause = $tenantId === null ? '' : ' AND s.tenant_id = ?';
 
         $stmt = self::db()->prepare(
             'SELECT DISTINCT n.id, n.name, n.whatsapp_phone, e.id AS enrolment_id, s.name AS sequence_name'
@@ -693,9 +710,10 @@ final class FollowUp
             . ' JOIN newcomers n ON n.id = e.newcomer_id'
             . " WHERE e.status = 'active' AND (n.email IS NULL OR n.email = '')"
             . ($clause !== '' ? ' AND ' . $clause : '')
+            . $churchClause
             . ' ORDER BY n.name ASC LIMIT ' . (int) $limit
         );
-        $stmt->execute();
+        $stmt->execute($tenantId === null ? array() : array($tenantId));
         return $stmt->fetchAll();
     }
 

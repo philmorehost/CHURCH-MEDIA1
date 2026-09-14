@@ -65,7 +65,7 @@
 | **4** | WhatsApp channel | Official Cloud API integration (templates, 24-h window, webhooks) | 5–7 sessions | Per-conversation | ✅ closed (4.1–4.3; 4.4 rejected) |
 | **5** | Members & daily engagement | Member accounts, daily devotional, Bible reading plans + streaks, offline sermon downloads | 10–12 sessions | None | ✅ shipped (S1–S6) |
 | **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ✅ **complete** — 6a–6g shipped |
-| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings), 7b shipped (an account belongs to one church), 7c shipped (a unit belongs to one church), 7d-i shipped (worker tenancy plumbing), 7d-ii parts 1–2 and 4 shipped (the SMS worker, the sender-ID poller and the daily publisher report act as one church at a time), 7d-iii shipped (the SMS screens only touch their own church), 7d-iv shipped (the ads tables carry a church), 7d-v shipped (the public advert flow was driven over HTTP, clearing 7d-iv's verification debt), 7d-ii part 3 shipped (the devotional push and the reading reminder act as one church at a time) |
+| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings), 7b shipped (an account belongs to one church), 7c shipped (a unit belongs to one church), 7d-i shipped (worker tenancy plumbing), 7d-ii parts 1–2 and 4 shipped (the SMS worker, the sender-ID poller and the daily publisher report act as one church at a time), 7d-iii shipped (the SMS screens only touch their own church), 7d-iv shipped (the ads tables carry a church), 7d-v shipped (the public advert flow was driven over HTTP, clearing 7d-iv's verification debt), 7d-ii part 3 shipped (the devotional push and the reading reminder act as one church at a time), 7d-ii part 5 shipped (the follow-up and rota emails act as one church at a time) |
 
 **Confirmed 2026-09-12:** multi-tenant **SaaS is a real goal**. That is why **Phase 0
 (tenancy foundation) runs before everything else** — the SMS token, sender IDs, country
@@ -1645,8 +1645,8 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > used: `media_worker` (emails a publisher a daily report whose subject carries
 > `setting('site_title')` — from cron, the default church's name — **shipped as part 4**), then
 > `devotional_worker` and `reading_worker` (push to devices; both needed the new
-> `device_tokens.tenant_id` — **shipped as part 3**), then `followup_worker`
-> and `roster_worker` (email), then `wa_worker` (partly converted already — it stamps `Tenant::id()` on
+> `device_tokens.tenant_id` — **shipped as part 3**), then `followup_worker` and `roster_worker` (email —
+> **shipped as part 5**), then `wa_worker` (partly converted already — it stamps `Tenant::id()` on
 > new conversations), and finally `analytics_rollup` and `backup`, which send nothing and need reading
 > rather than rewriting. `sms_maintenance` is already correct: it deliberately uses the un-scoped
 > `activeAll()`. Each of the rest becomes `Tenant::each(...)`, so a failure in one church cannot stop
@@ -1885,6 +1885,52 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > account — this harness makes no FCM request, and a dry run claims nothing by design. What is established
 > is *who would be reached and with which church's entry*, not that a notification arrives. No device
 > received anything.
+
+> **7d-ii part 5 shipped — the follow-up and rota emails act as one church at a time.** Four files:
+> `core/FollowUpRunner.php`, `core/RosterNotifier.php` and their two cron scripts. Both queues were read
+> across the whole install, so one run used whichever church resolved first — the default one, from a cron
+> — for the site name in every message and for every church's sequences and rotas alike.
+>
+> - This stage had a **mail seam** (`FollowUpRunner::setMailer()`, `RosterNotifier::setMailer()`), so the
+>   harness substitutes the transport and drives the **real** run paths instead of only dry runs. Nothing
+>   left the machine, and what would have been sent was captured and asserted on.
+> - The strongest assertion uses `{{church}}`: both runners render it from `setting('site_title')`, the
+>   church being served. So *"the message alpha's pass produced says Alpha Chapel"* is a direct test that
+>   the pass was made as the right church — and under mutation it failed by naming the other one.
+> - `due()` is scoped on `follow_up_sequences.tenant_id`; `targets()` on `service_plans.tenant_id`.
+>   `service_roles` and `service_assignments` carry no church of their own — they are reached through the
+>   plan. `newcomers` carries **no `tenant_id` at all**, only a unit, so the sequence is the only church
+>   the follow-up rules can use, and it is the right one: the sequence owns the words that get sent.
+> - Both writes that matter are scoped: `RosterNotifier::claim()`/`release()` join through to the plan, and
+>   the follow-up's retry `UPDATE` carries an `EXISTS` on the sequence's church. A notice claimed for the
+>   wrong church would be marked sent and then never sent.
+> - `FollowUp::closeFinished()` gained an optional church — it had one caller, and without it the first
+>   church's pass closed every other church's finished enrolments.
+> - The switch is per church, so one church turning rota messages off no longer silences the rest.
+>
+> **Verified (7d-ii part 5): 49 assertions, 0 failures**, and **10 failures** under mutation (both queues
+> made church-blind again). The one that names the defect: *"and it went to alpha's own visitor"* — under
+> mutation alpha's pass emailed **beta's** visitor, and beta's own step was marked as done by alpha's run.
+>
+> **Three defects found by fixtures that had nothing to do with tenancy, and fixed here:**
+>
+> 1. **A visitor with no email address was queued for email steps.** The runner tried to send to an empty
+>    string, the mail server refused, and the attempt was recorded as a failure, retried five times and
+>    left sitting on the Follow-up page as a broken sequence. `due()` now requires an address *for email
+>    steps only* — a task step still comes through, which is the documented point (a visitor who left only
+>    a phone number is the common case).
+> 2. **`followup_worker --status` printed zeros for three of its lines, always.** They were called with a
+>    `null` user, and `Unit::scopeClause(null, …)` is `1 = 0` — "see nothing". A status command that
+>    reports a confident zero regardless of reality is worse than no status command. It now passes a
+>    super-admin scope (no unit filter) and narrows by church where the helper can take one.
+> 3. **`roster_worker --dry-run` always said "Nothing due right now".** It tested `sent`, and a dry run
+>    increments only `notices`/`reminders` — so the one mode whose whole purpose is to say what *would*
+>    happen said nothing would.
+>
+> **Not verified:** a real send. `Mailer::configured()` is **no** on this machine (no `smtp_host`), so
+> every message in this stage went to a captured closure rather than to an SMTP server. What is established
+> is which church's queue produced which message, to which address, with which church's name in it. No
+> email was delivered.
 
 > **Not built yet in Phase 7 (beyond 7d):** letting a church admin edit its own branding
 > (`admin/settings.php` is super-admin only, and letting one in needs a decision about which fields are
