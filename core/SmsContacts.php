@@ -580,6 +580,22 @@ final class SmsContacts
                 'tag' => 'app',
                 'source' => 'app',
             ],
+            [
+                // Consent-gated for the same reason as the subscriber list: a member ticking
+                // "send me text messages" is the permission, not the mere presence of a phone
+                // number on their account. This is the one source the person themselves
+                // controls, from their own dashboard.
+                //
+                // `is_suspended` is excluded so a disabled account stops being texted.
+                //
+                // `'member'` was already a valid source in the ENUM, in SOURCES and in
+                // sourceLabel — only this definition was missing, which meant members could
+                // never actually reach the address book.
+                'label' => 'Members who agreed to be texted',
+                'sql' => 'SELECT id, name, phone, email, org_unit_id FROM members WHERE phone IS NOT NULL AND phone != \'\' AND sms_consent = 1 AND is_suspended = 0',
+                'tag' => 'member',
+                'source' => 'member',
+            ],
         ];
 
         foreach ($sources as $definition) {

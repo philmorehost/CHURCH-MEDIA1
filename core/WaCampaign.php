@@ -44,6 +44,50 @@ final class WaCampaign
         return class_exists('Tenant') ? Tenant::id() : null;
     }
 
+    /* --------------------------------------------------------------- consents */
+
+    /**
+     * Records a person's own WhatsApp choice in the registry a broadcast actually reads.
+     *
+     * `wa_opt_ins` is the only thing the audience builder consults, so a tick on the member
+     * dashboard has to land here or it is a checkbox that changes nothing. Ticking is a
+     * deliberate act by the person who owns the number, which is what opt-in means.
+     *
+     * Unticking writes a real opt-out rather than deleting the row, so the history survives
+     * and an inbound opt-in can be seen to have been overridden.
+     *
+     * The write lives next to the read on purpose — separating them is how they drift.
+     */
+    public static function setOptIn(string $msisdn, bool $consent, string $source = 'manual'): bool
+    {
+        $msisdn = trim($msisdn);
+        if ($msisdn === '') {
+            return false;
+        }
+
+        $pdo = self::db();
+
+        if ($consent) {
+            // `source` is deliberately NOT overwritten on an existing row: an inbound
+            // message is the strongest opt-in there is, and downgrading it to 'member'
+            // would throw that away.
+            $stmt = $pdo->prepare(
+                "INSERT INTO wa_opt_ins (tenant_id, msisdn, is_opted_in, opted_in_at, opted_out_at, source)
+                 VALUES (?, ?, 1, NOW(), NULL, ?)
+                 ON DUPLICATE KEY UPDATE is_opted_in = 1,
+                                         opted_in_at = COALESCE(opted_in_at, NOW()),
+                                         opted_out_at = NULL"
+            );
+            return $stmt->execute([self::tenantId(), $msisdn, $source]);
+        }
+
+        $stmt = $pdo->prepare(
+            'UPDATE wa_opt_ins SET is_opted_in = 0, opted_out_at = NOW()
+              WHERE tenant_id <=> ? AND msisdn = ?'
+        );
+        return $stmt->execute([self::tenantId(), $msisdn]);
+    }
+
     /* ------------------------------------------------------------------ reads */
 
     public static function find(int $id): ?array

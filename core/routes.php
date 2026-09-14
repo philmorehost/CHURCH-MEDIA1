@@ -1383,13 +1383,32 @@ $router->post('/member', function () {
 
     switch ((string) ($_POST['do'] ?? '')) {
         case 'profile':
+            $phone = (string) ($_POST['phone'] ?? '');
+            $waConsent = !empty($_POST['whatsapp_consent']);
+            $previousMsisdn = (string) ($member['phone'] ?? '');
+
             Member::updateProfile(
                 $memberId,
                 (string) ($_POST['name'] ?? $member['name']),
-                (string) ($_POST['phone'] ?? ''),
+                $phone,
                 !empty($_POST['sms_consent']),
-                !empty($_POST['whatsapp_consent'])
+                $waConsent
             );
+
+            // A WhatsApp broadcast only reads `wa_opt_ins`, so this tick has to reach it or
+            // it is a checkbox that changes nothing. WaCampaign owns that table, so the write
+            // sits with the read rather than being duplicated here.
+            $msisdn = Member::normalisePhone($phone);
+            if ($msisdn !== null) {
+                WaCampaign::setOptIn($msisdn, $waConsent, 'member');
+            }
+
+            // Changing to a new number must not leave the old one opted in for whoever
+            // inherits it.
+            if ($previousMsisdn !== '' && $previousMsisdn !== $msisdn) {
+                WaCampaign::setOptIn($previousMsisdn, false, 'member');
+            }
+
             flash('member_notice', 'Your details are saved.');
             break;
 
