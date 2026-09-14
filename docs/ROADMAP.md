@@ -65,7 +65,7 @@
 | **4** | WhatsApp channel | Official Cloud API integration (templates, 24-h window, webhooks) | 5–7 sessions | Per-conversation | ✅ closed (4.1–4.3; 4.4 rejected) |
 | **5** | Members & daily engagement | Member accounts, daily devotional, Bible reading plans + streaks, offline sermon downloads | 10–12 sessions | None | ✅ shipped (S1–S6) |
 | **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ✅ **complete** — 6a–6g shipped |
-| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings), 7b shipped (an account belongs to one church), 7c shipped (a unit belongs to one church), 7d-i shipped (worker tenancy plumbing), 7d-ii part 1 shipped (the SMS worker acts as one church at a time) |
+| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings), 7b shipped (an account belongs to one church), 7c shipped (a unit belongs to one church), 7d-i shipped (worker tenancy plumbing), 7d-ii parts 1–2 shipped (the SMS worker and the sender-ID poller act as one church at a time) |
 
 **Confirmed 2026-09-12:** multi-tenant **SaaS is a real goal**. That is why **Phase 0
 (tenancy foundation) runs before everything else** — the SMS token, sender IDs, country
@@ -1574,18 +1574,88 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > from a real cron; and `--status` was read but never rendered in a browser. There is still no second
 > church in production, so every multi-church result here is from local fixtures.
 >
+> **7d-ii (part 2) shipped — the sender-ID poller.** `cli/sms_sender_check.php` now runs one pass per
+> church. The pass itself moved to **`core/SmsSenderCheck.php`**, which is the same split
+> `cli/sms_worker.php` already has from `core/SmsRunner.php` — and it was moved for a concrete reason,
+> not tidiness: while the pass lived inside the script it could only be executed, never driven, so it
+> could not be tested with a fake gateway at all. The script keeps the schedule, the reporting and the
+> exit code.
+>
+> **What the defect was.** One unscoped query (`SELECT * FROM sms_senders WHERE status = 'pending' …`)
+> collected **every** church's pending sender IDs, and each was then polled with whichever token was
+> ambient — from cron, the default church's. So church B's sender ID was asked about on church A's
+> account; the gateway answers about an ID that account does not own, and the row was marked
+> **rejected permanently** on the strength of it, notifying church B's media team that their sender ID
+> had been refused. The same pass would then write church B's sender ID into church A's
+> `sms_default_sender_id`. The pre-flight `Sms::configured()` guard had the same shape as the one removed
+> from the SMS worker in part 1: it asked the default church only, so one church with no token stopped
+> every other church's sender IDs from ever being polled.
+>
+> **A second, subtler bug found while fixing the first, by the harness rather than by reading.**
+> `sms_senders.tenant_id` is **nullable**, and NULL means "platform-wide" — the convention
+> `admin/partials/sms/sender-ids.php` already uses. The first version of this fix scoped the platform
+> church with `tenant_id <=> ?`, on the assumption that null-safe equality would also match the NULL rows.
+> It does not: `NULL <=> 1` is **false**. `<=>` matches the shared rows only when the bound value is
+> itself null, which is how the sender-IDs screen uses it — from a web request, where `Tenant::id()` can
+> be null. A pass always names a concrete church, so the shared rows have to be asked for explicitly:
+> `(tenant_id = ? OR tenant_id IS NULL)`. **The same mistake was in the `--list` block**, which is why the
+> clause now lives in exactly one place (`SmsSenderCheck::scopedTo()`), used by both the due set and the
+> listing.
+>
+> **Shared rows are polled once, not once per church.** They belong to the platform rather than to any one
+> church, so they are polled during the platform church's pass (the seeded default, which is the church a
+> cron already resolves to). Otherwise a three-church install would poll each shared row three times, with
+> three different tokens, and could get three different answers, of which the last would win.
+>
+> **Verified (7d-ii part 2): 55 assertions.** Five fixture churches: one with a sender ID whose pass is
+> made to throw, two ordinary, one with **no token at all**, plus a platform-wide row and a manually
+> overridden row. Asserted: each pass sees only its own rows; **every gateway call carried the token of
+> the church that owns the row** (the pair set is compared exactly); the untokened church's row was never
+> polled and was left untouched rather than failed; the manual override was never polled and is still
+> `manual`; the shared row was polled **exactly once**, by the platform church; a rejection quoted the
+> gateway's own words; each approval wrote `sms_default_sender_id` into **its own** church and no other;
+> a pass that threw was held (`ok = false`, surfaced on stderr, exit 1) while the churches after it still
+> ran; the back-off window still holds (a row checked 5 minutes ago is not due, 20 minutes ago is);
+> the listing groups by church and puts the shared row only under the platform church; and the untokened
+> church was reported as skipped rather than silently ignored.
+>
+> The real script was also run as a subprocess **with cURL disabled**, so it exercises its own reporting,
+> per-church labelling, summary line and exit code without a single packet leaving the machine: `4
+> checked, 0 approved, 0 rejected, 0 still pending, 4 error(s)` — one per church with a token, and the
+> untokened church excluded. Single-church output was re-checked byte for byte: with no token the script
+> prints exactly `sms_sender_check: no SMS API token is configured; skipping.` on stderr with an empty
+> stdout and exit 0, and the listing prints exactly `No sender IDs have been submitted yet.` with no
+> heading.
+>
+> **The mutation check:** restoring the original unscoped query makes **15 assertions fail**, and the
+> captured calls read `ALP001|token-PLATFORM BET001|token-PLATFORM FLT001|token-PLATFORM
+> GAM001|token-PLATFORM SHR001|token-PLATFORM` — every church's row polled with one church's token, which
+> is the defect stated in one line.
+>
+> **Not verified:** the labelled *success* line (`sms_sender_check: <church>: AAA111 approved.`) is
+> exercised only for the failure variant reached through the disabled-cURL run and for the no-token skip
+> path; injecting a fake gateway into the script itself is not possible without bootstrapping the app
+> twice, which warns — so the one `foreach` that prints those lines is reviewed rather than executed. No
+> real gateway was contacted and no email or push was delivered (fixture churches have no units, so
+> `Notifier::send()` returns early with "There are no recipient units").
+>
 > **7d-ii — the rest, still to do.** Corrected by listing `cli/` instead of reciting from memory:
 > there are eleven workers, not the six named here first, and the first version of this list missed
 > `media_worker.php` and `reading_worker.php` entirely. Ordered by who gets hurt when the wrong church is
-> used: `sms_sender_check` (polls the gateway and emails a church's media team using whatever token is
-> ambient), then `media_worker` (emails a publisher a daily report whose subject carries
+> used: `media_worker` (emails a publisher a daily report whose subject carries
 > `setting('site_title')` — from cron, the default church's name), then `devotional_worker` and
 > `reading_worker` (push to devices; both need the new `device_tokens.tenant_id`), then `followup_worker`
 > and `roster_worker` (email), then `wa_worker` (partly converted already — it stamps `Tenant::id()` on
 > new conversations), and finally `analytics_rollup` and `backup`, which send nothing and need reading
 > rather than rewriting. `sms_maintenance` is already correct: it deliberately uses the un-scoped
-> `activeAll()`. Each of the rest becomes `Tenant::each(...)` with the pass body unchanged, so a failure
-> in one church cannot stop another's run.
+> `activeAll()`. Each of the rest becomes `Tenant::each(...)`, so a failure in one church cannot stop
+> another's run.
+>
+> **Also outstanding, found while doing part 2 and not fixed there:** `admin/partials/sms/sender-ids.php`'s
+> `$loadSender()` guard is **unit-based, not church-based**. It documents the unit rule and enforces it,
+> but when an admin has no unit scope (`$scopeUnitIds === []`) it returns the row for any id — so an admin
+> of one church could act on another church's sender ID by posting its number. It needs a tenant check
+> alongside the unit one, as its own small commit.
 >
 > **Still not tested against a second church** — there is none in production, and every claim in this
 > audit is from reading the code, not from a run.

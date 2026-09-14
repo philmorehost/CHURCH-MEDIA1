@@ -24,6 +24,10 @@ declare(strict_types=1);
  * because the super admin set it deliberately — usually precisely because the gateway
  * was unreachable.
  *
+ * One pass per church, because a sender ID is polled with the token of the church that submitted it.
+ * Asking the gateway about another church's sender ID gets an answer about an ID that account does not
+ * own — and the row would be marked rejected on the strength of it.
+ *
  * Usage:
  *   php cli/sms_sender_check.php            check whatever is due
  *   php cli/sms_sender_check.php --all      check every non-final sender ID now
@@ -50,230 +54,124 @@ $options = array_slice($argv, 1);
 $checkAll = in_array('--all', $options, true);
 $listOnly = in_array('--list', $options, true);
 
-$pdo = Database::getInstance()->getConnection();
-
-/** The minimum minutes between checks for a request of this age. */
-$intervalFor = static function (int $ageMinutes): int {
-    if ($ageMinutes < 360) {   // under 6 hours
-        return 15;
-    }
-    if ($ageMinutes < 1440) {  // under a day
-        return 120;
-    }
-    if ($ageMinutes < 10080) { // under a week
-        return 360;
-    }
-    return 1440;
-};
+/**
+ * The church a cron resolves to, which is the seeded default one.
+ *
+ * `sms_senders` treats a NULL `tenant_id` as a platform-wide row — the convention
+ * `admin/partials/sms/sender-ids.php` already uses — and those rows belong to the platform rather than
+ * to any one church. So they are polled during *this* church's pass and not during every church's: a
+ * three-church install would otherwise poll each shared row three times, with three different tokens,
+ * and could get three different answers, of which the last would win.
+ */
+$platformTenantId = Tenant::id();
 
 /* ---------------------------------------------------------------- list mode */
 
 if ($listOnly) {
-    $rows = $pdo->query('SELECT * FROM sms_senders ORDER BY status ASC, id ASC')->fetchAll();
-    if (!$rows) {
-        fwrite(STDOUT, "No sender IDs have been submitted yet.\n");
-        exit(0);
-    }
-    foreach ($rows as $row) {
-        fwrite(STDOUT, sprintf(
-            "%-12s %-9s %-8s %-14s %s\n",
-            (string) $row['sender_id'],
-            (string) $row['status'],
-            (string) $row['status_source'],
-            $row['last_checked_at'] ? (string) $row['last_checked_at'] : 'never checked',
-            (string) ($row['rejection_note'] ?? $row['last_check_note'] ?? '')
-        ));
-    }
-    exit(0);
-}
+    // Grouped by church. Somebody running this by hand needs to know whose sender IDs these are, and
+    // one undifferentiated list of every church's rows is how a name gets changed in the wrong church.
+    $listed = Tenant::each(static function (int $tenantId) use ($platformTenantId): array {
+        return SmsSenderCheck::rowsFor($tenantId, $tenantId === $platformTenantId);
+    });
 
-if (!Sms::configured()) {
-    fwrite(STDERR, "sms_sender_check: no SMS API token is configured; skipping.\n");
+    $severalChurches = count($listed) > 1;
+    $any = false;
+
+    foreach ($listed as $tenantId => $entry) {
+        if ($entry['ok'] !== true || !is_array($entry['result'])) {
+            fwrite(STDERR, 'sms_sender_check: could not list church ' . $tenantId . ' — '
+                . (string) ($entry['error'] ?? 'unknown error') . "\n");
+            continue;
+        }
+        $rows = $entry['result'];
+        if ($rows) {
+            $any = true;
+        }
+        if ($severalChurches) {
+            $church = Tenant::find((int) $tenantId);
+            fwrite(STDOUT, "\n" . (string) ($church['name'] ?? ('Church ' . $tenantId)) . "\n");
+        }
+        foreach ($rows as $row) {
+            fwrite(STDOUT, sprintf(
+                "%-12s %-9s %-8s %-14s %s\n",
+                (string) $row['sender_id'],
+                (string) $row['status'],
+                (string) $row['status_source'],
+                $row['last_checked_at'] ? (string) $row['last_checked_at'] : 'never checked',
+                (string) ($row['rejection_note'] ?? $row['last_check_note'] ?? '')
+            ));
+        }
+    }
+
+    if (!$any) {
+        fwrite(STDOUT, "No sender IDs have been submitted yet.\n");
+    }
     exit(0);
 }
 
 /* ------------------------------------------------------------------- due set */
 
-// Only `pending` rows can change, and a manual override is not ours to overrule.
-$candidates = $pdo->query("SELECT * FROM sms_senders WHERE status = 'pending' AND status_source = 'gateway' ORDER BY id ASC")->fetchAll();
+// One pass per church: each church's own sender IDs are polled with that church's own gateway token.
+// The pass itself lives in `core/SmsSenderCheck.php` — the same split `sms_worker.php` has from
+// `SmsRunner` — so it can be driven directly, rather than only through this script.
+$runs = Tenant::each(static function (int $tenantId) use ($checkAll, $platformTenantId): array {
+    return SmsSenderCheck::pass($tenantId, $checkAll, $tenantId === $platformTenantId);
+});
 
-$checked = 0;
-$approved = 0;
-$rejected = 0;
-$stillPending = 0;
-$errors = 0;
+$severalChurches = count($runs) > 1;
+$totals = ['checked' => 0, 'approved' => 0, 'rejected' => 0, 'pending' => 0, 'errors' => 0];
+$configured = 0;
+$failedPasses = 0;
 
-foreach ($candidates as $row) {
-    $id = (int) $row['id'];
-    $senderId = (string) $row['sender_id'];
+foreach ($runs as $tenantId => $entry) {
+    $church = $severalChurches ? Tenant::find((int) $tenantId) : null;
+    $label = $severalChurches ? (string) ($church['name'] ?? ('Church ' . $tenantId)) . ': ' : '';
 
-    if (!$checkAll && $row['last_checked_at'] !== null) {
-        $ageMinutes = (int) floor((time() - strtotime((string) $row['created_at'])) / 60);
-        $sinceLast = (int) floor((time() - strtotime((string) $row['last_checked_at'])) / 60);
-        $due = $intervalFor(max(0, $ageMinutes));
-        if ($sinceLast < $due) {
-            continue;
-        }
-    }
-
-    $result = Sms::senderIdStatus($senderId);
-    $checked++;
-
-    if (!$result['ok']) {
-        $errors++;
-        // Record the attempt so a gateway that is down does not cause a retry storm.
-        $pdo->prepare('UPDATE sms_senders SET last_checked_at = NOW(), last_check_note = ? WHERE id = ?')
-            ->execute([mb_substr('Check failed: ' . (string) ($result['error'] ?? 'unknown error'), 0, 255), $id]);
-        fwrite(STDERR, sprintf("sms_sender_check: %s — %s\n", $senderId, (string) ($result['error'] ?? 'check failed')));
+    if ($entry['ok'] !== true || !is_array($entry['result'])) {
+        // A pass that threw is a bug worth a non-zero exit. Tenant::each held it so the other churches
+        // still ran, which is why it has to be reported out here rather than inside the function.
+        $failedPasses++;
+        fwrite(STDERR, 'sms_sender_check: ' . $label . 'the pass failed — ' . (string) ($entry['error'] ?? 'unknown error') . "\n");
         continue;
     }
 
-    // The gateway is inconsistent about the key and the case, so read it loosely.
-    $raw = $result['raw'];
-    $status = '';
-    foreach (['status', 'senderIDStatus', 'sender_status', 'message', 'data'] as $key) {
-        if (isset($raw[$key]) && is_scalar($raw[$key])) {
-            $status = strtolower(trim((string) $raw[$key]));
-            break;
+    $pass = $entry['result'];
+
+    if ($pass['configured'] !== true) {
+        // Reported per church rather than as a pre-flight exit: a church with no token must not stop
+        // every other church's sender IDs from being polled.
+        if ($severalChurches) {
+            fwrite(STDERR, 'sms_sender_check: ' . $label . "no SMS API token is configured; skipped.\n");
         }
-    }
-
-    // Match on the words rather than on an exact string: the gateway has answered with
-    // "Approved", "approved." and "Sender ID approved" at different times.
-    $resolved = 'pending';
-    if (str_contains($status, 'approve')) {
-        $resolved = 'approved';
-    } elseif (str_contains($status, 'reject') || str_contains($status, 'declin') || str_contains($status, 'denied')) {
-        $resolved = 'rejected';
-    }
-
-    if ($resolved === 'pending') {
-        $stillPending++;
-        $pdo->prepare('UPDATE sms_senders SET last_checked_at = NOW(), last_check_note = ? WHERE id = ?')
-            ->execute([mb_substr('Still pending at the gateway: ' . ($status !== '' ? $status : 'no status given'), 0, 255), $id]);
         continue;
     }
 
-    if ($resolved === 'approved') {
-        $approved++;
-        $pdo->prepare("UPDATE sms_senders SET status = 'approved', status_source = 'gateway', approved_at = NOW(), last_checked_at = NOW(), last_check_note = NULL WHERE id = ?")
-            ->execute([$id]);
+    $configured++;
 
-        // If nothing else is set as default yet, make this one it — a church that has
-        // just been approved should be able to send without hunting for a setting.
-        if ((string) setting('sms_default_sender_id', '') === '') {
-            settingSave(['sms_default_sender_id' => $senderId]);
-        }
-
-        notifyApproved($row);
-        fwrite(STDOUT, sprintf("sms_sender_check: %s approved.\n", $senderId));
-        continue;
+    foreach ($pass['lines'] as $line) {
+        fwrite($line['stream'] === 'err' ? STDERR : STDOUT, 'sms_sender_check: ' . $label . $line['text'] . "\n");
     }
 
-    $rejected++;
-    $note = mb_substr('The gateway rejected this sender ID. ' . ($status !== '' ? 'Gateway said: ' . $status : ''), 0, 255);
-    $pdo->prepare("UPDATE sms_senders SET status = 'rejected', status_source = 'gateway', rejection_note = ?, last_checked_at = NOW() WHERE id = ?")
-        ->execute([$note, $id]);
+    foreach (['checked', 'approved', 'rejected', 'pending', 'errors'] as $key) {
+        $totals[$key] += (int) $pass[$key];
+    }
+}
 
-    notifyRejected($row, $note);
-    fwrite(STDOUT, sprintf("sms_sender_check: %s rejected.\n", $senderId));
+if ($configured === 0) {
+    fwrite(STDERR, "sms_sender_check: no SMS API token is configured; skipping.\n");
+    exit($failedPasses > 0 ? 1 : 0);
 }
 
 fwrite(STDOUT, sprintf(
     "sms_sender_check: %d checked, %d approved, %d rejected, %d still pending, %d error(s).\n",
-    $checked,
-    $approved,
-    $rejected,
-    $stillPending,
-    $errors
+    $totals['checked'],
+    $totals['approved'],
+    $totals['rejected'],
+    $totals['pending'],
+    $totals['errors']
 ));
 
-exit(0);
+// A pass that threw is a bug worth surfacing to cron. A sender ID that is merely still pending at the
+// gateway is not a failure.
+exit($failedPasses > 0 ? 1 : 0);
 
-/**
- * Tells the church that submitted the sender ID that it is ready to use.
- *
- * Addressed to the submitting unit, and to the submitter's own unit when they are
- * different — the person who filled the form and the church it belongs to both want
- * to know. `media_team` is included because that is who the roadmap has submitting
- * these, and they are the ones the approval unblocks.
- */
-function notifyApproved(array $row): void
-{
-    $units = [];
-    if (!empty($row['org_unit_id'])) {
-        $units[] = (int) $row['org_unit_id'];
-    }
-    if (!empty($row['submitted_by'])) {
-        try {
-            $stmt = Database::getInstance()->getConnection()->prepare('SELECT org_unit_id FROM users WHERE id = ? LIMIT 1');
-            $stmt->execute([(int) $row['submitted_by']]);
-            $unit = $stmt->fetchColumn();
-            if ($unit) {
-                $units[] = (int) $unit;
-            }
-        } catch (Throwable $e) {
-            // Fall through with whatever units we already have.
-        }
-    }
-
-    if ($units === []) {
-        // No church attached — tell everyone who can act on it rather than nobody. Bounded to the
-        // sender's own church: this runs from a cron, where the ambient church is always the default
-        // one, so asking for `Unit::all()` would name every church in the platform.
-        $tenantId = (int) ($row['tenant_id'] ?? 0);
-        if ($tenantId <= 0) {
-            $tenantId = (int) (Tenant::id() ?? 0);
-        }
-        foreach (Unit::allForTenant($tenantId, 'id ASC') as $unit) {
-            $units[] = (int) $unit['id'];
-        }
-    }
-
-    try {
-        Notifier::send(
-            $units,
-            'Sender ID ' . (string) $row['sender_id'] . ' approved',
-            'Your sender ID ' . (string) $row['sender_id'] . ' has been approved and is ready to use. '
-            . 'You can now send SMS from Admin → SMS → Compose.',
-            ['email' => true, 'push' => true, 'roles' => ['admin', 'editor', 'media_team']]
-        );
-    } catch (Throwable $e) {
-        error_log('sms_sender_check notify failed: ' . $e->getMessage());
-    }
-}
-
-/** Tells the submitter why it was refused, so they can fix it and try again. */
-function notifyRejected(array $row, string $note): void
-{
-    $units = [];
-    if (!empty($row['org_unit_id'])) {
-        $units[] = (int) $row['org_unit_id'];
-    } elseif (!empty($row['submitted_by'])) {
-        try {
-            $stmt = Database::getInstance()->getConnection()->prepare('SELECT org_unit_id FROM users WHERE id = ? LIMIT 1');
-            $stmt->execute([(int) $row['submitted_by']]);
-            $unit = $stmt->fetchColumn();
-            if ($unit) {
-                $units[] = (int) $unit;
-            }
-        } catch (Throwable $e) {
-            // Nothing more we can do; the row itself is updated either way.
-        }
-    }
-
-    if ($units === []) {
-        return;
-    }
-
-    try {
-        Notifier::send(
-            $units,
-            'Sender ID ' . (string) $row['sender_id'] . ' was not approved',
-            $note . "\n\nYou can submit a different sender ID under Admin → SMS → Sender IDs.",
-            ['email' => true, 'push' => false, 'roles' => ['admin', 'editor', 'media_team']]
-        );
-    } catch (Throwable $e) {
-        error_log('sms_sender_check notify failed: ' . $e->getMessage());
-    }
-}
