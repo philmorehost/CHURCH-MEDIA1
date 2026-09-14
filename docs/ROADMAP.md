@@ -65,7 +65,7 @@
 | **4** | WhatsApp channel | Official Cloud API integration (templates, 24-h window, webhooks) | 5–7 sessions | Per-conversation | ✅ closed (4.1–4.3; 4.4 rejected) |
 | **5** | Members & daily engagement | Member accounts, daily devotional, Bible reading plans + streaks, offline sermon downloads | 10–12 sessions | None | ✅ shipped (S1–S6) |
 | **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ✅ **complete** — 6a–6g shipped |
-| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings), 7b shipped (an account belongs to one church), 7c shipped (a unit belongs to one church), 7d-i shipped (worker tenancy plumbing), 7d-ii parts 1–2 shipped (the SMS worker and the sender-ID poller act as one church at a time), 7d-iii shipped (the SMS screens only touch their own church), 7d-iv shipped (the ads tables carry a church) |
+| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings), 7b shipped (an account belongs to one church), 7c shipped (a unit belongs to one church), 7d-i shipped (worker tenancy plumbing), 7d-ii parts 1–2 and 4 shipped (the SMS worker, the sender-ID poller and the daily publisher report act as one church at a time), 7d-iii shipped (the SMS screens only touch their own church), 7d-iv shipped (the ads tables carry a church) |
 
 **Confirmed 2026-09-12:** multi-tenant **SaaS is a real goal**. That is why **Phase 0
 (tenancy foundation) runs before everything else** — the SMS token, sender IDs, country
@@ -1748,6 +1748,50 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > were **not driven**. The public `/advertise` flow needs a multipart upload and reaches the payment path,
 > so driving it is the next stage's work rather than something to claim here. Nothing reads the new column
 > yet, so no behaviour changed — which is also why this is safe to ship ahead of the worker conversion.
+>
+> **7d-ii part 4 shipped — the daily publisher report runs one pass per church.** The worker is
+> `media_worker`, and its two halves turned out to have opposite answers.
+>
+> **The video conversion is deliberately *not* per church.** It is file work with no church of its own:
+> the only setting it reads is `ffmpeg_path`, a platform binary path, and `media_post_items` has no church
+> column. Running it once per church would re-query and re-skip the same rows N times, so it still runs
+> once, and its docblock now says why rather than leaving the next reader to guess.
+>
+> **The report is.** It carries a church's name and links to that church's site, and it was sent under
+> whichever church happened to resolve — the default one, from a cron. Worse, its once-a-day marker was a
+> **single install-wide file**: the first church to run after 8am wrote it, and every other church's
+> publishers got nothing for the rest of the day. The marker is now per church and per day, the publishers
+> query is scoped (on the column 7d-iv added), and the whole job runs through `Tenant::each()`.
+>
+> **Also fixed, and it was live: the link in that email was dead.** `baseUrl()` is built from
+> `$_SERVER['HTTP_HOST']`, which does not exist in a shell, so under a CLI cron every publisher report
+> linked to `http://localhost/ad-manager?token=…`. It now falls back to the church being served —
+> `tenants.domain`, which is what the site is actually reachable at — and **only when there is no Host**,
+> so a web request is untouched.
+>
+> **How it is verified.** The selection moved into `core/PublisherReport.php`, the same way `SmsRunner` is
+> split from `sms_worker`, and for the same reason: `Mailer` has no seam, so a test must never post mail,
+> and splitting the choice from the sending is what lets the choice be asserted at all. **34 assertions:**
+> the marker is per church and per day; marking one church does not mark another (the bug, as a single
+> assertion); nothing is due before 8am and it is from 8am; each church is told about **its own**
+> publishers under **its own** name and never mentions the other; a publisher with nothing approved is
+> left out; a church with no advertisers gets an empty report rather than everybody else's; each church's
+> portal link points at its own domain and none of them is localhost; a web request with a Host is
+> unaffected by the fallback; and a church with no domain still gets `localhost` exactly as before. The
+> real worker was then run twice as a subprocess — first run had a report due, second had none because the
+> markers were written — with the harness **deleting its own markers first**, so that the worker made the
+> decision rather than the harness arranging the answer.
+>
+> The mutation check — putting the install-wide marker back — fails **4 assertions**, the marker ones and
+> nothing else.
+>
+> **Not verified:** the mail itself. There is no local SMTP, so `Mailer::send()` fails and the run reports
+> `0 sent`; what is asserted is that the right church was *due* and that the right publishers were
+> selected for it. Nothing was delivered — true of every email in this project so far.
+>
+> **Still owed from 7d-iv:** the three stamps in `core/routes.php` have now been carried across two
+> stages without being driven. The public `/advertise` flow needs a multipart upload and reaches the
+> payment path. That is a debt, not a decision, and it is the next stage's first job.
 >
 > **Still not tested against a second church** — there is none in production, and every claim in this
 > audit is from reading the code, not from a run.

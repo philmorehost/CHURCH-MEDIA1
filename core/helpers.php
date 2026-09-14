@@ -59,8 +59,25 @@ function clientIp(): string
 
 function baseUrl(string $path = ''): string
 {
+    $host = $_SERVER['HTTP_HOST'] ?? '';
+
+    // A shell has no Host header, so every absolute link built in a cron came out as
+    // `http://localhost/...` — which is what the daily publisher report's portal link did. Fall back to
+    // the church being served, whose `domain` is what the site is actually reachable at. Web requests are
+    // untouched: they always have a Host.
+    if ($host === '' && class_exists('Tenant')) {
+        $tenantId = Tenant::id();
+        if ($tenantId !== null) {
+            $church = Tenant::find((int) $tenantId);
+            $host = (string) ($church['domain'] ?? '');
+        }
+    }
+
     $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    if ($host === '') {
+        $host = 'localhost';
+    }
+
     return $scheme . '://' . $host . '/' . ltrim($path, '/');
 }
 
