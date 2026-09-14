@@ -921,9 +921,9 @@ CREATE TABLE IF NOT EXISTS `members` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Daily devotionals. `tenant_id` and `org_unit_id` are NOT NULL DEFAULT 0 rather than
-the NULL that `sermon_series` uses for "shared", because this table needs
-UNIQUE (tenant_id, org_unit_id, publish_on) and MySQL treats every NULL as distinct,
-which would silently allow two devotionals for the same day. 0 means church-wide.
+-- the NULL that `sermon_series` uses for "shared", because this table needs
+-- UNIQUE (tenant_id, org_unit_id, publish_on) and MySQL treats every NULL as distinct,
+-- which would silently allow two devotionals for the same day. 0 means church-wide.
 CREATE TABLE IF NOT EXISTS `devotionals` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `tenant_id` INT NOT NULL DEFAULT 0,
