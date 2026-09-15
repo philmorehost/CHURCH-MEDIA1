@@ -2433,6 +2433,120 @@ cannot double-credit, and that every branch of the retry and resubmission rules 
 gateway's HTTP calls stubbed, the way `Sms::setTransport()` is used for the SMS worker. The end-to-end
 payment itself needs live keys and a person with a test card.
 
+## 9c. Phase 8 — News & blog (SEO, categories, a rich-text editor)
+
+Requested 2026-09-15. A news/blog section: admins, editors and media team can create **categories** and
+publish **news posts**, authored in **CKEditor 5** with a **featured image that cannot be huge**, on a
+public **news page that is modern** and fully **SEO** — unique titles and descriptions, canonical URLs,
+OpenGraph, `NewsArticle` structured data, sitemap entries and a feed.
+
+### The facts this rests on
+
+- **CKEditor is now vendored, not loaded from a CDN.** `bootstrap.php` sends `script-src 'self'` — and
+  `'self' 'unsafe-inline'` in the admin — so a CDN `<script>` is **blocked in production**, and adding a
+  third-party host would loosen the policy that Phase 1.1 deliberately tightened for a page that can
+  publish content. `public/assets/vendor/ckeditor5/` holds the unmodified official
+  **CKEditor 5 Classic 44.3.0** build (1.4 MB, no separate stylesheet — v44 injects its own, which
+  `style-src 'unsafe-inline'` already allows), its `LICENSE.md`, and a `README.md` with provenance and the
+  update command. ⚠️ **The obvious npm package name is a squat at version 1.0.0**; the real one is the
+  scoped `@ckeditor/ckeditor5-build-classic`.
+- ⚠️ **The licence is a business decision, not a code one.** The build is dual-licensed
+  **GPL-2.0-or-later or commercial**. This repository is public, so distributing a combined work puts the
+  GPL on it unless a commercial licence is bought from CKSource. Flagged here rather than decided.
+- **The featured image cannot be large because it is never stored large.**
+  `MediaProcessor::compressImage($src, $dir, 1280, 78, 'news_')` caps the long edge at 1280px and converts
+  to WebP, keeping whichever of the two is smaller. The editor screen shows the stored dimensions and file
+  size so a slow upload is visible before it is published rather than after.
+
+### Stages
+
+- **8a — schema + `core/News.php`.** `news_categories` and `news_posts`, both carrying `tenant_id` like
+  every table since Phase 1 (news is church content, so it is **church-scoped and deliberately not
+  unit-scoped** — the same asymmetry as the SMS spend tiles). Slug uniqueness is `(tenant_id, slug)`, so
+  two churches can both own `news/announcement` — unlike `org_units.slug`, whose global uniqueness forces
+  a `-2` suffix on the second church.
+- **8b — authoring.** `admin/news.php`: the post list, the editor (CKEditor 5, uploaded-free HTML sanitised
+  on save), the featured image with its measured size, draft/publish, and category management — with the
+  role check the request names: **admin, editor and media team**.
+- **8c — the public pages and their SEO.** `/news`, `/news/{slug}`, `/news/category/{slug}`; unique
+  title/description per post, canonical URL, OpenGraph and Twitter cards, `NewsArticle` JSON-LD, a
+  breadcrumb trail, `sitemap.xml` entries, and a news RSS feed.
+- **8d — the design.** A modern news index (lead story, card grid, category chips) and a readable article
+  page, in the site's existing dark theme rather than a second visual language.
+- **8e — integration.** A nav entry, the sitemap and the feed, and `views/sitemap.php` picking the posts
+  up. Kept deliberately small.
+
+### What has shipped so far
+
+> **8a and 8b shipped — the news tables, the core class and the authoring screen.** The public pages and
+> their SEO are 8c/8d and are not built yet.
+>
+> **What shipped:** `news_categories` + `news_posts` (migration `2026_43`, mirrored in
+> `installer/schema.sql`), `core/News.php`, `admin/news.php` with category management, the post list, the
+> editor and a **Content → News & Blog** nav entry for `admin`, `editor` and `media_team`.
+> **CKEditor 5 Classic 44.3.0 is vendored** at `public/assets/vendor/ckeditor5/` (1.4 MB) with its licence
+> and a README — not loaded from a CDN, because `script-src 'self'` would block it in production, and
+> loosening the CSP for a page that can publish content is the wrong trade.
+>
+> **Four decisions worth stating, because each was a fork in the road:**
+>
+> - **News is church-scoped and deliberately *not* unit-scoped.** A post is the whole church's news, not one
+>   parish's — the same asymmetry the SMS spend tiles have, and the opposite of the admin screens that are
+>   unit-scoped. `find()`, `category()`, `save()` and `delete()` all carry the church, not just the lists.
+> - **The slug key is `(tenant_id, slug)`**, so two churches can both own `news/announcement`. Deliberately
+>   unlike `org_units.slug`, whose global uniqueness silently hands the second church `grace-zone-2`.
+> - **The body is sanitised against a whitelist on the way in, rather than escaped on the way out.** The
+>   media team is the role handed to the most volunteers, so "the author is staff" is not a security
+>   boundary. Verified against the shapes that matter: `<script>` (removed with its content), `onerror` and
+>   `onclick`, `javascript:` / `vbscript:` / `data:` URLs, `<iframe>`, `<style>`, `url(...)` and
+>   `expression()` inside a `style`, `<svg>`, and a `java\0script:` scheme with an embedded null. The
+>   formatting the author meant — `<strong>`, lists, tables, links, safe colours — survives, and UTF-8
+>   survives: a Yorùbá body round-trips intact.
+> - **The featured image cannot be large because it is never stored large.**
+>   `MediaProcessor::compressImage(…, 1280, 78, 'news_')` caps the long edge at 1280px and encodes WebP.
+>   Measured: a 3000×2000 upload was stored at **1280×853 and under 300 KB**, and the row records the
+>   *stored* file's dimensions rather than the upload's, so the screen shows what was actually written.
+>
+> **Verified (8a/8b): 63 assertions, 0 failures**, and **eight mutations, eight caught:** the body stored
+> unsanitised (3 failures), any URL scheme allowed (1), the post loader unscoped (2), a draft reachable by
+> its public URL (1), two posts sharing one slug (1), the image cap raised to 2000px (3), the media team
+> shut out (1), and a delete leaving its image on disk (2). The harness drives the real screens over HTTP
+> with a real sign-in and CSRF tokens, including a genuine multipart upload of a 3000×2000 PNG.
+>
+> **Four things the harness taught — all fixed in the harness, not explained away:**
+>
+> - **`is_file()` lies after a delete, inside one request.** PHP caches every stat result, so the check that
+>   returned `true` before the delete returns `true` after it. The assertion failed while the file was
+>   genuinely gone, and the proof was a fresh `glob()` of the directory coming back empty.
+>   `clearstatcache()` is now called before that check.
+> - **A sweep that signs in repeatedly throttles itself.** `admin/login.php` allows 15 attempts per 300s per
+>   IP, and 8 mutations × 2 sign-ins exceeded it — so the *last* mutation reported **29 failures** that had
+>   nothing to do with the code under test. The runner now clears that counter per iteration.
+> - **"Got a cookie back" is not "signed in".** A refused login still sets a session cookie, so the original
+>   helper made "an editor can sign in" pass for a session that was never signed in, and every later
+>   assertion then failed three steps downstream of the cause. `login()` now probes an authenticated page.
+> - **The unique key on `(tenant_id, slug)` is a second line of defence.** The mutation that removed the
+>   slug-uniqueness helper was caught not by the helper but by the database refusing the INSERT, so the
+>   assertion now accepts either defence — and a run that *needs* the database means the helper failed.
+>
+> ⚠️ **And one mutation that was invisible until the test was made harder:** deleting `status = 'published'`
+> from the public lookup changed nothing, because a normal draft has a NULL `published_at` and the second
+> clause hid it anyway. A draft is now given a publish date directly, which is the only case where the status
+> is the sole guard.
+>
+> **Not verified: no browser has been used.** The editor was never typed into; what is proven is the pinned
+> version, the local path, the CSP-compatible markup, the licence branch, and that the plain textarea is
+> still the form field if the editor does not start. CKEditor may also attempt a licence check that
+> `connect-src 'self'` blocks — it reports that in the console and keeps working, and that is unverified for
+> the same reason.
+
+### What cannot be verified here
+
+**No browser has been used.** The editor is verified by asserting the markup, the pinned version, the CSP
+compatibility and the server-side save path — not by typing into it. CKEditor may also attempt a licence
+check that `connect-src 'self'` blocks (`licenseKey: 'GPL'` is passed); it reports that in the console and
+keeps working, and that is unverified for the same reason.
+
 ## 10. Cross-cutting concerns (build these once, early)
 
 

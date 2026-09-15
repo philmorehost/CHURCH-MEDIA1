@@ -35,6 +35,9 @@ $navGroups = [
         'key' => 'content',
         'label' => 'Content',
         'items' => [
+            // News is the one Content item the media team may use, so the roles are named rather than left
+            // out: the gate in admin/news.php is the same list, and the two are meant to be read together.
+            ['key' => 'news', 'href' => '/admin/news', 'label' => 'News & Blog', 'roles' => ['admin', 'editor', 'media_team']],
             ['key' => 'branding', 'href' => '/admin/branding', 'label' => 'Branding', 'roles' => ['admin']],
             ['key' => 'media', 'href' => '/admin/media', 'label' => 'Media & Reels'],
             ['key' => 'comments', 'href' => '/admin/comments', 'label' => 'Comments'],

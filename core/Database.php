@@ -2347,6 +2347,58 @@ class Database
             '2026_42_default_locale' => function (PDO $pdo): void {
                 self::addColumnIfMissing($pdo, 'settings', 'default_locale', "VARCHAR(12) NOT NULL DEFAULT 'en'", 'timezone');
             },
+
+            // News & blog.
+            //
+            // Both tables carry `tenant_id` like every table added since Phase 1: news is the church's own
+            // content, so it is **church-scoped** — and deliberately not unit-scoped, because a news item
+            // belongs to the whole church rather than to one parish. See the note in `core/News.php`.
+            //
+            // The slug key is `(tenant_id, slug)` on purpose. `org_units.slug` is globally unique, so the
+            // second church that wants `grace-zone` silently gets `grace-zone-2` — a wart this table does
+            // not inherit.
+            '2026_43_news' => function (PDO $pdo): void {
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `news_categories` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `tenant_id` INT NOT NULL DEFAULT 0,
+                    `name` VARCHAR(120) NOT NULL,
+                    `slug` VARCHAR(120) NOT NULL,
+                    `description` VARCHAR(255) NULL,
+                    `sort_order` INT NOT NULL DEFAULT 0,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY `uniq_news_cat_slug` (`tenant_id`, `slug`),
+                    KEY `idx_news_cat_tenant` (`tenant_id`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                $pdo->exec("CREATE TABLE IF NOT EXISTS `news_posts` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `tenant_id` INT NOT NULL DEFAULT 0,
+                    `category_id` INT NULL,
+                    `author_id` INT NULL,
+                    `author_name` VARCHAR(150) NOT NULL,
+                    `title` VARCHAR(200) NOT NULL,
+                    `slug` VARCHAR(200) NOT NULL,
+                    `excerpt` VARCHAR(400) NULL,
+                    `body` MEDIUMTEXT NULL,
+                    `featured_path` VARCHAR(255) NULL COMMENT 'Stored small: long edge capped at 1280px, WebP',
+                    `featured_alt` VARCHAR(200) NULL,
+                    `featured_width` INT NOT NULL DEFAULT 0,
+                    `featured_height` INT NOT NULL DEFAULT 0,
+                    `seo_title` VARCHAR(200) NULL,
+                    `seo_description` VARCHAR(300) NULL,
+                    `status` ENUM('draft','published') NOT NULL DEFAULT 'draft',
+                    `is_featured` TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'The lead story on /news',
+                    `views_count` INT NOT NULL DEFAULT 0,
+                    `published_at` DATETIME NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY `uniq_news_slug` (`tenant_id`, `slug`),
+                    KEY `idx_news_tenant_status` (`tenant_id`, `status`, `published_at`),
+                    KEY `idx_news_category` (`category_id`),
+                    CONSTRAINT `fk_news_category` FOREIGN KEY (`category_id`) REFERENCES `news_categories`(`id`) ON DELETE SET NULL,
+                    CONSTRAINT `fk_news_author` FOREIGN KEY (`author_id`) REFERENCES `users`(`id`) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+            },
         ];
     }
 

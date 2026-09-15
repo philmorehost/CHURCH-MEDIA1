@@ -1260,3 +1260,46 @@ CREATE TABLE IF NOT EXISTS `reading_progress` (
   FOREIGN KEY (`member_id`) REFERENCES `members`(`id`) ON DELETE CASCADE,
   FOREIGN KEY (`plan_id`) REFERENCES `reading_plans`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- News & blog. Categories first: news_posts references it. Appended at the end because this file is a
+-- ONE-SHOT script, so a table has to appear after anything it points at. `users` is created far above.
+CREATE TABLE IF NOT EXISTS `news_categories` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NOT NULL DEFAULT 0,
+  `name` VARCHAR(120) NOT NULL,
+  `slug` VARCHAR(120) NOT NULL,
+  `description` VARCHAR(255) NULL,
+  `sort_order` INT NOT NULL DEFAULT 0,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_news_cat_slug` (`tenant_id`, `slug`),
+  INDEX `idx_news_cat_tenant` (`tenant_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `news_posts` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NOT NULL DEFAULT 0,
+  `category_id` INT NULL,
+  `author_id` INT NULL,
+  `author_name` VARCHAR(150) NOT NULL,
+  `title` VARCHAR(200) NOT NULL,
+  `slug` VARCHAR(200) NOT NULL,
+  `excerpt` VARCHAR(400) NULL,
+  `body` MEDIUMTEXT NULL,
+  `featured_path` VARCHAR(255) NULL COMMENT 'Stored small: long edge capped at 1280px, WebP',
+  `featured_alt` VARCHAR(200) NULL,
+  `featured_width` INT NOT NULL DEFAULT 0,
+  `featured_height` INT NOT NULL DEFAULT 0,
+  `seo_title` VARCHAR(200) NULL,
+  `seo_description` VARCHAR(300) NULL,
+  `status` ENUM('draft','published') NOT NULL DEFAULT 'draft',
+  `is_featured` TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'The lead story on /news',
+  `views_count` INT NOT NULL DEFAULT 0,
+  `published_at` DATETIME NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_news_slug` (`tenant_id`, `slug`),
+  INDEX `idx_news_tenant_status` (`tenant_id`, `status`, `published_at`),
+  INDEX `idx_news_category` (`category_id`),
+  FOREIGN KEY (`category_id`) REFERENCES `news_categories`(`id`) ON DELETE SET NULL,
+  FOREIGN KEY (`author_id`) REFERENCES `users`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
