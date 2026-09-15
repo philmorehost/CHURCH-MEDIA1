@@ -2891,6 +2891,33 @@ PayHub documents all of it at `https://merchant.payhub.com.ng/api-reference.php`
 > cannot respond. 7h-9 already made this non-fatal by rendering the hosted form visibly beneath it, which is
 > how the advertiser managed to pay at all.
 
+> **7h-13 shipped — the payment window never opened because of `const`.** *(The user supplied the gateway's own
+> source, which settled it in one line.)*
+>
+> `MERCHANT.PAYHUB/inline.js` declares **`const PayhubPop = { setup: …, openIframe: … }`** at the top level of
+> the file. **A top-level `const` creates a global *lexical* binding — it is NOT a property of `window`.**
+> `advertise.js` gated on `window.PayhubPop`, which is therefore `undefined` even when the script has loaded
+> perfectly, so it announced *"the secure payment window could not be loaded"* on every browser while the
+> gateway's object sat there, fully usable, one scope away. **The button never opened anything and the
+> advertiser was sent to the fallback for a reason that was not true.**
+>
+> It now resolves the bare binding with `typeof` (safe for an undeclared name, resolves normally for a loaded
+> `const`), falls back to `window.PayhubPop` in case a future version assigns there, and keeps a `try/catch`
+> for the temporal-dead-zone case.
+>
+> **This also explains the return.** Grepping the gateway's `api/`, `includes/` and `merchant/` for
+> `callback_url` / `redirect_url` / `return_url` returns **nothing at all** — there is no such parameter, which
+> is why the advertiser is stranded on `verify.php` after a hosted payment. The **inline** window's `callback`
+> is the only return path that exists, and it was the one that could never open. One fault, two symptoms.
+>
+> **Verified: 11 assertions, 0 failures** in Node against a stub DOM — including the premise itself (the object
+> is reachable as a top-level binding and **not** as `window.PayhubPop`), the window opening with no click, the
+> right public key reaching the gateway, the status not claiming a failure, and the honest fallback still firing
+> when the script really is absent.
+>
+> **Not verified:** no browser has run it and no live payment has been taken. The gateway source also confirms
+> the amount fix — `checkout.php` renders `formatCurrency($tx['amount'])`, the **stored naira** figure.
+
 ### Decisions taken, and two worth confirming
 
 - **"Two failed attempts" is counted per advert**, not per publisher: the advert is what is being bought,

@@ -107,7 +107,30 @@
       say(message);
     };
 
-    if (!window.PayhubPop || typeof window.PayhubPop.setup !== 'function') {
+    /*
+     * PayHub's inline script declares `const PayhubPop = { … }` at the top level of the file.
+     *
+     * A top-level `const` creates a global LEXICAL binding — it is NOT a property of `window`. So
+     * `window.PayhubPop` is undefined even when the script has loaded perfectly. The check here used to
+     * require `window.PayhubPop`, so it announced "the secure payment window could not be loaded" on every
+     * browser, while the gateway's own object sat there fully usable one scope away. The payment window
+     * never opened, and the advertiser was sent to the fallback for a reason that was simply untrue.
+     *
+     * `typeof` is used because a bare reference to an undeclared name throws a ReferenceError; a loaded
+     * `const` resolves normally. The try/catch covers the one remaining case — the binding exists but has
+     * not been initialised yet (its "temporal dead zone") — which in practice means our script ran first,
+     * and the ordering in the markup is what prevents that.
+     */
+    var pop = null;
+    try {
+      if (typeof PayhubPop !== 'undefined' && PayhubPop !== null) { pop = PayhubPop; }
+    } catch (error) {
+      pop = null;
+    }
+    // A future version might assign it to `window` instead; accept that too rather than guess.
+    if (!pop && window.PayhubPop) { pop = window.PayhubPop; }
+
+    if (!pop || typeof pop.setup !== 'function') {
       useFallback('The secure payment window could not be loaded, so the button above will not work. Use the payment option below instead.');
       return;
     }
@@ -125,7 +148,7 @@
       return;
     }
 
-    var handler = window.PayhubPop.setup({
+    var handler = pop.setup({
       key: settings.key,
       email: settings.email,
       amount: settings.amount,
