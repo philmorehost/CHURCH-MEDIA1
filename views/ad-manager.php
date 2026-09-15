@@ -196,6 +196,9 @@ $metaDescription = 'Manage your advertisements and monitor campaign performance.
                 <td style="padding:12px 8px;">
                   <?php if ($ad['status'] === 'pending'): ?>
                     <span class="badge warn" style="padding:4px 8px; border-radius:4px; font-size:11px;">Pending Approval</span>
+                    <?php if ((int) ($ad['revision_count'] ?? 0) > 0): ?>
+                      <br><span class="badge info" style="padding:4px 8px; border-radius:4px; font-size:10px;">↻ Resubmitted</span>
+                    <?php endif; ?>
                   <?php elseif ($ad['status'] === 'approved'): ?>
                     <?php if ($isExpired): ?>
                       <span class="badge fail" style="padding:4px 8px; border-radius:4px; font-size:11px;">Expired</span>
@@ -207,6 +210,66 @@ $metaDescription = 'Manage your advertisements and monitor campaign performance.
                   <?php endif; ?>
                 </td>
               </tr>
+
+              <?php
+              /*
+               * A rejected advert gets its own row underneath rather than another column: the reason is a
+               * sentence, and a sentence in a narrow cell is unreadable on a phone.
+               *
+               * The form below sends the advert back for review at no cost. That promise is kept by
+               * /ad-manager/revise leaving every payment column and every attempt row untouched — so a
+               * publisher who has already paid sees their payment stay exactly where it is.
+               */
+              ?>
+              <?php if ($ad['status'] === 'rejected'): ?>
+                <tr style="border-bottom:1px solid var(--border); background:rgba(239,68,68,0.05);">
+                  <td colspan="7" style="padding:4px 8px 18px;">
+                    <div style="padding:14px 16px; border-radius:8px; border:1px solid rgba(239,68,68,0.3); background:rgba(239,68,68,0.08);">
+                      <strong style="color:#f87171; font-size:13px;">This advert was not approved</strong>
+                      <?php if (!empty($ad['rejection_reason'])): ?>
+                        <p style="margin:8px 0 0; font-size:14px; color:var(--ink-base);"><?= nl2br(e($ad['rejection_reason'])) ?></p>
+                      <?php endif; ?>
+                      <?php if (!empty($ad['rejected_at'])): ?>
+                        <p style="margin:6px 0 0; font-size:12px; color:var(--ink-faint);"><?= e(date('M j, Y', strtotime($ad['rejected_at']))) ?></p>
+                      <?php endif; ?>
+                      <p style="margin:10px 0 0; font-size:13px; color:var(--ink-dim);">
+                        Fix what was asked and send it back for review — <strong>you do not pay again</strong>.<?php if ($ad['payment_status'] === 'paid'): ?> Anything you have already paid still stands.<?php endif; ?>
+                      </p>
+
+                      <form method="post" action="/ad-manager/revise" enctype="multipart/form-data" style="margin-top:14px;">
+                        <?= Csrf::field() ?>
+                        <input type="hidden" name="token" value="<?= e($publisher['token']) ?>">
+                        <input type="hidden" name="ad_id" value="<?= (int) $ad['id'] ?>">
+
+                        <div style="display:grid; gap:10px; max-width:520px;">
+                          <div>
+                            <label for="revise_title_<?= (int) $ad['id'] ?>" style="display:block; margin-bottom:6px; font-weight:600; font-size:13px;">Ad Title / Campaign Name *</label>
+                            <input type="text" id="revise_title_<?= (int) $ad['id'] ?>" name="title" required value="<?= e($ad['title']) ?>" style="width:100%; padding:10px 12px; border-radius:6px; border:1px solid var(--border); background:rgba(255,255,255,0.05); color:inherit;">
+                          </div>
+                          <div>
+                            <label for="revise_url_<?= (int) $ad['id'] ?>" style="display:block; margin-bottom:6px; font-weight:600; font-size:13px;">Destination URL</label>
+                            <input type="url" id="revise_url_<?= (int) $ad['id'] ?>" name="destination_url" value="<?= e((string) $ad['destination_url']) ?>" placeholder="https://yourwebsite.com/offer" style="width:100%; padding:10px 12px; border-radius:6px; border:1px solid var(--border); background:rgba(255,255,255,0.05); color:inherit;">
+                          </div>
+                          <div>
+                            <label for="revise_media_<?= (int) $ad['id'] ?>" style="display:block; margin-bottom:6px; font-weight:600; font-size:13px;">Replace the media (optional)</label>
+                            <input type="file" id="revise_media_<?= (int) $ad['id'] ?>" name="media_file" accept="image/*,video/*" style="width:100%; padding:10px 12px; border-radius:6px; border:1px solid var(--border); background:rgba(255,255,255,0.05); color:inherit;">
+                            <small style="color:var(--ink-faint); font-size:12px;">Leave this empty to keep the creative you already sent.</small>
+                          </div>
+                          <div>
+                            <label for="revise_type_<?= (int) $ad['id'] ?>" style="display:block; margin-bottom:6px; font-weight:600; font-size:13px;">Media type</label>
+                            <select id="revise_type_<?= (int) $ad['id'] ?>" name="media_type" style="width:100%; padding:10px 12px; border-radius:6px; border:1px solid var(--border); background:#1e1b2e; color:inherit;">
+                              <option value="image" <?= $ad['media_type'] === 'image' ? 'selected' : '' ?>>Image Ad</option>
+                              <option value="video" <?= $ad['media_type'] === 'video' ? 'selected' : '' ?>>Video Ad</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <button type="submit" class="btn btn-gold" style="margin-top:14px;">Send back for review</button>
+                      </form>
+                    </div>
+                  </td>
+                </tr>
+              <?php endif; ?>
             <?php endforeach; ?>
           </tbody>
         </table>

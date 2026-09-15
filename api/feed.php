@@ -8,6 +8,42 @@ if (!RateLimiter::attemptConfigured('feed', Fingerprint::hash())) {
 }
 
 $pdo = Database::getInstance()->getConnection();
+
+/*
+ * The reviewer's preview — `/api/feed?preview_ad=N`.
+ *
+ * Gated on an admin session, because an advert under review is not public and this endpoint is. The id is
+ * resolved through `AdFeed::find()`, which is church-scoped, so an admin cannot preview another church's
+ * advert by guessing a number — the same rule the rest of the codebase applies to a request id.
+ *
+ * The item is shaped by `AdFeed::feedItem()`, the same call the live feed below makes. That is the whole
+ * point: a preview that built its own card could look right while the thing that actually runs looked
+ * wrong, which is the failure this feature exists to prevent.
+ */
+$previewAdId = (int) ($_GET['preview_ad'] ?? 0);
+if ($previewAdId > 0) {
+    $previewUser = Auth::user();
+    $isAdmin = $previewUser !== null
+        && ((string) ($previewUser['role'] ?? '') === 'admin' || !empty($previewUser['is_super_admin']));
+
+    if (!$isAdmin) {
+        jsonResponse(['status' => 'error', 'message' => 'Not available'], 403);
+    }
+
+    $previewAd = AdFeed::find($previewAdId);
+    if ($previewAd === null) {
+        jsonResponse(['status' => 'error', 'message' => 'Advert not found'], 404);
+    }
+
+    // One item, one page. `has_more` is false so the scroller cannot ask for a second page of a preview.
+    jsonResponse([
+        'status' => 'success',
+        'page' => 1,
+        'has_more' => false,
+        'data' => [AdFeed::feedItem($previewAd)],
+    ]);
+}
+
 $page = max(1, (int) ($_GET['page'] ?? 1));
 $perPage = min(30, max(1, (int) ($_GET['per_page'] ?? 10)));
 $offset = ($page - 1) * $perPage;
@@ -122,62 +158,30 @@ foreach ($posts as &$post) {
 }
 unset($post);
 
-// Fetch active Ads to intersperse into the feed based on payment & frequency
-$freq = (string) setting('ad_display_frequency', '5_min');
-// Frequency mapping in minutes (once_daily = 1440 mins)
-$freqMinutes = [
-    '5_min' => 5,
-    '10_min' => 10,
-    '15_min' => 15,
-    '30_min' => 30,
-    'once_daily' => 1440,
-];
-$paidMinInterval = $freqMinutes[$freq] ?? 5;
-
-// Select approved ads that are either paid or free
-$adsStmt = $pdo->prepare("SELECT id, title, media_type, file_path, thumbnail_path, destination_url, target_platform, is_free, price, display_frequency
-    FROM ads
-    WHERE status = 'approved'
-      AND (target_platform = 'both' OR target_platform = 'web')
-      AND start_at <= NOW()
-      AND (expires_at IS NULL OR expires_at > NOW())
-    ORDER BY RAND() LIMIT 2");
-$adsStmt->execute();
-$activeAds = $adsStmt->fetchAll();
+/*
+ * The adverts are chosen once, here, and their shaping lives in AdFeed — the same class the app API and
+ * the reviewer's preview use.
+ *
+ * This block used to hold its own query and its own inline array. Both are gone, and with them three live
+ * faults: the query was not confined to the church being served (so church A's paid adverts ran on church
+ * B's site); the feed item's id was the string 'ad_13', which `Post.fromJson`'s `as int` cannot parse (so
+ * one approved advert made the feed unparseable in BOTH apps); and nothing anywhere rendered an advert —
+ * no ad branch existed in `feed.js`, so the web feed drew a post that could never be clicked.
+ *
+ * The per-advert display frequency is deliberately not consulted. `setting('ad_display_frequency')` was
+ * read here and its result, `$paidMinInterval`, was then never used by anything — the advert was served on
+ * every page regardless. That is a real gap against what the packages promise, but applying it needs a
+ * per-visitor "when did this advert last appear" record, which is its own piece of work rather than
+ * something to fake here. Recorded in the roadmap under 7h-4b.
+ */
+$activeAds = AdFeed::activeFor('web', AdFeed::PER_PAGE);
 
 $feedItems = [];
 $adIdx = 0;
 foreach ($posts as $i => $post) {
     $feedItems[] = $post;
     if (($i + 1) % 3 === 0 && isset($activeAds[$adIdx])) {
-        $ad = $activeAds[$adIdx++];
-        $feedItems[] = [
-            'id' => 'ad_' . $ad['id'],
-            'real_ad_id' => (int) $ad['id'],
-            'is_ad' => true,
-            'caption' => $ad['title'],
-            'post_type' => 'ad',
-            'likes_count' => 0,
-            'views_count' => 0,
-            'saves_count' => 0,
-            'comments_count' => 0,
-            'created_at' => date('Y-m-d H:i:s'),
-            'author_name' => 'Sponsored',
-            'author_username' => 'sponsored',
-            'destination_url' => $ad['destination_url'],
-            'media_items' => [[
-                'type' => $ad['media_type'],
-                'source' => 'upload',
-                'file_url' => uploadUrl($ad['file_path']),
-                'thumbnail_url' => uploadUrl($ad['thumbnail_path']),
-                'conversion_status' => 'converted',
-            ]],
-            'categories' => [],
-            'liked_by_viewer' => false,
-            'saved_by_viewer' => false,
-            'unit' => [],
-            'unit_label' => 'Sponsored',
-        ];
+        $feedItems[] = AdFeed::feedItem($activeAds[$adIdx++]);
     }
 }
 

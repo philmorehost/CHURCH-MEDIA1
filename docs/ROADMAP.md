@@ -2357,12 +2357,14 @@ PayHub documents all of it at `https://merchant.payhub.com.ng/api-reference.php`
   `payment_attempts++`, and a report page that says what happened and offers **Retry**. After **two**
   failed online attempts the retry page offers **bank transfer only**, with the proof upload; submitting
   proof sets `payment_status = 'pending_review'` and returns to the dashboard.
-- **7h-5 — rejection with a reason, and resubmission without paying twice.** Rejecting requires a reason,
+- **7h-5 — rejection with a reason, and resubmission without paying twice.** ✅ **shipped** — see the notes
+  under *What has shipped so far*. Rejecting requires a reason,
   stored and emailed. The publisher's dashboard shows the reason and an edit form; resubmitting sets
   `status = 'pending'`, `resubmitted_at`, `revision_count++` and **touches no payment state at all** — a
   paid advert stays paid. The admin list shows a **"Resubmitted (revision N)"** badge with the previous
   reason, so a reviewer can see it has been round once already.
-- **7h-6 — preview.** An admin-only preview that renders the advert through **the site's own feed
+- **7h-6 — preview.** ✅ **shipped** — see the notes under *What has shipped so far*. An admin-only preview
+  that renders the advert through **the site's own feed
   renderer** against an admin-gated `?preview_ad=` payload, so the reviewer sees exactly what a visitor
   will. The advert-to-feed-item shaping moves into one function used by both, because a preview with its
   own markup is a preview of the preview.
@@ -2612,6 +2614,125 @@ PayHub documents all of it at `https://merchant.payhub.com.ng/api-reference.php`
 > bank-transfer card and the file input have **never been rendered by a browser**; the multipart upload is
 > driven from PHP, which is why it is worth saying that the browser-side version of the same form has not
 > been exercised.
+
+> **7h-4b shipped — the adverts were running on the wrong church's site, and no client could render one.**
+> *(A stage that was not in the plan. It forced itself in front of 7h-5 and 7h-6 while the state of the feed
+> was being read for the preview, and 7h-6 is not achievable without it: "the reviewer sees what a visitor
+> will" means nothing while a visitor sees a broken post.)*
+>
+> New `core/AdFeed.php` is now the **only** place an advert is selected and the only place it is shaped.
+> `api/feed.php` and `api/ads.php` both call it, and the admin preview calls it too. Three live defects went
+> with the duplicated queries and inline arrays:
+>
+> 1. **Neither reader was confined to a church.** Both selected `status = 'approved'` adverts with no tenant
+>    clause at all, although `ads.tenant_id` exists and both writers stamp it — so once a second church
+>    existed, church A's paid adverts were served into church B's site. An advertiser paying one church for
+>    impressions delivered on another's site; a church whose own advertisers' exclusivity quietly evaporated.
+>    `api/ads.php`'s view/click handler was unscoped in the same way, which mattered more than it looks:
+>    those counters are what the advertiser's performance report is built from and emailed out.
+> 2. **The feed item's id was the string `'ad_13'`.** `Post.fromJson` in **both** Flutter apps reads
+>    `id: json['id'] as int`, `fetchFeed()` does not catch, and one un-castable element fails the whole list
+>    — so **a single approved advert made the feed unparseable in both apps**, taking the feed down entirely
+>    rather than losing one card. An advert's feed id is now the **negative** of its advert id: numeric, so
+>    every existing parser is happy; never colliding with a media post id, which is always positive; and if a
+>    client that does not understand adverts sends it to `/api/like` anyway, the lookup finds nothing instead
+>    of liking an unrelated post that happens to share the number. `real_ad_id` carries the positive id.
+> 3. **Nothing rendered an advert — anywhere.** `public/assets/js/feed.js`'s `buildSlide()` had no ad branch
+>    (no `is_ad`, no `post_type`, no `destination_url`, no `real_ad_id` in the file), and no Dart file in
+>    either app referenced ads. So the web feed drew the advert as an ordinary post: it looked sponsored,
+>    **could not be clicked** because nothing ever read `destination_url`, and its like/save/comment buttons
+>    posted `post_id = "ad_5"`. Every advertiser paid, the approval email said the advert was live, and no
+>    visitor could reach the advertiser's site. There is now a real sponsored branch: a label, a call to
+>    action, click-through to the destination that registers a click, an impression counted once per page
+>    load, and the post-only actions (like, save, comment, the ⋯ menu) hidden rather than shown and broken.
+>
+> **Two further findings while doing that work:**
+>
+> - **The admin Ads list was not church-scoped either** (`SELECT … FROM ads a JOIN ad_publishers p` with no
+>   `WHERE`), so a church admin opening Ads Management saw **every church's** adverts — each with the
+>   advertiser's name, email address and phone number printed beside it, plus a working link carrying the
+>   token that opens that advertiser's management portal. `Auth::requireRole('admin')` admits ordinary church
+>   admins, not only the platform operator, so this was a cross-church disclosure of contact data and of
+>   somebody else's credentials link. Scoped with `tenantScope(null, 'a.tenant_id')`.
+> - **The publisher portal's create-advert handler never checked the CSRF token its own form emits.**
+>   `Csrf::field()` was there, so the protection looked present; `Csrf::requireValid()` was only called on the
+>   `request_token` branch. Now checked.
+>
+> **Two known gaps, recorded rather than papered over:**
+>
+> - **The per-advert and global display frequency is still not applied.** `setting('ad_display_frequency')`
+>   was read on every feed request and its result, `$paidMinInterval`, was then used by nothing — the advert
+>   was served on every page regardless. Packages promise a frequency; nothing honours it. Applying it needs
+>   a per-visitor "when did this advert last appear" record, which is its own piece of work.
+> - **With fewer than three posts on a page, no advert is ever served.** Placement is `($i + 1) % 3 === 0`,
+>   so a quiet church — or any church whose feed has under three published posts — sells an advert and shows
+>   nothing at all. This is why the harness has to create six posts to test placement, and it is a product
+>   decision, not a bug to fix silently.
+>
+> **7h-5 shipped — a rejection says why, and a resubmission costs nothing.**
+>
+> - **A reason is required, in the handler not just the form.** "Rejected." with no reason is what makes an
+>   advertiser telephone the church to ask what they did wrong, and it makes the resubmission a guess. The
+>   reason is stored on `rejection_reason`, dated, emailed to the publisher with their portal link, and shown
+>   to them in full — and to the reviewer afterwards, where the admin list reads **"↻ Resubmitted (revision
+>   N)"** with **"Previously: …"** beside it, because a reviewer who cannot see that an advert has already
+>   been round once will read it as a first submission and approve the same problem again.
+> - **Rejection touches no money.** It writes `status`, `rejection_reason` and `rejected_at` and nothing else.
+>   Rejection is a review outcome, not a refund: an advertiser who has paid keeps that payment.
+> - **`POST /ad-manager/revise`** is the "edit and resubmit without paying again" — and the guarantee is what
+>   it does *not* write. Every payment column and every attempt row is left alone, `rejection_reason` is kept
+>   so the second review is not blind, and the advert goes back to `pending` with `resubmitted_at` and
+>   `revision_count + 1`. Only a rejected advert may be revised (an approved one pushed back to pending would
+>   stop being served, and would let an advertiser restart the clock on a live campaign); only the advert's
+>   own publisher may revise it; and a replacement creative goes through the same `MediaProcessor` path the
+>   original upload did, so a resubmission cannot smuggle in a file the first upload would have refused.
+> - **Roadmap finding #6 is fixed.** The approve handler used to write `status = "approved", payment_status
+>   = "paid"` together, so an advert whose bank transfer nobody had checked — or one whose advertiser had
+>   abandoned the gateway and left it unpaid — went live **and was recorded as paid** the moment a reviewer
+>   pressed Approve. The one screen that would have shown somebody the money was missing was the one
+>   declaring the money had arrived. Approval now decides only whether something already settled may run; an
+>   unsettled advert is refused with a message naming the button to press first, and the payment and the
+>   review are recorded separately on purpose.
+>
+> **7h-6 shipped — the reviewer sees what a visitor will.**
+>
+> `/admin/ads?action=preview&id=N` renders **the site's own feed view** with one advert in it, against an
+> admin-gated `?preview_ad=N` on `/api/feed` — the same renderer, the same `views/feed.php` template, the same
+> `feed.css`, the same `feed.js`, and the same `AdFeed::feedItem()` shaping the live feed uses. A preview with
+> its own card would be a picture of the advert rather than the advert, and the two can disagree about exactly
+> the things worth checking: the destination link, the media shape, the sponsored label. The advert is served
+> by the API rather than printed into the page, so what is on screen is what would actually run, and it works
+> for an advert of **any** status — which is the point, since the advert being reviewed is by definition not
+> approved. `AdFeed::find()` is church-scoped, so an admin cannot preview another church's advert by id.
+>
+> **Verified (7h-4b/7h-5/7h-6): 86 assertions, 0 failures, 0 rows left behind — and seventeen mutations,
+> seventeen caught.** Two of the mutations found defects in the harness rather than the code, and both were
+> worth more than the assertions they replaced:
+>
+> - **"An advert is served on every church's site" was missed at first.** Deleting the `status = 'approved'`
+>   filter left the harness green, because the pending fixture had no `start_at` and `start_at <= NOW()`
+>   excludes a NULL — so *the fixture was excluded twice over* and could never show which exclusion was doing
+>   the work. Each reason an advert is not served now has its own fixture, excluded by that reason and
+>   nothing else. **An assertion that passes for the wrong reason is worse than no assertion**, because it is
+>   counted.
+> - **Streams follow `Location` by default.** The first run's "refused without signing in" assertions passed
+>   while looking at a **login page**, because the 302 was followed and the 200 of its target was what got
+>   measured. `follow_location => 0`. Any status assertion is meaningless without it.
+> - The harness also caught my own broken edit — `tenantScope('a.tenant_id')` passes the alias as the tenant
+>   *id* (the column is the second parameter), which fatal-errors the whole Ads Management screen. `php -l`,
+>   the compat check and the reference sweep were all clean; only driving the page found it.
+>
+> **Not verified, and this has to be said plainly:**
+>
+> - **No browser has ever rendered any of this.** The sponsored card, the call to action, the preview bar and
+>   every line of the new `feed.js` branch have **never been executed** — the harness asserts the payload and
+>   the page's markup, not its behaviour. The `feed.js` URL-separator fix is pure string logic and was not
+>   executed either.
+> - **Neither Flutter app renders adverts.** They no longer *break* on one (the id parses), but a client that
+>   ignores `is_ad` draws the advert as an ordinary post titled "Sponsored" that cannot be clicked, and its
+>   like button would post a negative id that matches nothing. In-app ad rendering is not done.
+> - **No live PayHub transaction**, still — and no second church exists in production, so every two-church
+>   assertion above is a local fixture.
 
 ### Decisions taken, and two worth confirming
 

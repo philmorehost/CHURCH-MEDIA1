@@ -150,6 +150,10 @@ $router->post('/ad-manager', function () {
         redirect('/ad-manager');
     }
 
+    // The create form has always emitted a CSRF token and nothing ever checked it — `Csrf::field()` was
+    // there, so the protection looked present. It is checked now.
+    Csrf::requireValid();
+
     $token = trim((string) ($_GET['token'] ?? ''));
     if ($token === '') {
         http_response_code(403);
@@ -222,6 +226,110 @@ $router->post('/ad-manager', function () {
 
     flash('pub_success', 'Your new advertisement has been submitted and is pending admin approval.');
     redirect('/ad-manager?token=' . rawurlencode($token));
+});
+
+// Edit a rejected advert and send it back for review.
+//
+// The point of this route is what it does NOT touch. "Without paying again" is not a discount applied
+// here; it is the absence of any write to `payment_status`, `payment_reference`, `payment_attempts` or
+// `ad_payments`. An advertiser whose advert was rejected after paying keeps that payment, the reviewer
+// sees the same settled advert come back, and no second attempt is ever opened. Anything that added a
+// payment write to this handler would be charging twice for one advert.
+$router->post('/ad-manager/revise', function () {
+    Csrf::requireValid();
+
+    $token = trim((string) ($_POST['token'] ?? ''));
+    if ($token === '') {
+        http_response_code(403);
+        render('ad-manager');
+        return;
+    }
+
+    $pdo = Database::getInstance()->getConnection();
+    // The token is the credential — the same rule as the create handler above.
+    $stmt = $pdo->prepare('SELECT id, tenant_id FROM ad_publishers WHERE token = ? LIMIT 1');
+    $stmt->execute([$token]);
+    $pub = $stmt->fetch();
+
+    if (!$pub) {
+        http_response_code(403);
+        exit('Access denied.');
+    }
+
+    $back = '/ad-manager?token=' . rawurlencode($token);
+
+    // The advert has to belong to THIS publisher. Without the second condition one advertiser's token
+    // could rewrite another advertiser's campaign by guessing an id.
+    $stmt = $pdo->prepare('SELECT * FROM ads WHERE id = ? AND publisher_id = ? LIMIT 1');
+    $stmt->execute([(int) ($_POST['ad_id'] ?? 0), (int) $pub['id']]);
+    $ad = $stmt->fetch();
+
+    if (!$ad) {
+        flash('pub_error', 'That advert could not be found.');
+        redirect($back);
+    }
+
+    /*
+     * Only a rejected advert may be resubmitted, and this is not a formality.
+     *
+     * An approved advert pushed back to `pending` would stop being served — and an advertiser with a
+     * month of display left could use that to restart the clock on it. A pending one is already waiting
+     * and needs nothing, and resubmitting it would only inflate its revision count.
+     */
+    if ((string) $ad['status'] !== 'rejected') {
+        flash('pub_error', 'That advert is not waiting for a change, so there is nothing to resubmit.');
+        redirect($back);
+    }
+
+    $title = trim((string) ($_POST['title'] ?? ''));
+    $destUrl = trim((string) ($_POST['destination_url'] ?? ''));
+
+    if ($title === '') {
+        flash('pub_error', 'Please enter an Ad title.');
+        redirect($back);
+    }
+
+    $filePath = (string) $ad['file_path'];
+    $thumbPath = $ad['thumbnail_path'];
+    $mediaType = (string) $ad['media_type'];
+
+    // A replacement creative, if one was chosen — through the same processors the first upload went
+    // through, so a resubmission cannot smuggle in a file the original path would have refused.
+    $fileUpload = $_FILES['media_file'] ?? null;
+    if ($fileUpload && ($fileUpload['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK) {
+        $mediaType = in_array($_POST['media_type'] ?? '', ['image', 'video'], true) ? (string) $_POST['media_type'] : $mediaType;
+
+        if ($mediaType === 'image') {
+            $processed = MediaProcessor::processAdImage($fileUpload['tmp_name'], UPLOADS_PATH . '/ads');
+            if (!$processed) {
+                flash('pub_error', 'Failed to process the uploaded image.');
+                redirect($back);
+            }
+            $filePath = 'ads/' . $processed;
+            $thumbPath = null;
+        } else {
+            $res = MediaProcessor::processAdVideo($fileUpload['tmp_name'], UPLOADS_PATH . '/ads/reels', UPLOADS_PATH . '/ads/thumbs');
+            if (empty($res['file'])) {
+                flash('pub_error', 'Failed to process the uploaded video.');
+                redirect($back);
+            }
+            $filePath = 'ads/reels/' . $res['file'];
+            $thumbPath = !empty($res['thumbnail']) ? 'ads/thumbs/' . $res['thumbnail'] : null;
+        }
+    }
+
+    /*
+     * Back into the queue — and that is the entire write.
+     *
+     * `rejection_reason` is deliberately NOT cleared: the reviewer's list shows it beside the revision
+     * count, so whoever rejected it last time can see what they objected to and whether it was addressed.
+     * A reason that vanished on resubmission would make the second review blind.
+     */
+    $pdo->prepare('UPDATE ads SET title = ?, destination_url = ?, media_type = ?, file_path = ?, thumbnail_path = ?, status = "pending", resubmitted_at = NOW(), revision_count = revision_count + 1 WHERE id = ?')
+        ->execute([$title, $destUrl !== '' ? $destUrl : null, $mediaType, $filePath, $thumbPath, (int) $ad['id']]);
+
+    flash('pub_success', 'Your advert has been sent back for review. Your payment still stands — there is nothing more to pay.');
+    redirect($back);
 });
 
 // Payhub Callback & Webhook Verification Endpoint
