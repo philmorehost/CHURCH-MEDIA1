@@ -10,6 +10,17 @@ $campaignProgress = $campaign !== null ? GivingCampaign::progressFor($campaign) 
 $openCampaigns = $campaign === null ? GivingCampaign::open(null, 12) : array();
 $giveAction = $campaign !== null ? '/give/c/' . $campaign['slug'] : '/give';
 $currencySymbol = '₦';
+
+/*
+ * Online giving is offered only when the gateway can actually take a payment *and* verify it afterwards —
+ * `Payhub::configured()` requires the switch and the secret key, not just one of them.
+ *
+ * The page used to offer the online tab unconditionally. On an install with no gateway configured, a giver
+ * who chose it was sent down a path whose last line marked the donation completed and thanked them for
+ * money that was never taken. The tab now appears only when it can work, and `POST /give` refuses the
+ * online method outright if it arrives anyway.
+ */
+$onlineGiving = Payhub::configured();
 ?>
 
 <div class="container section" style="max-width:880px; padding-top:40px; padding-bottom:80px;">
@@ -145,9 +156,18 @@ $currencySymbol = '₦';
   <div class="card glass-card" style="padding:32px; border-radius:16px; margin-bottom:40px;">
     <!-- Giving Method Toggle Buttons -->
     <div style="display:flex; gap:12px; margin-bottom:28px; border-bottom:1px solid var(--border); padding-bottom:16px; flex-wrap:wrap;">
-      <button type="button" id="tab_online_btn" class="btn btn-gold" onclick="switchGivingMethod('online')" style="flex:1; min-width:180px; padding:12px 16px; font-weight:600;">💳 Online Payment (Payhub)</button>
-      <button type="button" id="tab_manual_btn" class="btn secondary" onclick="switchGivingMethod('manual_bank')" style="flex:1; min-width:180px; padding:12px 16px; font-weight:600;">🏦 Manual Bank Transfer</button>
+      <?php if ($onlineGiving): ?>
+        <button type="button" id="tab_online_btn" class="btn btn-gold" onclick="switchGivingMethod('online')" style="flex:1; min-width:180px; padding:12px 16px; font-weight:600;">💳 Online Payment (Payhub)</button>
+      <?php endif; ?>
+      <button type="button" id="tab_manual_btn" class="btn <?= $onlineGiving ? 'secondary' : 'btn-gold' ?>" onclick="switchGivingMethod('manual_bank')" style="flex:1; min-width:180px; padding:12px 16px; font-weight:600;">🏦 Manual Bank Transfer</button>
     </div>
+
+    <?php if (!$onlineGiving): ?>
+      <p style="margin:0 0 18px; padding:12px 14px; border-radius:10px; background:rgba(212,175,55,0.10); border:1px solid rgba(212,175,55,0.25); font-size:13.5px;">
+        Card payment is not available at the moment, so bank transfer is the way to give right now. Your
+        receipt is verified by the finance team before it is counted.
+      </p>
+    <?php endif; ?>
 
     <?php if ($campaign !== null): ?>
       <p style="margin:0 0 18px; padding:12px 14px; border-radius:10px; background:rgba(212,175,55,0.10); border:1px solid rgba(212,175,55,0.25); font-size:13.5px;">
@@ -156,7 +176,7 @@ $currencySymbol = '₦';
     <?php endif; ?>
 
     <!-- ONLINE PAYMENT FORM -->
-    <form id="form_online_give" method="post" action="/give">
+    <form id="form_online_give" method="post" action="/give"<?= $onlineGiving ? '' : ' style="display:none;"' ?>>
       <?= Csrf::field() ?>
       <input type="hidden" name="payment_method" value="online">
       <?php if ($campaign !== null): ?>
@@ -217,7 +237,7 @@ $currencySymbol = '₦';
     </form>
 
     <!-- MANUAL BANK TRANSFER FORM -->
-    <form id="form_manual_give" method="post" action="/give" enctype="multipart/form-data" style="display:none;">
+    <form id="form_manual_give" method="post" action="/give" enctype="multipart/form-data" style="display:<?= $onlineGiving ? 'none' : 'block' ?>;">
       <?= Csrf::field() ?>
       <input type="hidden" name="payment_method" value="manual_bank">
       <?php if ($campaign !== null): ?>
@@ -349,10 +369,16 @@ function switchGivingMethod(method) {
   var btnOnline = document.getElementById('tab_online_btn');
   var btnManual = document.getElementById('tab_manual_btn');
 
-  if (method === 'manual_bank') {
+  // The online tab does not exist when the gateway is not configured, so every reference to it is guarded:
+  // setting className on null is the kind of error that takes the whole page's script down with it.
+  if (!formOnline || !formManual || !btnManual) {
+    return;
+  }
+
+  if (method === 'manual_bank' || !btnOnline) {
     formOnline.style.display = 'none';
     formManual.style.display = 'block';
-    btnOnline.className = 'btn secondary';
+    if (btnOnline) { btnOnline.className = 'btn secondary'; }
     btnManual.className = 'btn btn-gold';
   } else {
     formOnline.style.display = 'block';

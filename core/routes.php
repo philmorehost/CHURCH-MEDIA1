@@ -241,26 +241,18 @@ $router->get('/payment/payhub/callback', function () {
 
     $secKey = (string) setting('payhub_secret_key');
 
-    // Verify transaction with Payhub API
-    $url = 'https://merchant.payhub.com.ng/api/transaction/verify/' . urlencode($reference);
-    $paid = false;
-
-    if ($secKey !== '' && function_exists('curl_init')) {
-        $ch = curl_init($url);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_HTTPHEADER => ['Authorization: Bearer ' . $secKey],
-        ]);
-        $res = curl_exec($ch);
-        curl_close($ch);
-
-        $data = json_decode((string) $res, true);
-        if (!empty($data['paid']) || (!empty($data['data']['status']) && $data['data']['status'] === 'success')) {
-            $paid = true;
-        }
-    } else {
-        $paid = true; // Sandbox fallback
-    }
+    /*
+     * The gateway is asked, server-side, and its answer is the only thing that decides.
+     *
+     * This block used to set `$paid = true` whenever it could not reach PayHub — no curl, no secret key,
+     * a timeout — so `?ref=…` on this URL marked a donation completed with no money behind it, and marked
+     * an advert paid. A verification that cannot be made is not a payment, and `Payhub::verify()` says so
+     * with the reason instead.
+     */
+    $verified = Payhub::verify($reference);
+    $paid = $verified['paid'];
+    $gatewayNote = $verified['error'] !== '' ? $verified['error'] : $verified['reason'];
+    $gatewayPayload = $verified['raw'] === [] ? null : (string) json_encode($verified['raw']);
 
     if ($paid) {
         if ($isGiving) {
@@ -288,18 +280,32 @@ $router->get('/payment/payhub/callback', function () {
             $stmt = $pdo->prepare('UPDATE ads SET payment_status = "paid" WHERE payment_reference = ?');
             $stmt->execute([$reference]);
 
-            $stmt = $pdo->prepare('UPDATE ad_payments SET status = "success" WHERE reference = ?');
-            $stmt->execute([$reference]);
+            $stmt = $pdo->prepare('UPDATE ad_payments SET status = "success", gateway_response = ? WHERE reference = ?');
+            $stmt->execute([$gatewayPayload ?? $gatewayNote, $reference]);
 
             flash('advertise_sent', '1');
             redirect('/advertise?sent=1');
         }
     } else {
         if ($isGiving) {
-            flash('give_error', 'Online giving payment verification was not successful.');
+            // The attempt is recorded as failed rather than left pending for ever, so the record matches
+            // what the giver was told.
+            $pdo->prepare('UPDATE donations SET payment_status = "failed" WHERE payment_reference = ? AND payment_status <> "completed"')->execute([$reference]);
+
+            flash('give_error', $gatewayNote !== ''
+                ? 'Your payment was not completed: ' . $gatewayNote . ' Nothing has been charged.'
+                : 'Your payment was not completed. Nothing has been charged.');
             redirect('/give');
         }
-        flash('advertise_error', 'Payment verification failed or payment was not successful.');
+
+        // Recorded on the attempt, where the advertiser's report reads it, and never over an earlier
+        // success — a replayed return URL must not be able to un-pay a paid advert.
+        $pdo->prepare('UPDATE ad_payments SET status = "failed", gateway_response = ? WHERE reference = ? AND status <> "success"')
+            ->execute([$gatewayPayload ?? $gatewayNote, $reference]);
+
+        flash('advertise_error', $gatewayNote !== ''
+            ? 'Payment was not completed: ' . $gatewayNote
+            : 'Payment was not completed.');
         redirect('/advertise');
     }
 });
@@ -308,23 +314,24 @@ $router->post('/payment/payhub/webhook', function () {
     $pdo = Database::getInstance()->getConnection();
     $body = (string) file_get_contents('php://input');
     $sig = $_SERVER['HTTP_X_PAYHUB_SIGNATURE'] ?? '';
-    $secKey = (string) setting('payhub_secret_key');
 
-    if ($secKey !== '') {
-        if ($sig === '' || !hash_equals(hash_hmac('sha256', $body, $secKey), $sig)) {
-            http_response_code(401);
-            exit('Invalid signature');
-        }
+    // The signature is over the raw body — see Payhub::verifyWebhook(). A webhook that cannot be verified
+    // is refused rather than trusted, and an unconfigured key means every webhook is refused, which is the
+    // safe way round.
+    if (!Payhub::verifyWebhook($body, $sig)) {
+        http_response_code(401);
+        exit('Invalid signature');
     }
 
     $payload = json_decode($body, true);
     if (($payload['event'] ?? '') === 'charge.success' && !empty($payload['data']['reference'])) {
-        $ref = $payload['data']['reference'];
+        $ref = (string) $payload['data']['reference'];
+        $note = (string) json_encode($payload['data']);
         if (str_starts_with($ref, 'GIVE_') || str_starts_with($ref, 'DON_')) {
             $pdo->prepare('UPDATE donations SET payment_status = "completed" WHERE payment_reference = ?')->execute([$ref]);
         } else {
             $pdo->prepare('UPDATE ads SET payment_status = "paid" WHERE payment_reference = ?')->execute([$ref]);
-            $pdo->prepare('UPDATE ad_payments SET status = "success" WHERE reference = ?')->execute([$ref]);
+            $pdo->prepare('UPDATE ad_payments SET status = "success", gateway_response = ? WHERE reference = ?')->execute([$note, $ref]);
         }
     }
 
@@ -495,41 +502,27 @@ $router->post('/advertise', function () {
     }
 
     // Online Payment via Payhub
-    if (!$isFree && $paymentMethod === 'online' && setting('payhub_enabled') && setting('payhub_secret_key')) {
-        $secKey = (string) setting('payhub_secret_key');
-        $callbackUrl = baseUrl('payment/payhub/callback');
-        $koboAmount = (int) round($price * 100);
-
-        $payload = json_encode([
+    if (!$isFree && $paymentMethod === 'online' && Payhub::configured()) {
+        $result = Payhub::initialize([
             'email' => $pubEmail,
-            'amount' => $koboAmount,
+            'amount' => Payhub::amountInKobo($price),
             'reference' => $reference,
             'name' => $pubName,
             'phone' => $pubPhone,
-            'callback_url' => $callbackUrl,
-            'metadata' => ['ad_id' => $adId, 'publisher_id' => $publisherId]
+            'callback_url' => baseUrl('payment/payhub/callback?ref=' . urlencode($reference)),
+            'metadata' => ['ad_id' => $adId, 'publisher_id' => $publisherId],
         ]);
 
-        if (function_exists('curl_init')) {
-            $ch = curl_init('https://merchant.payhub.com.ng/api/transaction/initialize');
-            curl_setopt_array($ch, [
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_POST => true,
-                CURLOPT_POSTFIELDS => $payload,
-                CURLOPT_HTTPHEADER => [
-                    'Content-Type: application/json',
-                    'Authorization: Bearer ' . $secKey
-                ],
-            ]);
-            $res = curl_exec($ch);
-            curl_close($ch);
-
-            $data = json_decode((string) $res, true);
-            if (!empty($data['data']['authorization_url'])) {
-                clearFormOld();
-                redirect($data['data']['authorization_url']);
-            }
+        if ($result['ok'] && $result['authorization_url'] !== '') {
+            clearFormOld();
+            redirect($result['authorization_url']);
         }
+
+        // The gateway could not be reached. The advert stays filed and unpaid, and the advertiser is told
+        // rather than shown the success page — which is what used to happen here.
+        flash('advertise_error', 'Your advert was saved, but the card payment could not be started ('
+            . $result['error'] . '). Nothing has been charged — you can try again, or pay by bank transfer.');
+        redirect('/advertise');
     }
 
     clearFormOld();
@@ -955,48 +948,48 @@ $router->post('/give', function () {
     $stmt = $pdo->prepare('INSERT INTO donations (donor_name, donor_email, donor_phone, category, amount, currency, description, payment_method, payment_status, payment_reference, campaign_id) VALUES (?, ?, ?, ?, ?, "NGN", ?, "online", "pending", ?, ?)');
     $stmt->execute([$donorName ?: 'Anonymous Giver', $donorEmail, $donorPhone ?: null, $category, $amount, $description ?: null, $ref, $campaign !== null ? (int) $campaign['id'] : null]);
 
-    $apiKey = (string) setting('payhub_api_key');
-    $secKey = (string) setting('payhub_secret_key');
+    $apiKey = Payhub::publicKey();
+    $secKey = Payhub::secretKey();
 
-    if ($apiKey !== '' && $secKey !== '') {
+    if (Payhub::configured()) {
         $callbackUrl = baseUrl('payment/payhub/callback?ref=' . urlencode($ref));
-        $payhubUrl = 'https://merchant.payhub.com.ng/api/v1/checkout/initialize';
 
-        $payload = [
-            'amount' => $amount,
+        $result = Payhub::initialize([
+            // Kobo, per the gateway's documentation: `500000` is ₦5,000. This used to send naira here and
+            // kobo in the advert flow, so one of the two was always going to be a hundred times out.
+            'amount' => Payhub::amountInKobo($amount),
             'email' => $donorEmail,
             'reference' => $ref,
             'callback_url' => $callbackUrl,
             'description' => 'Church Giving: ' . $category . ($description ? ' - ' . substr($description, 0, 80) : ''),
             'currency' => 'NGN',
-        ];
+        ]);
 
-        if (function_exists('curl_init')) {
-            $ch = curl_init($payhubUrl);
-            curl_setopt_array($ch, [
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_POST => true,
-                CURLOPT_POSTFIELDS => json_encode($payload),
-                CURLOPT_HTTPHEADER => [
-                    'Content-Type: application/json',
-                    'Authorization: Bearer ' . $secKey,
-                ],
-            ]);
-            $res = curl_exec($ch);
-            curl_close($ch);
-
-            $data = json_decode((string) $res, true);
-            if (!empty($data['checkout_url'])) {
-                redirect($data['checkout_url']);
-            } elseif (!empty($data['data']['authorization_url'])) {
-                redirect($data['data']['authorization_url']);
-            }
+        if ($result['ok'] && $result['authorization_url'] !== '') {
+            redirect($result['authorization_url']);
         }
+
+        /*
+         * The gateway could not be reached. Say so and stop.
+         *
+         * What used to be here was a "Sandbox / fallback mode" that marked the donation **completed** and
+         * thanked the giver for money that was never taken. On any install where a giver chose online
+         * giving, the church's donation record said it had been paid. An honest dead end is the only
+         * acceptable behaviour when the alternative is a lie in the accounts.
+         */
+        $pdo->prepare('UPDATE donations SET payment_status = "failed" WHERE payment_reference = ?')->execute([$ref]);
+
+        flash('give_error', 'Online giving could not be started just now (' . $result['error'] . '). '
+            . 'Nothing has been charged. Please use the bank transfer option below, or try again in a few minutes.');
+        redirect($campaign !== null ? '/give/c/' . $campaign['slug'] : '/give');
     }
 
-    // Sandbox / fallback mode
-    $pdo->prepare('UPDATE donations SET payment_status = "completed" WHERE payment_reference = ?')->execute([$ref]);
-    flash('give_success', 'Thank you for your cheerful giving of ₦' . number_format($amount) . ' towards ' . $category . '! Your online donation has been recorded.');
+    // Reachable only with a crafted request: the page does not offer online giving while the gateway is
+    // unconfigured. Refused rather than recorded as a gift.
+    $pdo->prepare('UPDATE donations SET payment_status = "failed" WHERE payment_reference = ?')->execute([$ref]);
+
+    flash('give_error', 'Online giving is not available at the moment. Nothing has been charged — '
+        . 'please use the bank transfer option below.');
     redirect($campaign !== null ? '/give/c/' . $campaign['slug'] : '/give');
 });
 

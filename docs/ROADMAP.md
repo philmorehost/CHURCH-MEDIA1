@@ -2278,7 +2278,163 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 
 ---
 
+## 9b. Phase 7h — The advertiser money path (inline checkout, retries, review)
+
+Requested 2026-09-15. The advertiser should **never leave the site**, should come back to a real
+transaction report, should be able to retry, should fall back to bank transfer after two failed online
+attempts, and should be able to edit and resubmit a rejected advert **without paying again** — with the
+reviewer able to see that it is a resubmission and to preview the advert before approving it.
+
+### What is wrong today (all of it read from the code, not assumed)
+
+1. **The checkout is a redirect.** `POST /advertise` calls `/api/transaction/initialize` and sends the
+   browser to `authorization_url`. The advertiser leaves the church's site to pay.
+2. **`payhub_public_key` is a setting that nothing reads.** It is editable in the admin, stored per
+   church, and referenced by **no line of code** — which is exactly the key PayHub's inline checkout needs.
+   It is the fossil of an inline integration that was never written.
+3. **The return is a lie by omission.** The callback redirects to `/advertise?sent=1`, whose page says the
+   advert was submitted successfully. A **failed** payment lands there too.
+4. **There is no retry, no attempt count and no bank-transfer fallback.** A failed online payment leaves
+   the advert at `unpaid` with nothing to do next; `ads.payment_status`'s `pending_review` value is
+   **never written by any code** — the enum was designed for the proof-upload state and never used.
+5. **A rejection has no reason.** `admin/ads.php` runs `UPDATE ads SET status = "rejected"` and nothing
+   else: no reason is stored, no email is sent, and the advertiser's dashboard shows a bare "Rejected".
+   There is no way to edit and resubmit, and a fresh submission would be charged again.
+6. **Approving conflates review with money.** The approve handler sets `payment_status = 'paid'`
+   unconditionally, so an unpaid bank-transfer advert becomes "paid" the moment it is approved. The
+   payments screen therefore cannot be trusted as a record of what was actually collected.
+7. **There is no preview.** A reviewer approves a 9:16 video or image they have never seen rendered.
+8. ⚠️ **And in the *giving* flow, found while reading this:** online giving is gated on
+   `setting('payhub_api_key')` — **a key that does not exist** in `settings` (the row has
+   `payhub_public_key` and `payhub_secret_key`). The condition is always false, the gateway is never
+   called, and the code falls through to a "Sandbox / fallback mode" that **marks the donation
+   `completed` and thanks the giver without any transaction at all**. That block also sends `amount` in
+   **naira** while PayHub's documentation states kobo (`500000` = ₦5,000) — a 100× difference. The
+   advert flow is the one that gets the unit right.
+
+### The facts this plan rests on
+
+PayHub documents all of it at `https://merchant.payhub.com.ng/api-reference.php` (fetched 2026-09-15):
+
+- **Inline checkout exists** and is their recommended path: `<script src="…/inline.js">`, then
+  `PayhubPop.setup({ key: PUBLIC_KEY, email, amount: kobo, ref, callback, onClose })` and
+  `handler.openIframe()`. The `callback` receives `response.reference`.
+- **`/api/transaction/verify/:reference` is the source of truth**, and the docs are emphatic that a
+  top-level `status: true` only means "transaction retrieved" — the outcome is `paid` or `data.status`
+  (`success` / `pending` / `failed`). The existing verify code already reads it correctly.
+- **Amounts are in kobo**, and **the public key is a different key from the secret key** (the secret key
+  is for server-side calls only, and must never reach the browser).
+- **Webhook signature** is `X-Payhub-Signature = HMAC-SHA256(raw body, secret)`, which `core/routes.php`
+  already verifies correctly.
+
+### Stages
+
+- **7h-0 — the giving flow stops inventing payments.** Gate the online path on `payhub_enabled` plus the
+  keys that actually exist; send kobo; **delete the "mark it completed anyway" fallback** and answer
+  honestly instead (point at bank transfer). This is first because it is live and wrong: on any install
+  where a giver chooses "online", the donation is currently recorded as completed with no money.
+- **7h-1 — `core/Payhub.php`.** One client for the whole gateway: `configured()`, `publicKey()`,
+  `initialize()`, `verify($reference)`, `amountInKobo()`, `verifyWebhook($raw, $sig)`. The same curl and
+  verify logic is currently written out **three times** in `core/routes.php` with three different
+  assumptions about the key name, the endpoint and the amount unit.
+- **7h-2 — the schema for the money path** (migration + `installer/schema.sql`, both, or a fresh install
+  diverges from an upgraded one):
+  - `ad_payments` becomes **one row per attempt**: `+ attempt_no`, `+ failure_reason`, `+ gateway_payload`,
+    index on `(ad_id, status)`.
+  - `ads`: `+ rejection_reason`, `+ rejected_at`, `+ resubmitted_at`, `+ revision_count`,
+    `+ payment_attempts`.
+  - Ad-level payment state stays `unpaid | pending_review | paid` — the *attempt* outcome lives on the
+    attempt row, so "how many times did this fail" is a count, not a state machine.
+- **7h-3 — inline checkout on `/advertise`.** The form posts, the advert and its first attempt row are
+  created, and the page renders PayHub's inline script with the **public** key and the amount in kobo, then
+  opens the iframe in the page. `callback` → `/advertise/return`; `onClose` → the retry path.
+  **If `inline.js` cannot be loaded the button must say so and fall back to the hosted checkout**, because
+  the alternative is a payment button that silently does nothing.
+- **7h-4 — `/advertise/return` and the real report.** The reference is verified **server-side** — never
+  trusted from the browser. Success: attempt `success`, advert `paid`, straight to the advertiser dashboard
+  with the advert listed as pending review. Failure: attempt `failed` with the gateway's reason,
+  `payment_attempts++`, and a report page that says what happened and offers **Retry**. After **two**
+  failed online attempts the retry page offers **bank transfer only**, with the proof upload; submitting
+  proof sets `payment_status = 'pending_review'` and returns to the dashboard.
+- **7h-5 — rejection with a reason, and resubmission without paying twice.** Rejecting requires a reason,
+  stored and emailed. The publisher's dashboard shows the reason and an edit form; resubmitting sets
+  `status = 'pending'`, `resubmitted_at`, `revision_count++` and **touches no payment state at all** — a
+  paid advert stays paid. The admin list shows a **"Resubmitted (revision N)"** badge with the previous
+  reason, so a reviewer can see it has been round once already.
+- **7h-6 — preview.** An admin-only preview that renders the advert through **the site's own feed
+  renderer** against an admin-gated `?preview_ad=` payload, so the reviewer sees exactly what a visitor
+  will. The advert-to-feed-item shaping moves into one function used by both, because a preview with its
+  own markup is a preview of the preview.
+
+### What has shipped so far
+
+> **7h-0 and 7h-1 shipped — the gateway has one client, and the giving flow stops inventing payments.**
+>
+> **What shipped:** `core/Payhub.php` — `configured()`, `inlineReady()`, `publicKey()`, `secretKey()`,
+> `amountInKobo()`, `reference()`, `initialize()`, `verify()`, `verifyWebhook()`, and a `setTransport()`
+> seam so the branches can be tested without an account. The four call sites in `core/routes.php` (the
+> callback, the webhook, giving, the advert checkout) and `views/give.php` now go through it.
+>
+> **The two behaviours deleted, which were the same mistake twice:**
+>
+> - The callback set `$paid = true` whenever it could not reach PayHub — no secret key, no curl, a timeout.
+>   **Visiting `?ref=…` on the callback URL marked a donation completed and an advert paid.**
+> - The giving flow's "sandbox fallback" marked the donation `completed` and thanked the giver for money
+>   that was never taken, on **every** install where a giver chose online giving, because the block that
+>   would have reached the gateway was gated on `payhub_api_key`, a setting that does not exist.
+>
+> Both are now honest refusals that say why. Nothing is credited without a verification that actually
+> succeeded, and `/give` no longer offers a payment method that cannot work — with a crafted
+> `payment_method=online` refused rather than recorded as a gift.
+>
+> **Also fixed on the way:** the giving flow sent the amount in **naira** where the gateway documents kobo,
+> so every online gift would have been a hundredth of its face value. There is now exactly one conversion
+> in the application (`Payhub::amountInKobo()`), which is the only way that cannot drift again.
+>
+> **Verified (7h-0/7h-1): 60 assertions, 0 failures**, and **eight mutations, eight caught:** the amount
+> sent in naira not kobo (4 failures), an unverifiable payment counted as paid again (4), a retrieved
+> transaction read as a paid one (2), the webhook trusted with no secret key (1), the online tab offered
+> without a secret key (4), a forged online gift recorded as completed (3), the callback crediting a
+> payment it could not verify (3), and the giving page offering the online tab unconditionally (2).
+> The harness drives the real routes over HTTP — a session and a real CSRF token for the crafted POST, a
+> real `GIVE_` reference for the callback, and the webhook both signed and unsigned.
+>
+> **Not verified: no live PayHub transaction.** No account is configured here, so the gateway's HTTP call
+> is stubbed through `Payhub::setTransport()` — the same seam `Sms::setTransport()` provides for the SMS
+> worker. What is proven is that the right key, amount and reference are sent, and that every branch reads
+> the gateway's answer correctly; what is not proven is that a card is charged. **The inline checkout itself
+> is 7h-3 and is not built yet.**
+>
+> **Two things the harness taught, both now in the harness rather than in a comment:**
+>
+> - **A harness must establish the state it asserts about.** The first run died before its cleanup and left
+>   a `settings` row with the gateway switched on, so three "unconfigured" assertions passed for the wrong
+>   reason — and the run sent a live request to PayHub's API with a fake key. It now deletes that row and
+>   asserts the state before testing anything.
+> - **The likely real-world state is *half configured*** — switch ticked, public key pasted (it is the one
+>   the gateway's docs show first), secret key missed. A mutation that only demanded the switch survived
+>   every assertion, because the harness had no half-configured case; it has one now.
+
+### Decisions taken, and two worth confirming
+
+- **"Two failed attempts" is counted per advert**, not per publisher: the advert is what is being bought,
+  and an advertiser who abandons one advert should not have the next one start already exhausted. Say if
+  it should be per publisher instead.
+- **Retry is online-only for the first two attempts, then bank transfer only** — as specified.
+- **Card data never reaches this server.** The iframe is PayHub's, which keeps the site out of PCI scope;
+  nothing in these stages may change that.
+
+### What cannot be verified here, and will be said in the commit rather than glossed
+
+**No PayHub account is configured on this machine**, so the inline iframe cannot be opened and no
+transaction can be taken. What can be verified is that the correct key, amount unit and reference are
+emitted, that the server-side verify handles success/pending/failed, that a replay of the return URL
+cannot double-credit, and that every branch of the retry and resubmission rules behaves — with the
+gateway's HTTP calls stubbed, the way `Sms::setTransport()` is used for the SMS worker. The end-to-end
+payment itself needs live keys and a person with a test card.
+
 ## 10. Cross-cutting concerns (build these once, early)
+
 
 | Concern | Where |
 |---|---|
