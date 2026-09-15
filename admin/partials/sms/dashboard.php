@@ -38,6 +38,16 @@ $optedOut = SmsContacts::count(['scope_unit_ids' => $scopeUnitIds, 'opted_out' =
 $sourceCounts = SmsContacts::countsBySource($scopeUnitIds);
 
 // Sent and failed over the last 30 days, from the queue rather than a counter.
+//
+// Scoped to the church being served, through `sms_campaigns` rather than through the recipients table:
+// `sms_campaign_recipients` has no `tenant_id` of its own at all, so the campaign it belongs to is the
+// only church a recipient row has. Without this the tiles added up every church's spending and showed
+// it as this one's — and on a platform where one church's SMS bill is the number they watch, that is the
+// number they would have been shown.
+//
+// Note the asymmetry with the contact tiles above, which are unit-scoped: these are deliberately the
+// whole church's spend, because a unit does not have its own wallet. That is a separate decision from
+// tenancy and is left as it was.
 $sent30 = 0;
 $failed30 = 0;
 $units30 = 0;
@@ -45,21 +55,28 @@ $unitsMonth = 0;
 try {
     $stmt = $pdo->prepare(
         "SELECT
-            SUM(status = 'sent') AS sent,
-            SUM(status = 'failed') AS failed,
-            COALESCE(SUM(CASE WHEN status = 'sent' THEN units ELSE 0 END), 0) AS units
-         FROM sms_campaign_recipients
-         WHERE created_at >= (NOW() - INTERVAL 30 DAY)"
+            SUM(r.status = 'sent') AS sent,
+            SUM(r.status = 'failed') AS failed,
+            COALESCE(SUM(CASE WHEN r.status = 'sent' THEN r.units ELSE 0 END), 0) AS units
+         FROM sms_campaign_recipients r
+         JOIN sms_campaigns c ON c.id = r.campaign_id
+         WHERE c.tenant_id = ? AND r.created_at >= (NOW() - INTERVAL 30 DAY)"
     );
-    $stmt->execute();
+    $stmt->execute([(int) ($tenantId ?? 0)]);
     $row = $stmt->fetch() ?: [];
     $sent30 = (int) ($row['sent'] ?? 0);
     $failed30 = (int) ($row['failed'] ?? 0);
     $units30 = (int) ($row['units'] ?? 0);
 
     // This calendar month, for a "what have we spent" figure.
-    $month = $pdo->query("SELECT COALESCE(SUM(units), 0) FROM sms_campaign_recipients WHERE status = 'sent' AND sent_at >= DATE_FORMAT(CURDATE(), '%Y-%m-01')")->fetchColumn();
-    $unitsMonth = (int) $month;
+    $month = $pdo->prepare(
+        "SELECT COALESCE(SUM(r.units), 0)
+           FROM sms_campaign_recipients r
+           JOIN sms_campaigns c ON c.id = r.campaign_id
+          WHERE c.tenant_id = ? AND r.status = 'sent' AND r.sent_at >= DATE_FORMAT(CURDATE(), '%Y-%m-01')"
+    );
+    $month->execute([(int) ($tenantId ?? 0)]);
+    $unitsMonth = (int) $month->fetchColumn();
 } catch (Throwable $e) {
     // The queue table is missing; the tiles read zero.
 }

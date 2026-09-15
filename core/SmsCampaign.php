@@ -406,8 +406,12 @@ final class SmsCampaign
         // to the admin reading the screen.
         $started = false;
         try {
-            $stmt = self::db()->prepare('SELECT started_at IS NOT NULL FROM sms_campaigns WHERE id = ? LIMIT 1');
-            $stmt->execute([$campaignId]);
+            // Scoped. This read and the UPDATE below it are the one place in this class that takes a
+            // bare campaign id and writes: unscoped, a stale or hand-made id let one church's pass
+            // rewrite another church's counters and status. The id normally comes from a query this
+            // class already scoped, which is exactly the argument that stops being true one edit later.
+            $stmt = self::db()->prepare('SELECT started_at IS NOT NULL FROM sms_campaigns WHERE id = ? AND tenant_id = ? LIMIT 1');
+            $stmt->execute([$campaignId, self::tenantId()]);
             $started = (bool) $stmt->fetchColumn();
         } catch (Throwable $e) {
             // Treat it as not started, which reads as "queued" — the safe half of the guess.
@@ -420,7 +424,7 @@ final class SmsCampaign
                 'UPDATE sms_campaigns
                     SET total_recipients = ?, sent_count = ?, failed_count = ?, skipped_count = ?,
                         units_charged = ?, status = ?
-                  WHERE id = ?'
+                  WHERE id = ? AND tenant_id = ?'
             )->execute([
                 $counters['total_recipients'],
                 $counters['sent_count'],
@@ -429,6 +433,7 @@ final class SmsCampaign
                 $counters['units_charged'],
                 $counters['status'],
                 $campaignId,
+                self::tenantId(),
             ]);
         } catch (Throwable $e) {
             error_log('SmsCampaign refreshCounters failed: ' . $e->getMessage());
