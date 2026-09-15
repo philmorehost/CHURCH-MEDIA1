@@ -41,6 +41,18 @@ final class Payhub
     /** The inline checkout script, for `<script src="…">` on the advertiser's own page. */
     public const INLINE_SCRIPT = self::BASE . '/inline.js';
 
+    /**
+     * The origin the browser has to be allowed to load script and make requests from.
+     *
+     * Derived from `BASE` rather than written out a second time, because the Content-Security-Policy in
+     * `bootstrap.php` and the `<script src>` in the checkout page have to name the same host. Two literals
+     * that must match are two literals that will eventually not.
+     */
+    public static function scriptOrigin(): string
+    {
+        return self::BASE;
+    }
+
     /** @var callable|null test seam — see the class docblock */
     private static $transport = null;
 

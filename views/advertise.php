@@ -87,7 +87,7 @@ $metaDescription = 'Advertise on our website and Mobile App. Place video or imag
 
           <div>
             <label for="duration_id" style="display:block; margin-bottom:6px; font-weight:600; font-size:14px;">Ad Display Duration Package *</label>
-            <select id="duration_id" name="duration_id" required onchange="updatePaymentOptions()" style="width:100%; padding:10px 12px; border-radius:6px; border:1px solid var(--border); background:var(--bg-input, #1e1b2e); color:inherit;">
+            <select id="duration_id" name="duration_id" required style="width:100%; padding:10px 12px; border-radius:6px; border:1px solid var(--border); background:var(--bg-input, #1e1b2e); color:inherit;">
               <?php foreach ($durations as $d): ?>
                 <option value="<?= (int) $d['id'] ?>" data-free="<?= (int) $d['is_free'] ?>" data-price="<?= (float) $d['price'] ?>" <?= (int) formOld('duration_id') === (int) $d['id'] ? 'selected' : '' ?>>
                   <?= e($d['title']) ?> (<?= (int) $d['days'] ?> Days) — <?= $d['is_free'] ? 'FREE' : '₦' . number_format((float) $d['price'], 2) ?>
@@ -105,14 +105,25 @@ $metaDescription = 'Advertise on our website and Mobile App. Place video or imag
           <div id="paid_options" style="display:none;">
             <label style="display:block; margin-bottom:8px; font-weight:600; font-size:14px;">Choose Payment Method *</label>
             <div style="display:flex; flex-direction:column; gap:10px;">
-              <?php if (setting('payhub_enabled')): ?>
+              <?php
+              /*
+               * `Payhub::configured()` rather than `setting('payhub_enabled')`.
+               *
+               * The switch alone is not enough to offer a card payment, because a payment this server
+               * cannot check afterwards is a payment that can never be credited: `configured()` also
+               * requires the secret key, and the secret key is what signs the verification. A church that
+               * has ticked the box but not pasted that key used to be shown an online option here whose
+               * money could never be matched to its advert.
+               */
+              ?>
+              <?php if (Payhub::configured()): ?>
                 <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-                  <input type="radio" name="payment_method" value="online" checked onclick="togglePaymentMethod('online')"> 💳 Pay Online via Payhub (Instant Gateway)
+                  <input type="radio" name="payment_method" value="online" checked> 💳 Pay Online via Payhub (Instant Gateway)
                 </label>
               <?php endif; ?>
               <?php if (setting('manual_payment_enabled', 1)): ?>
                 <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-                  <input type="radio" name="payment_method" value="manual" <?= !setting('payhub_enabled') ? 'checked' : '' ?> onclick="togglePaymentMethod('manual')"> 🏦 Manual Bank Transfer
+                  <input type="radio" name="payment_method" value="manual" <?= Payhub::configured() ? '' : 'checked' ?>> 🏦 Manual Bank Transfer
                 </label>
               <?php endif; ?>
             </div>
@@ -136,10 +147,10 @@ $metaDescription = 'Advertise on our website and Mobile App. Place video or imag
           <label style="display:block; margin-bottom:6px; font-weight:600; font-size:14px;">Media Type *</label>
           <div style="display:flex; gap:20px; align-items:center;">
             <label style="display:inline-flex; align-items:center; gap:6px; cursor:pointer;">
-              <input type="radio" name="media_type" value="image" checked onclick="toggleMediaType('image')"> Image Ad
+              <input type="radio" name="media_type" value="image" checked> Image Ad
             </label>
             <label style="display:inline-flex; align-items:center; gap:6px; cursor:pointer;">
-              <input type="radio" name="media_type" value="video" onclick="toggleMediaType('video')"> Video Ad
+              <input type="radio" name="media_type" value="video"> Video Ad
             </label>
           </div>
           <p style="font-size:12px; color:var(--ink-faint); margin-top:6px;">
@@ -160,37 +171,18 @@ $metaDescription = 'Advertise on our website and Mobile App. Place video or imag
   <?php endif; ?>
 </div>
 
-<script>
-function toggleMediaType(type) {
-  var fileInput = document.getElementById('media_file');
-  if (type === 'video') {
-    fileInput.accept = 'video/mp4,video/quicktime,video/webm';
-  } else {
-    fileInput.accept = 'image/*';
-  }
-}
-
-function updatePaymentOptions() {
-  var sel = document.getElementById('duration_id');
-  var opt = sel.options[sel.selectedIndex];
-  if (!opt) return;
-  var isFree = opt.getAttribute('data-free') === '1';
-  document.getElementById('free_notice').style.display = isFree ? 'block' : 'none';
-  document.getElementById('paid_options').style.display = isFree ? 'none' : 'block';
-  if (!isFree) {
-    var manualRadio = document.querySelector('input[name="payment_method"][value="manual"]');
-    var onlineRadio = document.querySelector('input[name="payment_method"][value="online"]');
-    if (onlineRadio && onlineRadio.checked) togglePaymentMethod('online');
-    else if (manualRadio) togglePaymentMethod('manual');
-  }
-}
-
-function togglePaymentMethod(method) {
-  var manualDetails = document.getElementById('manual_details');
-  if (manualDetails) {
-    manualDetails.style.display = method === 'manual' ? 'block' : 'none';
-  }
-}
-
-document.addEventListener('DOMContentLoaded', updatePaymentOptions);
-</script>
+<?php
+/*
+ * The page's JavaScript, in a file rather than in a <script> block.
+ *
+ * This page used to carry an inline script and inline `onclick`/`onchange` handlers, and the public
+ * site's Content-Security-Policy is `script-src 'self'` — which blocks both. In production the
+ * free/paid notice never appeared, choosing bank transfer never revealed the bank details or the proof
+ * upload, and the media-type toggle never changed what the file picker accepted. It all worked locally,
+ * because the policy is only sent when the site is not running as local, which is the configuration the
+ * bug hides in.
+ *
+ * `asset()` stamps the version, so a church that has already cached the old page gets the new script.
+ */
+?>
+<script src="<?= e(asset('js/advertise.js')) ?>" defer></script>

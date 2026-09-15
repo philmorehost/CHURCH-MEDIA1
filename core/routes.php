@@ -394,6 +394,18 @@ $router->post('/advertise', function () {
         $displayFreq = 'once_daily';
     } else {
         $paymentStatus = 'unpaid';
+
+        // A crafted POST asking for card payment on a site that cannot verify one is refused here, before
+        // an advert exists, rather than after — the alternative is an advert on the books that nobody can
+        // pay for and no admin can collect, which is worse than an error message.
+        //
+        // The form only offers the online option when Payhub::configured(), so this is the branch a
+        // request that never saw the form takes.
+        if ($paymentMethod === 'online' && !Payhub::configured()) {
+            keepFormOld($_POST);
+            flash('advertise_error', 'Card payment is not available on this site right now. Please choose bank transfer.');
+            redirect('/advertise');
+        }
     }
 
     $errors = [];
@@ -501,33 +513,164 @@ $router->post('/advertise', function () {
         } catch (Throwable $e) {}
     }
 
-    // Online Payment via Payhub
-    if (!$isFree && $paymentMethod === 'online' && Payhub::configured()) {
-        $result = Payhub::initialize([
-            'email' => $pubEmail,
-            'amount' => Payhub::amountInKobo($price),
-            'reference' => $reference,
-            'name' => $pubName,
-            'phone' => $pubPhone,
-            'callback_url' => baseUrl('payment/payhub/callback?ref=' . urlencode($reference)),
-            'metadata' => ['ad_id' => $adId, 'publisher_id' => $publisherId],
-        ]);
-
-        if ($result['ok'] && $result['authorization_url'] !== '') {
-            clearFormOld();
-            redirect($result['authorization_url']);
-        }
-
-        // The gateway could not be reached. The advert stays filed and unpaid, and the advertiser is told
-        // rather than shown the success page — which is what used to happen here.
-        flash('advertise_error', 'Your advert was saved, but the card payment could not be started ('
-            . $result['error'] . '). Nothing has been charged — you can try again, or pay by bank transfer.');
-        redirect('/advertise');
+    // Card payment. The advertiser pays on THIS site now — the checkout page below renders the gateway's
+    // inline checkout — so this is a redirect to our own page rather than to PayHub's website, and the
+    // browser is never handed off. It is a redirect and not a render because a render would re-run this
+    // whole handler on a refresh, creating a second advert and a second attempt for one payment.
+    if (!$isFree && $paymentMethod === 'online') {
+        // Kept in the session because the checkout page is the page that takes money. The reference is
+        // ours and random, but a URL that can be handed to somebody else will be, so the page checks that
+        // the session asking for it is the session that created it.
+        $_SESSION['ad_checkout_ref'] = $reference;
+        clearFormOld();
+        redirect('/advertise/checkout?ref=' . urlencode($reference));
     }
 
     clearFormOld();
     flash('advertise_sent', '1');
     redirect('/advertise?sent=1');
+});
+
+/**
+ * Loads an advert by its payment reference, within the church being served.
+ *
+ * Shared by the three money routes below so they cannot disagree about which advert a reference names —
+ * the same reasoning as `Payhub::amountInKobo()` being the only conversion: one answer to one question.
+ *
+ * @return array<string, mixed>|null
+ */
+$loadAdByReference = function (string $reference): ?array {
+    if (trim($reference) === '') {
+        return null;
+    }
+    $pdo = Database::getInstance()->getConnection();
+    [$tenantClause, $tenantParams] = tenantScope(null, 'a.tenant_id');
+    $stmt = $pdo->prepare('SELECT a.*, p.name AS publisher_name, p.email AS publisher_email
+                           FROM ads a JOIN ad_publishers p ON p.id = a.publisher_id
+                           WHERE a.payment_reference = ? AND ' . $tenantClause . ' LIMIT 1');
+    $stmt->execute(array_merge([trim($reference)], $tenantParams));
+
+    return $stmt->fetch() ?: null;
+};
+
+/** How many online attempts this advert has actually failed. The retry rule is measured on this. */
+
+// The page that takes the money, on this site.
+$router->get('/advertise/checkout', function () use ($loadAdByReference) {
+    $ref = trim((string) ($_GET['ref'] ?? ''));
+    $sessionRef = (string) ($_SESSION['ad_checkout_ref'] ?? '');
+
+    // Gated on the session that created the reference rather than on the reference alone. This is the one
+    // page on the site that starts a card payment, and a payment page reachable by anybody who is handed
+    // the URL is a payment page that will be.
+    if ($ref === '' || $sessionRef === '' || !hash_equals($sessionRef, $ref)) {
+        http_response_code(404);
+        render('404', [], true);
+        return;
+    }
+
+    $ad = $loadAdByReference($ref);
+    if ($ad === null) {
+        http_response_code(404);
+        render('404', [], true);
+        return;
+    }
+
+    // Already settled — a refresh, a back button, a bookmarked step. Sending them to the report is the
+    // only answer that cannot take a second payment for an advert that is already paid for.
+    if ((string) $ad['payment_status'] === 'paid') {
+        redirect('/advertise/return?ref=' . urlencode($ref));
+    }
+
+    // Bank transfer has become the only option, or the advert is not an online one. Either way this page
+    // must not offer a card payment; 7h-4 owns the rule that decides when, so until then the advert simply
+    // is not sent here.
+    if ((string) $ad['payment_method'] !== 'online') {
+        redirect('/advertise?sent=1');
+    }
+
+    render('advertise-checkout', [
+        'ad' => $ad,
+        'returnTo' => '/advertise/return',
+        'metaTitle' => 'Complete your payment',
+    ]);
+});
+
+// The hosted checkout, reached from the button on the page above. Still inside the site as far as the
+// advertiser is concerned — they chose it — but it is the gateway's page, which is why it is a separate
+// deliberate step rather than what happens by default.
+$router->post('/advertise/hosted', function () use ($loadAdByReference) {
+    Csrf::requireValid();
+
+    $ref = trim((string) ($_POST['ref'] ?? ''));
+    $sessionRef = (string) ($_SESSION['ad_checkout_ref'] ?? '');
+
+    if ($ref === '' || $sessionRef === '' || !hash_equals($sessionRef, $ref)) {
+        http_response_code(404);
+        render('404', [], true);
+        return;
+    }
+
+    $ad = $loadAdByReference($ref);
+    if ($ad === null || (string) $ad['payment_status'] === 'paid') {
+        redirect('/advertise/return?ref=' . urlencode($ref));
+    }
+
+    $result = Payhub::initialize([
+        'email' => (string) $ad['publisher_email'],
+        'amount' => Payhub::amountInKobo((float) $ad['price']),
+        'reference' => $ref,
+        'name' => (string) $ad['publisher_name'],
+        'callback_url' => baseUrl('advertise/return?ref=' . urlencode($ref)),
+        'metadata' => ['ad_id' => (int) $ad['id'], 'publisher_id' => (int) $ad['publisher_id']],
+    ]);
+
+    if ($result['ok'] && $result['authorization_url'] !== '') {
+        redirect($result['authorization_url']);
+    }
+
+    // The gateway could not be reached. Nothing has been charged, and the advert is untouched — the
+    // advertiser is told rather than shown a page that implies a payment happened.
+    flash('advertise_error', 'The card payment could not be started (' . $result['error']
+        . '). Nothing has been charged — please try again, or pay by bank transfer.');
+    redirect('/advertise/checkout?ref=' . urlencode($ref));
+});
+
+// Where the payment comes back to, and where the only decision about it is made.
+//
+// The browser is what arrives here, and a browser can be told to ask for any reference. So the reference is
+// verified with the gateway **server-side**, and what the browser says about the outcome is worth nothing.
+$router->get('/advertise/return', function () use ($loadAdByReference) {
+    $ref = trim((string) ($_GET['ref'] ?? ''));
+
+    $ad = $loadAdByReference($ref);
+    if ($ad === null) {
+        http_response_code(404);
+        render('404', [], true);
+        return;
+    }
+
+    // The browser is what arrives here, and a browser can be told to ask for any reference. So the gateway
+    // is asked **server-side**, and what the browser claims the outcome was counts for nothing.
+    //
+    // What the answer means is `core/AdPayments.php`, not this closure: a route handler ends in
+    // `redirect()`, which calls `exit`, so logic living here could never be driven from a harness. Every
+    // branch of the decision is tested directly on that class instead.
+    if ((string) $ad['payment_status'] === 'paid') {
+        $result = ['outcome' => 'paid', 'reason' => ''];
+    } else {
+        $result = AdPayments::recordOutcome($ad, Payhub::verify($ref));
+    }
+
+    $fresh = $loadAdByReference($ref) ?? $ad;
+
+    render('advertise-return', [
+        'ad' => $fresh,
+        'outcome' => $result['outcome'],
+        'reason' => $result['reason'],
+        'attempts' => (int) $fresh['payment_attempts'],
+        'remaining' => AdPayments::remainingOnlineAttempts((int) $fresh['id']),
+    ]);
 });
 
 // Public church-admin self-registration (super admin approves afterwards).

@@ -1,0 +1,127 @@
+<?php
+declare(strict_types=1);
+
+/**
+ * GET /advertise/checkout — where the advertiser pays, without leaving the site.
+ *
+ * The route has already checked that this reference belongs to the session that created it. Everything
+ * else here is about the payment being takeable *whatever the browser does*:
+ *
+ *  - **The hosted-checkout form is real markup and always present.** It is a plain POST, so it works with
+ *    JavaScript off, with the gateway's script blocked, and with the script loaded but broken. The iframe
+ *    is the upgrade, not the floor — which is the only shape that satisfies "if `inline.js` cannot be
+ *    loaded the button must say so and fall back", because a fallback that is assembled by the same
+ *    JavaScript that failed is not a fallback.
+ *  - **The server decides the amount, not the page.** `amountInKobo()` is called here from the advert row;
+ *    nothing on this page can be edited to change what is charged, and the public key in the markup cannot
+ *    be used to charge a different figure because the reference is what the server verifies.
+ *  - **The public key is the only key here.** The secret key never reaches a browser — that separation is
+ *    what keeps this application out of PCI scope, since the card form is drawn inside the gateway's own
+ *    frame and no card detail is ever posted to this server.
+ *
+ * @var array<string, mixed> $ad       the advert row, with publisher_name/publisher_email joined in
+ * @var string               $returnTo root-relative return URL, built from the route
+ */
+
+$reference = (string) $ad['payment_reference'];
+$amount = (float) $ad['price'];
+
+$metaTitle = 'Complete your payment';
+$metaDescription = 'Pay for your advert on ' . setting('site_title') . '.';
+// A checkout for one advertiser's one advert. There is nothing here for a crawler to index, and a
+// search result pointing at it would be a link that takes a stranger to somebody's payment page.
+$metaRobots = 'noindex, nofollow';
+
+$inlineReady = Payhub::inlineReady();
+
+/*
+ * What the checkout script is given. `amount` is in KOBO — see Payhub::amountInKobo() — because the
+ * gateway documents kobo and a naira figure here would charge a hundredth of the price. It is passed as
+ * JSON in a data attribute rather than interpolated into a JavaScript literal, so no value can end the
+ * attribute or the string it lands in.
+ */
+$inlineSettings = [
+    'key' => Payhub::publicKey(),
+    'email' => (string) ($ad['publisher_email'] ?? ''),
+    'amount' => Payhub::amountInKobo($amount),
+    'ref' => $reference,
+    'returnUrl' => $returnTo,
+];
+?>
+<div class="container section" style="max-width:640px; padding-top:40px; padding-bottom:60px;">
+
+  <?php if ($msg = flash('advertise_error')): ?>
+    <div style="margin-bottom:20px; padding:12px 16px; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); color:#f87171; border-radius:8px; font-size:14px;"><?= e($msg) ?></div>
+  <?php endif; ?>
+
+  <div style="text-align:center; margin-bottom:28px;">
+    <span class="eyebrow" style="color:var(--gold-soft); font-weight:700; text-transform:uppercase; letter-spacing:1px; font-size:13px;">Step 2 of 2</span>
+    <h1 style="margin:8px 0 10px; font-size:28px;">Complete your payment</h1>
+    <p style="color:var(--ink-dim); font-size:14.5px; margin:0;">
+      <?= e((string) $ad['title']) ?>
+    </p>
+  </div>
+
+  <div class="glass-card" style="padding:28px; border-radius:12px; text-align:center;">
+
+    <div style="font-size:13px; color:var(--ink-faint); margin-bottom:6px;">Amount due</div>
+    <div style="font-size:34px; font-weight:800; color:var(--gold-soft); margin-bottom:20px;">
+      ₦<?= e(number_format($amount, 2)) ?>
+    </div>
+
+    <div style="font-size:12.5px; color:var(--ink-faint); margin-bottom:24px;">
+      Reference <code style="color:var(--ink-dim);"><?= e($reference) ?></code>
+    </div>
+
+    <?php if ($inlineReady): ?>
+      <?php /* The settings the checkout script reads. `data-payhub` holds JSON, added with e() so a quote
+               in an email address cannot break out of the attribute. */ ?>
+      <div id="payhub-inline" data-payhub="<?= e((string) json_encode($inlineSettings, JSON_UNESCAPED_SLASHES)) ?>"></div>
+
+      <button type="button" id="payhub-pay" class="btn btn-gold" disabled
+              style="padding:13px 30px; font-size:16px; font-weight:700;">
+        Pay ₦<?= e(number_format($amount, 2)) ?> securely
+      </button>
+
+      <p id="payhub-status" style="font-size:12.5px; color:var(--ink-faint); margin:14px 0 0;">
+        Loading the secure payment window…
+      </p>
+    <?php else: ?>
+      <p style="font-size:13.5px; color:var(--ink-dim); margin:0 0 4px;">
+        Card payment is not available right now. Use the bank transfer option below, and our team will
+        confirm your advert as soon as the payment is seen.
+      </p>
+    <?php endif; ?>
+
+    <?php /* Loaded only when the inline checkout can actually run. The route's CSP exception is scoped to
+             this gateway origin and to this page, so nothing else on the site can load it. */ ?>
+    <?php if ($inlineReady): ?>
+      <script src="<?= e(Payhub::INLINE_SCRIPT) ?>" defer></script>
+    <?php endif; ?>
+  </div>
+
+  <?php /*
+   * The fallback, and on a church without the inline checkout this is the only thing here.
+   *
+   * It is hidden until it is needed rather than shown always: with JavaScript working, the reader pays in
+   * the frame above and never sees a second, competing payment button. Without JavaScript it stays hidden,
+   * which is why the "not available" wording above is server-rendered and not script-dependent.
+   */
+  ?>
+  <div id="payhub-fallback" <?= $inlineReady ? 'hidden' : '' ?> class="glass-card" style="padding:24px; border-radius:12px; margin-top:20px;">
+    <h2 style="font-size:17px; margin:0 0 8px;">Pay on the gateway's own page instead</h2>
+    <p style="font-size:13.5px; color:var(--ink-dim); margin:0 0 16px;">
+      Same payment, same reference, on PayHub's secure page rather than inside this one. Use this if the
+      button above does not work.
+    </p>
+    <form method="post" action="/advertise/hosted">
+      <?= Csrf::field() ?>
+      <input type="hidden" name="ref" value="<?= e($reference) ?>">
+      <button type="submit" class="btn btn-outline" style="padding:11px 24px;">Continue to secure checkout →</button>
+    </form>
+  </div>
+
+  <div style="text-align:center; margin-top:26px;">
+    <a href="/advertise" style="color:var(--ink-faint); font-size:13px;">Cancel and go back</a>
+  </div>
+</div>

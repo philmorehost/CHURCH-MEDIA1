@@ -2487,6 +2487,89 @@ PayHub documents all of it at `https://merchant.payhub.com.ng/api-reference.php`
 > `FOREIGN KEY` and after the constraint for a named one — nine of those, and comparing names would have
 > buried the one that was real.
 
+> **7h-3 shipped — the advertiser pays on this site, and the browser is never handed off.** *(The report,
+> retry and bank-transfer half is 7h-4.)*
+>
+> **What shipped:** `views/advertise-checkout.php` (the gateway's inline checkout inside the church's own
+> page), `views/advertise-return.php` (the outcome, reported), `core/AdPayments.php` (what a gateway answer
+> means, in one place), `public/assets/js/advertise.js`, and four routes. `POST /advertise` now redirects to
+> **our** `/advertise/checkout`; `/advertise/hosted` is the deliberate fallback to the gateway's own page;
+> `/advertise/return` verifies server-side and records.
+>
+> **The redirect is gone.** The submission used to call `/api/transaction/initialize` and send the browser to
+> `authorization_url` — the advertiser left the church's site to pay. The page now renders PayHub's own
+> `inline.js` with the **public** key and the amount in **kobo**, and opens the iframe in the page. The secret
+> key never reaches a browser, which is what keeps card data inside the gateway's frame and this application
+> out of PCI scope.
+>
+> ⚠️ **A live defect found on the way, and it was in the way.** `/advertise` carried its JavaScript in an
+> inline `<script>` block *and* in `onclick`/`onchange` attributes — and the public site sends
+> `script-src 'self'`, which blocks both. **In production none of it ran**: the free/paid notice never
+> appeared when the duration changed, choosing "Manual Bank Transfer" never revealed the bank details or the
+> proof upload, and switching to "Video Ad" never changed what the file picker accepted. It all worked on a
+> developer's machine, because the policy is only sent when the site is *not* running as local — which is the
+> configuration nobody tests in. The behaviour now lives in `public/assets/js/advertise.js` under
+> `script-src 'self'`, and the markup carries `data-` attributes instead of handlers.
+>
+> ⚠️ **And the CSP exception this stage added did not work either, for a reason worth writing down.**
+> `bootstrap.php` computed the policy beside the other security headers near the top — where `settings()`
+> answers from `config/site.php` alone, because `APP_IS_INSTALLED` is not defined until later, and from the
+> shared row alone, because the church being served has not been resolved. So the gateway origin was looked
+> up in a settings array that could not yet see `payhub_enabled`, came back "not configured", and was never
+> permitted. **The page would have fallen back to the gateway's own website every single time** — the one
+> behaviour this stage exists to remove, failing silently, in production only, exactly as the plan warned it
+> might. The policy is now sent after the tenant is resolved, and the harness asserts the header under
+> `APP_ENV=production`, which is the only condition that can catch it.
+>
+> **The money decisions live in `core/AdPayments.php`, not in the route.** A route handler ends in
+> `redirect()`, which calls `exit`, so logic in one can never be driven from a harness without ending the
+> harness process. Every branch is now reachable directly, against a fabricated gateway answer.
+>
+> Four rules, each of which was got wrong somewhere else in this codebase at least once: a verification that
+> did not succeed is never a payment; a return URL can be replayed, so every write is guarded and a paid
+> advert is only read; **a payment window that was closed is not a failed attempt** and does not consume one
+> of the advertiser's two, because two mis-clicks must not send somebody to bank transfer; and the attempt
+> counter is re-derived from the attempt rows rather than incremented, so a webhook first or a crash between
+> writes cannot make it disagree with what happened.
+>
+> **Verified: 54 assertions, 0 failures**, run three times consecutively to prove it is not order-dependent,
+> and **thirteen mutations, twelve caught.** Two were missed at first, and both were defects in the *tests*:
+>
+> - **The crafted-POST test did not send a media file.** The submission was refused by ordinary validation
+>   long before it reached the guard under test, so the assertion passed and a mutation that deleted the
+>   guard also passed — the test proved nothing. It now submits a complete, valid request in which the guard
+>   is the only thing that may refuse it. That immediately exposed a second flaw in itself: it un-configured
+>   the gateway with a raw `UPDATE ... WHERE tenant_id IS NULL`, the *shared* row, while `settingSave()`
+>   writes the church's own. The gateway stayed configured and the guard correctly declined to fire.
+> - ⚠️ **The thirteenth mutation is unobservable by design.** Deleting the "already paid" early return from
+>   `recordOutcome()` changes nothing, because *nothing in the code ever writes a worse payment state* — the
+>   protection is the write pattern (`AND status = "pending"`, and never writing `unpaid`), not that early
+>   return. It is kept as defence in depth and recorded here rather than papered over with an assertion that
+>   would pass for the wrong reason.
+>
+> **Three harness lessons, which is three more than the stage should have needed** — all the same mistake in
+> different clothes, that the test must establish the state it reasons about:
+>
+> - **`POST /advertise` is rate-limited to five submissions per ten minutes per IP.** Five harness runs in
+>   ten minutes is what a mutation sweep *is*, so the submission was refused with "Too many attempts" and
+>   eight assertions failed downstream of it, reporting a product defect that was the test's own footprint.
+>   The harness clears the counters first. (The news harness learned this about `admin/login.php` two stages
+>   ago, which is why it was recognised rather than debugged.)
+> - An attempt fixture used its own reference instead of the advert's, testing a shape production never
+>   produces — and reporting that as a product defect for one run.
+> - A request helper typed its cookie jar `array`, so the deliberately cookie-less request could not be made.
+>
+> **Not verified: no live PayHub transaction, and no browser.** No account is configured, so no card is
+> charged and the iframe has never been opened — what is proven is the key, the amount in kobo, the
+> reference, the policy entry, every branch of the outcome logic, and that the flow never leaves this site.
+> **The JavaScript has never been executed by a browser at all**, which matters more than usual here: it is
+> new code on a payment page, and the fallback it is supposed to reveal has never been seen to appear.
+>
+> **Deliberately left to 7h-4:** the retry button, the rule that bank transfer becomes the only option after
+> two failed online attempts, and the proof upload. `/advertise/return` records the outcome and reports it;
+> it does not yet offer the next step, and `views/advertise-return.php` says so in as many words rather than
+> offering a button that leads nowhere.
+
 ### Decisions taken, and two worth confirming
 
 - **"Two failed attempts" is counted per advert**, not per publisher: the advert is what is being bought,
