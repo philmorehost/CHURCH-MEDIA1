@@ -104,6 +104,7 @@ CREATE TABLE IF NOT EXISTS `settings` (
   `reading_reminder_enabled` TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'Whether the daily reading-plan reminder is sent',
   `roster_reminder_enabled` TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'Whether rota notices and day-before reminders are emailed',
   `timezone` VARCHAR(64) NOT NULL DEFAULT 'Africa/Lagos',
+  `default_locale` VARCHAR(12) NOT NULL DEFAULT 'en' COMMENT 'Catalogue code from lang/, e.g. en or yo',
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY `uniq_settings_tenant` (`tenant_id`),
   FOREIGN KEY (`tenant_id`) REFERENCES `tenants`(`id`) ON DELETE CASCADE

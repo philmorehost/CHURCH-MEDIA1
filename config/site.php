@@ -9,6 +9,7 @@ declare(strict_types=1);
 return [
     'site_title'           => 'Church Media',
     'site_tagline'         => 'A place to belong, believe, and become',
+    'default_locale'       => 'en', // a catalogue code from lang/; en is the source catalogue
     'logo_path'            => null,
     'favicon_path'         => null,
     'hero_tagline'         => 'Where Faith Comes Alive',

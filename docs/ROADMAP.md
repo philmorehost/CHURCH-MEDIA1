@@ -65,7 +65,7 @@
 | **4** | WhatsApp channel | Official Cloud API integration (templates, 24-h window, webhooks) | 5–7 sessions | Per-conversation | ✅ closed (4.1–4.3; 4.4 rejected) |
 | **5** | Members & daily engagement | Member accounts, daily devotional, Bible reading plans + streaks, offline sermon downloads | 10–12 sessions | None | ✅ shipped (S1–S6) |
 | **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ✅ **complete** — 6a–6g shipped |
-| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings), 7b shipped (an account belongs to one church), 7c shipped (a unit belongs to one church), 7d-i shipped (worker tenancy plumbing), 7d-ii parts 1–2 and 4 shipped (the SMS worker, the sender-ID poller and the daily publisher report act as one church at a time), 7d-iii shipped (the SMS screens only touch their own church), 7d-iv shipped (the ads tables carry a church), 7d-v shipped (the public advert flow was driven over HTTP, clearing 7d-iv's verification debt), 7d-ii part 3 shipped (the devotional push and the reading reminder act as one church at a time), 7d-ii part 5 shipped (the follow-up and rota emails act as one church at a time), 7d-ii part 6 shipped (the WhatsApp broadcast acts as one church at a time), 7d-ii part 7 shipped (the roll-up and the backup were read, and neither needs a church), 7d-ii leftovers shipped (the SMS counters write and the dashboard spend tiles), 7e shipped (a church admin edits its own branding, and nothing else), 7f shipped (each church's site installs to a home screen under its own name, and opens without a connection) |
+| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings), 7b shipped (an account belongs to one church), 7c shipped (a unit belongs to one church), 7d-i shipped (worker tenancy plumbing), 7d-ii parts 1–2 and 4 shipped (the SMS worker, the sender-ID poller and the daily publisher report act as one church at a time), 7d-iii shipped (the SMS screens only touch their own church), 7d-iv shipped (the ads tables carry a church), 7d-v shipped (the public advert flow was driven over HTTP, clearing 7d-iv's verification debt), 7d-ii part 3 shipped (the devotional push and the reading reminder act as one church at a time), 7d-ii part 5 shipped (the follow-up and rota emails act as one church at a time), 7d-ii part 6 shipped (the WhatsApp broadcast acts as one church at a time), 7d-ii part 7 shipped (the roll-up and the backup were read, and neither needs a church), 7d-ii leftovers shipped (the SMS counters write and the dashboard spend tiles), 7e shipped (a church admin edits its own branding, and nothing else), 7f shipped (each church's site installs to a home screen under its own name, and opens without a connection), 7g-i shipped (a church can serve its site in its own language, and a visitor can choose one) |
 
 **Confirmed 2026-09-12:** multi-tenant **SaaS is a real goal**. That is why **Phase 0
 (tenancy foundation) runs before everything else** — the SMS token, sender IDs, country
@@ -2141,19 +2141,81 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > reads* and an install prompt. Neither was built, and the first was deliberate: caching `/api` answers
 > means a POST answered from yesterday's body and a member's page stored on the device.
 
-> **Not built yet in Phase 7 (beyond 7d, 7e and 7f):** self-service tenant provisioning with plan limits,
-> per-tenant upload/cache namespacing, and tenant-scoped analytics and reporting. Localisation (`lang/` +
-> a `t()` helper + Flutter ARB) and the app widgets/shortcuts have not been started at all.
+> **7g-i shipped — a church can serve its site in its own language, and a visitor can choose one.**
+> `lang/en.php` and `lang/yo.php`, `core/Lang.php`, `t()` in `core/helpers.php`, a `/lang/{code}` route,
+> a `default_locale` column on `settings`, the header and footer through the catalogue, a switcher in the
+> footer, and `cli/lang_check.php` as a **permanent** tool. The navigation is the part translated first
+> because it is what a visitor in the wrong language has to read before they can find the switcher.
+>
+> Four decisions, each with a reason that is not obvious from the code:
+>
+> - **The class is `Lang`, not `Locale`.** `ext-intl` defines `Locale`, so declaring our own would be a
+>   fatal error on any host with intl enabled — most managed hosting, and none of the machines this was
+>   developed on. A name that collides with an extension is a bug that appears only in production.
+> - **A catalogue is a PHP file, not a database row and not gettext.** A church's language is a property
+>   of the *code* it runs, so it belongs in the repo beside the views it translates and deploys with them.
+>   `.po`/`.mo` would additionally need the file compiled on the host and the locale installed at OS level
+>   — the step that fails on cheap hosting and silently serves English. `lang/*.php` is also the list of
+>   available languages, so **adding a language is adding a file**, with no list anywhere to update.
+> - **A partial catalogue is never wrong, only English.** Resolution is requested → English → the key
+>   itself, which is what makes it safe to translate the shell first and the rest later, and safe for a
+>   volunteer to translate thirty strings and stop. `cli/lang_check.php` lists what is left and does not
+>   treat a gap as a failure.
+> - **The visitor outranks the church.** The `lang` cookie is read before `default_locale`, because a
+>   church's default is for people who have not chosen, not an override of somebody who has. It is a
+>   cookie rather than the session so it survives signing out and works for a visitor who never signs in,
+>   and the value is checked against the catalogues on disk on every read — a forged cookie can only ever
+>   select a language that exists.
+>
+> **A catalogue can also say what it is.** `__offered => false` keeps a language out of the visitor
+> switcher without hiding it from the church settings screen: `yo.php` is a first pass that no native
+> speaker has reviewed, so a church may deliberately set it as its own default while congregations are not
+> offered it as a choice. Flipping that one value is the whole promotion.
+>
+> **Two defects were found, one of them in code that was already passing.**
+>
+> - **`mixed` is PHP 8.0 and this project's floor is 7.4.** Four problems — three parameter types and a
+>   return type in the new `Lang` — reported by `php cli/php-compat-check.php`, which is the only check
+>   that would have caught it. Removed, re-run, clean.
+> - **The nav's dropdown ids were slugged from the label.** `preg_replace('/[^a-z0-9]+/', '-', …)` turns
+>   every accented character into a hyphen, so a Yorùbá "Ìwé" and "Ìwò" both slug to `-w-`: duplicate ids
+>   with two `aria-controls` pointing at the same element. Ids are now the item's position.
+>
+> **Verified (7g-i): 86 assertions, 0 failures**, and **eight mutations, eight caught:** the church default
+> outranking the visitor (8 failures), the protocol-relative guard in `safeNext` (3), the header-injection
+> guard (1), `offered()` ignoring `__offered` (2), `translate()` never falling back to English (6),
+> `catalogue()` keeping empty values (1), the document language hard-coded again (2), and the switcher
+> offered every catalogue on disk (1). The harness also writes a deliberately broken catalogue, asserts
+> `lang_check` exits non-zero and names each mistake, and asserts the **site still renders** — an empty
+> value falls back to English rather than drawing nothing.
+>
+> **Not verified: no native speaker has reviewed the Yorùbá.** Ten keys are translated, and the two
+> idiomatic ones were left in English on purpose rather than rendered word-for-word. No browser has been
+> used either — the switcher, the redirect and the cookie were driven over HTTP only.
+>
+> **Still English, and deliberately so:** the admin screens, and the standalone public pages that do not
+> use the layout (`views/forgot-password.php`, `views/unblock.php`, `RateLimiter`'s throttle page). Those
+> three hard-code `lang="en"`, and that is correct while their words are English — changing the attribute
+> without translating the page would be a lie about the content. They are 7g-ii.
+>
+> **One thing that will read as a bug and is not:** the service worker caches navigation responses
+> network-first, so a language switched while offline appears to do nothing until the device is back
+> online, when the next navigation re-fetches and the cached copy is replaced.
+
+> **Not built yet in Phase 7 (beyond 7d, 7e, 7f and 7g-i):** self-service tenant provisioning with plan
+> limits, per-tenant upload/cache namespacing, and tenant-scoped analytics and reporting. Localisation is
+> **started** — the PHP foundation and the site shell shipped as 7g-i; the admin screens, the three
+> standalone pages and the Flutter `intl`/ARB files are not done. The app widgets/shortcuts have not been
+> started at all.
 >
 > *(The line that used to be here said church-admin branding was still to build. It shipped as 7e below —
 > and the field decision it was waiting on is the whitelist recorded there.)*
 >
 > **"7d-ii part 1 shipped" must not be read as Phase 7 being nearly done.** That commit is one worker of
 > eleven. Phase 7's own scope line is *multi-tenant onboarding, localisation, PWA, app widgets*, and of
-> those, localisation (`lang/` + a `t()` helper + Flutter ARB) and the app widgets/shortcuts have not been
-> started at all — the PWA shipped later as 7f. 7d-ii and 7e came first because they are correctness
-> rather than features: until every worker runs one pass per church, onboarding a second church is not
-> safe, whatever else is finished.
+> those, the app widgets/shortcuts have not been started at all. The PWA shipped as 7f and localisation
+> started as 7g-i. 7d-ii and 7e came first because they are correctness rather than features: until every
+> worker runs one pass per church, onboarding a second church is not safe, whatever else is finished.
 
 - **Multi-tenant SaaS** — *the foundation is already built in Phase 0*. Phase 7 finishes the
   job: tenant-aware settings UI, per-tenant branding (logo, colours, domain) applied across
@@ -2161,8 +2223,10 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
   per-tenant admin accounts, and tenant-scoped analytics and reporting. This is what makes
   onboarding a third, fourth and fifth church cheap — and it is the foundation for the second
   church's app.
-- **Localisation**: `lang/` message catalogues + a `t()` helper for PHP, `intl`/ARB files
-  for Flutter; ship English first, then Yoruba / Igbo / Hausa; Bible translation selector.
+- **Localisation** — *started as 7g-i*: `lang/` catalogues + `t()` for PHP, shipped as English plus a
+  provisional Yorùbá; English shell first, then the remaining PHP screens, then the Flutter
+  `intl`/ARB files in both apps. Igbo and Hausa after that, and the Bible translation selector is
+  separate — `/bible` already switches translation, and that is the source text, not the interface.
 - **PWA** — *shipped as 7f*. A web app manifest generated per church, a service worker with
   network-first navigations and cache-first static assets, and an offline fallback page. The
   install prompt and the "stale-while-revalidate for API reads" named here were **not**

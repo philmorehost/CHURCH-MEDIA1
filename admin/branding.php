@@ -47,6 +47,7 @@ $branding = [
     'logo_path' => ['kind' => 'image', 'label' => 'Logo'],
     'favicon_path' => ['kind' => 'image', 'label' => 'Favicon', 'hint' => 'The little icon in the browser tab.'],
     'meta_description' => ['kind' => 'text', 'label' => 'Search description', 'hint' => 'One or two sentences for search results.'],
+    'default_locale' => ['kind' => 'enum', 'label' => 'Language', 'hint' => 'The language this site speaks by default. Anything a language has not translated yet is shown in English, and a visitor who chooses their own language keeps it.'],
 
     // The front page hero.
     'hero_type' => ['kind' => 'enum', 'label' => 'Hero style'],
@@ -88,6 +89,10 @@ $enums = [
     // currently a video keeps that value — see the note where the options are built.
     'hero_type' => ['gradient', 'image', 'youtube'],
     'go_declaration_mode' => ['marquee', 'static'],
+    // Every catalogue on disk, including one not yet offered to visitors in the footer switcher: a church
+    // choosing its own language is a deliberate act, and the option list is the language files rather
+    // than something that has to be kept in step with them.
+    'default_locale' => array_keys(Lang::available()),
 ];
 
 /** The fields on this screen that hold a link, so they can be checked as links. */
@@ -232,6 +237,21 @@ require __DIR__ . '/partials/layout-open.php';
           <?php if (!empty($spec['hint'])): ?><small style="color:var(--ink-faint);"><?= e($spec['hint']) ?></small><?php endif; ?>
         </div>
       <?php endforeach; ?>
+
+      <?php /*
+             * The language, shown by name rather than by code. A church admin choosing between "en" and
+             * "yo" is being asked to know ISO codes; the names come from each catalogue's own `__name`, so
+             * a language is listed as it calls itself.
+             */ ?>
+      <div style="margin-bottom:12px;">
+        <label for="default_locale"><?= e($branding['default_locale']['label']) ?></label>
+        <select id="default_locale" name="default_locale">
+          <?php foreach ($enums['default_locale'] as $code): ?>
+            <option value="<?= e($code) ?>"<?= $readable($current, 'default_locale') === $code ? ' selected' : '' ?>><?= e(Lang::available()[$code] ?? strtoupper($code)) ?></option>
+          <?php endforeach; ?>
+        </select>
+        <small style="color:var(--ink-faint);"><?= e($branding['default_locale']['hint']) ?></small>
+      </div>
 
       <?php foreach (['logo_path' => 'logo', 'favicon_path' => 'favicon'] as $key => $file): $spec = $branding[$key]; ?>
         <div style="margin-bottom:12px;">

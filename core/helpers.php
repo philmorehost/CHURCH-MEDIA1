@@ -390,6 +390,25 @@ function appShortName(): string
 }
 
 /**
+ * Translates a key into the language this visitor is reading.
+ *
+ * `:name` placeholders are substituted from `$vars`, and they are placeholders rather than
+ * concatenation on purpose: "© 2026 Grace Church" is a different word order in most languages, and a
+ * translator who can move `:church` and `:year` around does not need the code changed.
+ *
+ * A key with no translation anywhere returns **the key itself**, never an empty string. An empty label
+ * is invisible and looks like a layout bug; `footer.explore` in a footer is unmistakable, appears in a
+ * screenshot, and can be grepped.
+ *
+ * The return value is trusted text from a file in this repository, exactly like the view that echoes it,
+ * but it still belongs inside `e()` at the point of output — the same rule as every other string here.
+ */
+function t(string $key, array $vars = []): string
+{
+    return class_exists('Lang') ? Lang::translate($key, $vars) : $key;
+}
+
+/**
  * Writes settings for the current tenant.
  *
  * Creates the tenant's own `settings` row on first write and updates it after

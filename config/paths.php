@@ -7,6 +7,7 @@ define('CORE_PATH', ROOT_PATH . '/core');
 define('ADMIN_PATH', ROOT_PATH . '/admin');
 define('API_PATH', ROOT_PATH . '/api');
 define('VIEWS_PATH', ROOT_PATH . '/views');
+define('LANG_PATH', ROOT_PATH . '/lang');
 define('INSTALLER_PATH', ROOT_PATH . '/installer');
 define('STORAGE_PATH', ROOT_PATH . '/storage');
 define('PUBLIC_PATH', ROOT_PATH . '/public');

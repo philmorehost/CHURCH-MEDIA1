@@ -1,0 +1,201 @@
+#!/usr/bin/env php
+<?php
+declare(strict_types=1);
+
+/**
+ * Checks the language catalogues in `lang/` against each other.
+ *
+ * Why this exists: `Lang::translate()` resolves requested → English → the key itself, and it silently
+ * drops a value that is empty or not a string. That is the right behaviour at runtime — a missing label
+ * must never break a page — but it means three whole classes of mistake are invisible on the site:
+ *
+ *  - a key that exists only outside English, which renders as a dotted key (`nav.home`) for every English
+ *    reader and is a bug rather than a gap;
+ *  - a key mapped to an empty string or a number, which silently falls back to English, so the file looks
+ *    translated and is not;
+ *  - a catalogue file that cannot be read or parsed, or has no `__name`, so the switcher offers a language
+ *    as `YO` or does not offer it at all.
+ *
+ * A **missing** translation is deliberately not an error. A partial catalogue is the design: a volunteer
+ * can translate thirty strings and stop, and every unlisted key stays English. This tool lists what is
+ * left instead of failing on it.
+ *
+ * Run it after adding or editing anything in `lang/`, and before installing for a church in a language
+ * other than English.
+ *
+ *   php cli/lang_check.php            summary per catalogue
+ *   php cli/lang_check.php --missing  also list every untranslated key
+ *
+ * Exit codes: 0 the catalogues are sound, 1 a catalogue has a problem.
+ */
+
+if (!defined('STDERR')) {
+    $errStream = @fopen('php://stderr', 'wb');
+    define('STDERR', $errStream ?: fopen('php://output', 'wb'));
+}
+if (!defined('STDOUT')) {
+    $outStream = @fopen('php://stdout', 'wb');
+    define('STDOUT', $outStream ?: fopen('php://output', 'wb'));
+}
+
+require __DIR__ . '/../bootstrap.php';
+
+$showMissing = in_array('--missing', $argv ?? [], true);
+
+/** @var array<int, string> $problems */
+$problems = [];
+/** @var array<string, array<string, string>> $catalogues */
+$catalogues = [];
+/** @var array<string, array<string, mixed>> $metas */
+$metas = [];
+
+$files = glob(LANG_PATH . '/*.php') ?: [];
+
+if (!$files) {
+    fwrite(STDERR, 'No catalogues found in ' . LANG_PATH . PHP_EOL);
+    exit(1);
+}
+
+foreach ($files as $file) {
+    $code = strtolower(basename($file, '.php'));
+
+    // A file whose name is not a usable code can never be selected, so nothing in it is ever shown.
+    if (preg_match('/^[a-z]{2}(-[a-z0-9]{2,8})?$/', $code) !== 1) {
+        $problems[] = $code . '.php is not a usable locale code — Lang::available() skips it, so nothing in it is ever used.';
+        continue;
+    }
+
+    try {
+        // A parse error is catchable here: `require` throws ParseError, which is a Throwable.
+        $data = require $file;
+    } catch (Throwable $e) {
+        $problems[] = $code . '.php could not be loaded: ' . $e->getMessage();
+        continue;
+    }
+
+    if (!is_array($data)) {
+        $problems[] = $code . '.php must return an array.';
+        continue;
+    }
+
+    $clean = [];
+    $meta = [];
+    foreach ($data as $key => $value) {
+        if (!is_string($key)) {
+            $problems[] = $code . '.php has a key that is not a string (' . gettype($key) . '), which cannot be reached.';
+            continue;
+        }
+
+        /*
+         * Keys beginning with `__` describe the file rather than saying something to a reader, so they are
+         * not text and are exempt from every rule about text: `__offered` is a boolean on purpose. They are
+         * still checked, for the shapes `Lang` knows about.
+         */
+        if (str_starts_with($key, '__')) {
+            $meta[$key] = $value;
+            if ($key === '__name' && (!is_string($value) || trim($value) === '')) {
+                $problems[] = $code . '.php has no __name, so the switcher would offer it as ' . strtoupper($code) . '.';
+            }
+            if ($key === '__offered' && !is_bool($value)) {
+                $problems[] = $code . '.php: __offered is ' . gettype($value) . ', not true or false. Anything but false counts as offered, so a mistyped value cannot hide a language.';
+            }
+            continue;
+        }
+
+        if (!is_string($value)) {
+            $problems[] = $code . ".php: '" . $key . "' is " . gettype($value) . ', not a string — Lang drops it, so the key silently falls back to English.';
+            continue;
+        }
+        if (trim($value) === '') {
+            $problems[] = $code . ".php: '" . $key . "' is empty — Lang drops it, so the key silently falls back to English.";
+            continue;
+        }
+        $clean[$key] = $value;
+    }
+
+    $catalogues[$code] = $clean;
+    $metas[$code] = $meta;
+}
+
+$fallback = Lang::FALLBACK;
+$english = $catalogues[$fallback] ?? null;
+
+if ($english === null) {
+    fwrite(STDERR, 'lang/' . $fallback . '.php is missing. It is the catalogue every other one falls back to.' . PHP_EOL);
+    exit(1);
+}
+
+/** @var array<string, string> $englishKeys */
+$englishKeys = $english;
+
+/**
+ * A key that only exists outside English renders as a dotted key for every English reader — the one case
+ * where a gap is a defect rather than an untranslated string.
+ */
+foreach ($catalogues as $code => $keys) {
+    if ($code === $fallback) {
+        continue;
+    }
+    foreach (array_keys($keys) as $key) {
+        if (!array_key_exists($key, $englishKeys)) {
+            $problems[] = $code . ".php defines '" . $key . "', which " . $fallback . '.php does not. English readers would see that key itself.';
+        }
+    }
+}
+
+// ---------------------------------------------------------------- report
+
+fwrite(STDOUT, 'Language catalogues — ' . LANG_PATH . PHP_EOL . PHP_EOL);
+
+$codes = array_keys($catalogues);
+sort($codes);
+
+foreach ($codes as $code) {
+    $keys = $catalogues[$code];
+    $missing = array_diff_key($englishKeys, $keys);
+
+    // Padded by characters, not bytes: "Yorùbá" is 8 bytes for 6 characters, so sprintf's %-14s would
+    // leave the column ragged in exactly the entries most likely to be read.
+    $name = (string) ($metas[$code]['__name'] ?? strtoupper($code));
+    $pad = str_repeat(' ', max(1, 14 - mb_strlen($name)));
+
+    $line = sprintf(
+        '  %-6s %s%3d key%s',
+        $code,
+        $name . $pad,
+        count($keys),
+        count($keys) === 1 ? '' : 's'
+    );
+
+    if ($code === $fallback) {
+        $line .= '   (the source catalogue)';
+    } elseif (($metas[$code]['__offered'] ?? true) === false) {
+        $line .= '   not offered to visitors yet';
+    } elseif ($missing === []) {
+        $line .= '   complete';
+    } else {
+        $line .= '   ' . count($missing) . ' untranslated, served in ' . $fallback;
+    }
+
+    fwrite(STDOUT, $line . PHP_EOL);
+
+    if ($showMissing && $missing !== []) {
+        foreach (array_keys($missing) as $key) {
+            fwrite(STDOUT, '           - ' . $key . PHP_EOL);
+        }
+    }
+}
+
+fwrite(STDOUT, PHP_EOL);
+
+if ($problems === []) {
+    fwrite(STDOUT, '0 problems' . PHP_EOL);
+    exit(0);
+}
+
+foreach ($problems as $problem) {
+    fwrite(STDOUT, '  ! ' . $problem . PHP_EOL);
+}
+
+fwrite(STDOUT, PHP_EOL . count($problems) . ' problem' . (count($problems) === 1 ? '' : 's') . PHP_EOL);
+exit(1);

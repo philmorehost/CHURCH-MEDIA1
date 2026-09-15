@@ -2334,6 +2334,19 @@ class Database
                     // No tenants table yet — nothing to attribute the adverts to.
                 }
             },
+
+            // The language a church's interface is served in by default.
+            //
+            // **Per church, not per install.** One platform in Nigeria serves a Yorùbá congregation and an
+            // English-speaking one from the same code, and which is the default is the church's decision.
+            // The visitor's own choice still outranks it — the `lang` cookie is the first thing
+            // `Lang::current()` reads — because a church's default is for people who have not chosen, not
+            // an override of somebody who has.
+            //
+            // `en` is the source catalogue, so it is the one value guaranteed to answer every key.
+            '2026_42_default_locale' => function (PDO $pdo): void {
+                self::addColumnIfMissing($pdo, 'settings', 'default_locale', "VARCHAR(12) NOT NULL DEFAULT 'en'", 'timezone');
+            },
         ];
     }
 

@@ -20,49 +20,54 @@ $isLive = !empty($s['livestream_is_live']);
  * A parent's `href` is its landing page (also what a keyboard or no-JS visitor
  * can still click). Add entries to a group's `children`, or append a new
  * top-level array with `'children' => []` to put an item back on the bar itself.
+ *
+ * Every label goes through `t()`, because the navigation is the one part of the
+ * site a visitor in the wrong language has to be able to read before they can
+ * find the switcher. The single exception is the unit link below, which is the
+ * church's own word for its own structure — see lang/en.php.
  */
 $navTree = [
-    ['href' => '/', 'label' => 'Home', 'children' => []],
+    ['href' => '/', 'label' => t('nav.home'), 'children' => []],
     [
         'href' => '/feed',
-        'label' => 'Media',
+        'label' => t('nav.media'),
         'children' => [
-            ['href' => '/feed', 'label' => 'Video Feed'],
-            ['href' => '/media', 'label' => 'Media Gallery'],
-            ['href' => '/live', 'label' => 'Watch Live'],
+            ['href' => '/feed', 'label' => t('nav.video_feed')],
+            ['href' => '/media', 'label' => t('nav.media_gallery')],
+            ['href' => '/live', 'label' => t('nav.watch_live')],
         ],
     ],
     [
         'href' => '/sermons',
-        'label' => 'The Word',
+        'label' => t('nav.word'),
         'children' => [
-            ['href' => '/sermons', 'label' => 'Sermons'],
-            ['href' => '/bible', 'label' => 'Holy Bible'],
-            ['href' => '/devotional', 'label' => 'Daily Devotional'],
+            ['href' => '/sermons', 'label' => t('nav.sermons')],
+            ['href' => '/bible', 'label' => t('nav.bible')],
+            ['href' => '/devotional', 'label' => t('nav.devotional')],
         ],
     ],
     [
         'href' => '/events',
-        'label' => 'Community',
+        'label' => t('nav.community'),
         'children' => [
-            ['href' => '/events', 'label' => 'Events'],
+            ['href' => '/events', 'label' => t('nav.events')],
             ['href' => '/units', 'label' => Unit::pluralFor(Unit::leafType())],
-            ['href' => '/testimonies', 'label' => 'Testimonies'],
-            ['href' => '/prayer', 'label' => 'Prayer Wall'],
+            ['href' => '/testimonies', 'label' => t('nav.testimonies')],
+            ['href' => '/prayer', 'label' => t('nav.prayer_wall')],
         ],
     ],
     [
         'href' => '/about',
-        'label' => 'Connect',
+        'label' => t('nav.connect'),
         'children' => [
-            ['href' => '/about', 'label' => 'About Us'],
-            ['href' => '/contact', 'label' => 'Contact'],
-            ['href' => '/advertise', 'label' => 'Advertise With Us'],
-            ['href' => '/register', 'label' => 'Register'],
+            ['href' => '/about', 'label' => t('nav.about')],
+            ['href' => '/contact', 'label' => t('nav.contact')],
+            ['href' => '/advertise', 'label' => t('nav.advertise')],
+            ['href' => '/register', 'label' => t('nav.register')],
             // One link for both states on purpose: /member/login redirects a signed-in
             // member straight to /member, so this never says "Sign In" to somebody who
             // already is — and the partial never has to touch the session to know.
-            ['href' => '/member/login', 'label' => 'Sign In'],
+            ['href' => '/member/login', 'label' => t('nav.sign_in')],
         ],
     ],
 ];
@@ -111,7 +116,7 @@ try {
     error_log('CMS nav skipped: ' . $e->getMessage());
 }
 ?><!doctype html>
-<html lang="en">
+<html lang="<?= e(Lang::current()) ?>">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -225,7 +230,7 @@ $goMode = ($s['go_declaration_mode'] ?? 'marquee') === 'static' ? 'static' : 'ma
       <?= e($s['site_title']) ?>
     </a>
     <nav data-nav-links class="nav-links">
-      <?php foreach ($navTree as $item): ?>
+      <?php foreach ($navTree as $navIndex => $item): ?>
         <?php
           $href = (string) ($item['href'] ?? '');
           $label = (string) ($item['label'] ?? '');
@@ -236,7 +241,12 @@ $goMode = ($s['go_declaration_mode'] ?? 'marquee') === 'static' ? 'static' : 'ma
                   if ($path === ($c['href'] ?? '')) { $isActive = true; break; }
               }
           }
-          $menuId = 'nav-menu-' . preg_replace('/[^a-z0-9]+/', '-', strtolower($label));
+          /* The id comes from the item's position, not from its label. It used to be slugged from the
+             label, and slugging a translated label is lossy: every accented character in `[^a-z0-9]+`
+             becomes a hyphen, so a Yorùbá "Ìwé" and "Ìwò" both slug to "-w-" and the page then carries
+             duplicate ids with two `aria-controls` pointing at the same element. A position cannot
+             collide. */
+          $menuId = 'nav-menu-' . (int) $navIndex;
         ?>
         <?php if ($children): ?>
           <div class="nav-dropdown-wrap">
@@ -245,23 +255,23 @@ $goMode = ($s['go_declaration_mode'] ?? 'marquee') === 'static' ? 'static' : 'ma
             </a>
             <button type="button" class="nav-dropdown-toggle" data-nav-dropdown-toggle
                     aria-expanded="false" aria-controls="<?= e($menuId) ?>"
-                    aria-label="Show <?= e($label) ?> menu"><span aria-hidden="true">▾</span></button>
+                    aria-label="<?= e(t('nav.show_menu', [':label' => $label])) ?>"><span aria-hidden="true">▾</span></button>
             <div class="nav-dropdown-menu" id="<?= e($menuId) ?>">
               <?php foreach ($children as $child): ?>
                 <a href="<?= e($child['href']) ?>" class="<?= $path === $child['href'] ? 'active' : '' ?>">
-                  <?= e($child['label']) ?><?php if (($child['href'] ?? '') === '/live' && $isLive): ?> <span class="nav-live"><span class="dot"></span>LIVE</span><?php endif; ?>
+                  <?= e($child['label']) ?><?php if (($child['href'] ?? '') === '/live' && $isLive): ?> <span class="nav-live"><span class="dot"></span><?= e(t('nav.live')) ?></span><?php endif; ?>
                 </a>
               <?php endforeach; ?>
             </div>
           </div>
         <?php else: ?>
           <a href="<?= e($href) ?>" class="<?= $isActive ? 'active' : '' ?>">
-            <?= e($label) ?><?php if ($href === '/live' && $isLive): ?> <span class="nav-live"><span class="dot"></span>LIVE</span><?php endif; ?>
+            <?= e($label) ?><?php if ($href === '/live' && $isLive): ?> <span class="nav-live"><span class="dot"></span><?= e(t('nav.live')) ?></span><?php endif; ?>
           </a>
         <?php endif; ?>
       <?php endforeach; ?>
     </nav>
-    <button class="nav-toggle" data-nav-toggle aria-label="Menu">☰</button>
+    <button class="nav-toggle" data-nav-toggle aria-label="<?= e(t('nav.menu')) ?>">☰</button>
   </div>
 </header>
 

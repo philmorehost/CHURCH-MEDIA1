@@ -1288,6 +1288,21 @@ $router->get('/search', function () {
     render('search');
 });
 
+// The language switcher. A GET that records one preference and returns to the page it was clicked on, so
+// it carries no CSRF token: it changes no data, and the worst a forged link can do is choose a language.
+$router->get('/lang/{code}', function (array $params) {
+    $code = strtolower((string) ($params['code'] ?? ''));
+
+    // An unknown code is refused rather than turned into a 404: the visitor clicked a link on a real page,
+    // so they go back to it. `remember()` checks the code against the catalogues on disk itself, so the
+    // cookie can never hold a language that `Lang::current()` would then have to ignore.
+    Lang::remember($code);
+
+    // Already reduced to a same-site path by `Lang::safeNext()` — see the note there about why a switcher
+    // that can be pointed anywhere is an open redirect.
+    redirect(Lang::safeNext($_GET['next'] ?? '/'));
+});
+
 $router->get('/sitemap.xml', function () {
     require VIEWS_PATH . '/sitemap.php';
 });
