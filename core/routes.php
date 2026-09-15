@@ -223,8 +223,41 @@ $router->post('/ad-manager', function () {
 
     $stmt = $pdo->prepare('INSERT INTO ads (publisher_id, tenant_id, title, media_type, file_path, thumbnail_path, destination_url, target_platform, duration_days, price, is_free, display_frequency, payment_status, payment_method, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "pending")');
     $stmt->execute([(int) $pub['id'], (int) $pub['tenant_id'], $title, $mediaType, $filePath, $thumbPath, $destUrl ?: null, $targetPlatform, $durationDays, $price, $isFree, $displayFreq, $isFree ? 'paid' : 'unpaid', $isFree ? 'free' : 'online']);
+    $adId = (int) $pdo->lastInsertId();
 
-    flash('pub_success', 'Your new advertisement has been submitted and is pending admin approval.');
+    /*
+     * A PAID package chosen here must take the advertiser to the payment, exactly as the public /advertise
+     * form does.
+     *
+     * It did not, and that was a hole in the middle of the product. This handler inserted the advert with
+     * `payment_status = "unpaid"` and `payment_method = "online"` and then redirected straight to the
+     * dashboard saying "submitted and pending admin approval" — so an advertiser who picked a premium
+     * package from their own portal was told their advert was in, was never shown a payment page, and no
+     * payment attempt was ever opened. The advert then sat in the admin queue unpaid, and since 7h-5 an
+     * unsettled advert cannot be approved either: it could never go live, for a reason nothing on screen
+     * explained.
+     *
+     * Two create paths for the same product, and only one of them collected the money.
+     */
+    if ($isFree) {
+        flash('pub_success', 'Your free advertisement has been submitted and is pending admin approval.');
+        redirect('/ad-manager?token=' . rawurlencode($token));
+    }
+
+    // Reload the row so the attempt is opened against what was actually written rather than what we meant
+    // to write, then hand the advertiser the same checkout the public form hands out.
+    $stmt = $pdo->prepare('SELECT * FROM ads WHERE id = ? LIMIT 1');
+    $stmt->execute([$adId]);
+    $newAd = $stmt->fetch();
+
+    if ($newAd) {
+        $attempt = AdPayments::startAttempt($newAd);
+        $_SESSION['ad_checkout_ref'] = $attempt['reference'];
+        redirect('/advertise/checkout?ref=' . urlencode($attempt['reference']));
+    }
+
+    // Nothing written means nothing to pay for; the dashboard is the honest place to land.
+    flash('pub_error', 'Your advertisement could not be created. Please try again.');
     redirect('/ad-manager?token=' . rawurlencode($token));
 });
 

@@ -2862,6 +2862,35 @@ PayHub documents all of it at `https://merchant.payhub.com.ng/api-reference.php`
 > URL has to be registered in the merchant dashboard. This makes the handler correct; it cannot make the
 > gateway call it.
 
+> **7h-12 shipped — the publisher portal never took the money.** *(Reported: "I selected the premium and it
+> did not show me the payment gateway.")*
+>
+> `POST /ad-manager` — the create-advert modal in the **advertiser's own dashboard** — inserted the advert
+> with `payment_method = 'online'` and `payment_status = 'unpaid'` and then redirected straight back to the
+> dashboard saying *"submitted and pending admin approval"*. **No payment page, and no payment attempt
+> opened.** So an advertiser who chose a premium package was told their advert was in, was never asked to
+> pay, and the advert sat in the admin queue unpaid — and since 7h-5 an unsettled advert **cannot be
+> approved** either, so it could never run, for a reason nothing on screen explained.
+>
+> **Two create paths for the same product, and only one of them collected the money.** The public
+> `/advertise` form opened an attempt via `AdPayments::startAttempt()` and redirected to the checkout; the
+> portal path did neither. It now does the same thing, by calling the same method. A free package still
+> submits and returns to the dashboard, and opens no attempt.
+>
+> **Verified: 14 assertions, 0 failures** — a premium package from the portal redirects to
+> `/advertise/checkout?ref=…`, exactly one attempt is opened and it is the reference the redirect names, the
+> advert is not paid before any money exists, the payment page renders for that reference and names the
+> advert, and it offers the no-JavaScript hosted route. A free package still goes back to the dashboard with
+> no attempt and no payment owed.
+>
+> **Not verified:** no real payment was made from this path either — the same standing gap as 7h-10 and
+> 7h-11. This makes the portal *offer* the payment; the money still needs one live test.
+>
+> **The pay button "not responding to clicks" is the same stale deployment, not a new fault.** The button is
+> `disabled` in the markup until `advertise.js` enables it, and that file is still 404 on the demo — so it
+> cannot respond. 7h-9 already made this non-fatal by rendering the hosted form visibly beneath it, which is
+> how the advertiser managed to pay at all.
+
 ### Decisions taken, and two worth confirming
 
 - **"Two failed attempts" is counted per advert**, not per publisher: the advert is what is being bought,
