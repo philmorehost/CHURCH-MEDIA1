@@ -129,6 +129,10 @@ try {
 
     // Two devotionals for one day would both be shown, so this key is doing real work.
     $check('devotionals', 'uniq_devotional_day', 3);
+    // The retry gate counts failed attempts for one advert, which is a lookup on exactly these two
+    // columns. A composite key is the easiest thing for a naive statement splitter to mangle, so it is
+    // checked rather than assumed.
+    $check('ad_payments', 'idx_ad_payment_attempt', 2);
 } catch (Throwable $e) {
     echo 'FAILED: ' . $e->getMessage() . "\n";
     $failed[] = 'the import threw';

@@ -2399,6 +2399,74 @@ class Database
                     CONSTRAINT `fk_news_author` FOREIGN KEY (`author_id`) REFERENCES `users`(`id`) ON DELETE SET NULL
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
             },
+
+            // The advertiser money path, part 2: one row per payment ATTEMPT.
+            //
+            // `ad_payments` was already a transaction log, but nothing ever wrote a second row to it and
+            // nothing recorded why a payment failed — so "this one has failed twice" was not a question the
+            // schema could answer. The retry rule the advertiser asked for (two failed online attempts, then
+            // bank transfer only) needs a row per attempt, because a single row per advert can only ever
+            // hold the latest outcome, and a status column cannot count.
+            //
+            // `attempt_no` on the attempt is the authoritative number; `ads.payment_attempts` is a cache of
+            // it, written by the one function that creates an attempt. Two records of the same fact that are
+            // never compared are two records that will disagree, so the harness asserts they agree after
+            // every branch rather than trusting that they do.
+            //
+            // Note: the plan named a new `gateway_payload` column. It is deliberately NOT added —
+            // `gateway_response` already exists on this table and already holds exactly that, and a second
+            // column holding the same JSON would be one more thing to keep in step. The existing column is
+            // written instead.
+            '2026_44_ad_payment_attempts' => function (PDO $pdo): void {
+                self::addColumnIfMissing($pdo, 'ad_payments', 'attempt_no', 'INT NOT NULL DEFAULT 1', 'status');
+                self::addColumnIfMissing($pdo, 'ad_payments', 'failure_reason', 'VARCHAR(255) NULL', 'attempt_no');
+                self::addIndexIfMissing($pdo, 'ad_payments', 'idx_ad_payment_attempt', 'INDEX `idx_ad_payment_attempt` (`ad_id`, `status`)');
+
+                self::addColumnIfMissing($pdo, 'ads', 'payment_attempts', 'INT NOT NULL DEFAULT 0', 'payment_reference');
+                self::addColumnIfMissing($pdo, 'ads', 'rejection_reason', 'VARCHAR(500) NULL', 'status');
+                self::addColumnIfMissing($pdo, 'ads', 'rejected_at', 'DATETIME NULL', 'rejection_reason');
+                self::addColumnIfMissing($pdo, 'ads', 'resubmitted_at', 'DATETIME NULL', 'rejected_at');
+                self::addColumnIfMissing($pdo, 'ads', 'revision_count', 'INT NOT NULL DEFAULT 0', 'resubmitted_at');
+
+                // Backfills the counter for adverts that already have attempt rows.
+                //
+                // Guarded on BOTH `payment_attempts = 0` and the existence of a row, which is what makes it
+                // safe in a file that re-runs on every single request: it can only ever fire for an advert
+                // that has attempts recorded but no counter, which is the pre-migration state and nothing
+                // else. Unguarded, it would silently reset the live counter back to the row count on every
+                // page load — and the retry gate reads that counter.
+                try {
+                    $pdo->exec('UPDATE ads a SET a.payment_attempts = (SELECT COUNT(*) FROM ad_payments p WHERE p.ad_id = a.id)'
+                        . ' WHERE a.payment_attempts = 0 AND EXISTS (SELECT 1 FROM ad_payments p2 WHERE p2.ad_id = a.id)');
+                } catch (Throwable $e) {
+                    // ad_payments missing on a half-built install — there is nothing to count from.
+                }
+            },
+
+            // The `site_title` column default carried a specific church's name.
+            //
+            // `installer/schema.sql` — the file that builds a FRESH install — has always said
+            // `'Church Media'`, and the live column said something else entirely, so the two files
+            // disagreed and only one of them could be right. The neutral one is right: a column default is
+            // what a church gets when nothing has set a title, and a product that falls back to one
+            // congregation's name labels somebody else's church with it. The installer always writes a
+            // real title, so nothing in use changes — this exists so that "a fresh install and an upgraded
+            // one agree" can be an assertion instead of a shrug.
+            //
+            // Guarded on the current value, because this file re-runs on every request and an unguarded
+            // ALTER is an ALTER on every page load.
+            '2026_45_settings_title_default' => function (PDO $pdo): void {
+                try {
+                    $current = $pdo->query("SELECT COLUMN_DEFAULT FROM information_schema.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'settings' AND COLUMN_NAME = 'site_title'")->fetchColumn();
+                    if ($current !== null && (string) $current !== 'Church Media') {
+                        $pdo->exec("ALTER TABLE `settings` ALTER COLUMN `site_title` SET DEFAULT 'Church Media'");
+                    }
+                } catch (Throwable $e) {
+                    // A server that cannot ALTER a column default leaves a cosmetic difference, not a broken
+                    // site, so it is not worth failing a page render over.
+                }
+            },
         ];
     }
 
@@ -2481,7 +2549,19 @@ class Database
         }
     }
 
-    /** Splits SQL into statements, honouring '...' and `...` with '' / `` / \\ escapes. */
+    /**
+     * Splits SQL into statements, honouring '...', "..." and `...` with '' / "" / `` / \\ escapes.
+     *
+     * The double quote is a string delimiter in MySQL's default mode, and this did not honour it: it
+     * tracked only `'` and the backtick. The failure that exposed it was a `COMMENT "The church's own bank
+     * details, …"` — one apostrophe inside double quotes, which left the scanner inside a string for the
+     * rest of the file and produced a syntax error pointing at a column sixty-six lines further down.
+     *
+     * The reason the same construct already existed and worked (`COMMENT "'all' or comma-separated page
+     * paths"`) is luck rather than correctness: it contains TWO apostrophes, so the toggling cancelled out.
+     * An odd number of them — which is what ordinary prose produces — broke it. A permanent tool should not
+     * depend on that.
+     */
     private static function splitStatements(string $sql): array
     {
         $statements = [];
@@ -2493,7 +2573,7 @@ class Database
             if ($quote !== null) {
                 $buffer .= $char;
                 if ($char === $quote) {
-                    // MySQL escapes a quote inside a string by doubling it ('' or ``).
+                    // MySQL escapes a quote inside a string by doubling it ('' or ``)
                     if ($i + 1 < $length && $sql[$i + 1] === $quote) {
                         $buffer .= $sql[$i + 1];
                         $i++;
@@ -2506,7 +2586,7 @@ class Database
                 }
                 continue;
             }
-            if ($char === "'" || $char === '`') {
+            if ($char === "'" || $char === '"' || $char === '`') {
                 $quote = $char;
                 $buffer .= $char;
                 continue;

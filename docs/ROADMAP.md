@@ -2415,6 +2415,78 @@ PayHub documents all of it at `https://merchant.payhub.com.ng/api-reference.php`
 >   the gateway's docs show first), secret key missed. A mutation that only demanded the switch survived
 >   every assertion, because the harness had no half-configured case; it has one now.
 
+> **7h-2 shipped — the schema for the money path, and a much larger find underneath it.**
+>
+> **What shipped:** migration `2026_44_ad_payment_attempts` (mirrored into `installer/schema.sql`, because
+> a fresh install and an upgraded one have to agree): `ad_payments` gains **`attempt_no`** and
+> **`failure_reason`** plus an index on **`(ad_id, status)`**, and `ads` gains **`payment_attempts`**,
+> **`rejection_reason`**, **`rejected_at`**, **`resubmitted_at`** and **`revision_count`**. Ad-level state
+> stays `unpaid | pending_review | paid` — the *attempt* outcome lives on the attempt row, so "how many
+> times did this fail" is a count rather than a state machine. `cli/schema_check.php` now spot-checks the
+> new composite index, since a composite key is the easiest thing for a naive statement splitter to mangle.
+>
+> **One planned column was deliberately not added.** The plan called for a new `gateway_payload`;
+> `ad_payments.gateway_response` already exists and already holds exactly that. A second column with the
+> same JSON would be one more thing to keep in step, so the existing one is written instead.
+>
+> **The counter is a cache and the harness proves it.** `ads.payment_attempts` duplicates what
+> `COUNT(ad_payments)` would say. Two records of one fact that are never compared are two records that will
+> disagree, so the harness asserts the counter equals the attempt rows, that the backfill fills it from
+> existing rows, and — the important half — that **the backfill can never overwrite a counter the app has
+> counted**. That guard is load-bearing: this migration re-runs on *every single request*.
+>
+> ### ⚠️ The real find: `installer/schema.sql` had drifted from the migration chain on **eleven tables**
+>
+> The promise this stage's plan makes is "migration **and** `installer/schema.sql`, both, or a fresh install
+> diverges from an upgraded one". Nothing checked it, so it had diverged — and by more than the index this
+> stage added. Comparing a database built from `schema.sql` against the migrated one, column by column:
+>
+> - **`settings` was missing twenty columns** — the whole `payhub_*` and `manual_payment_*` group that this
+>   very stage depends on, `ad_display_frequency`, `free_ad_frequency`, and **all thirteen `wa_*` columns**
+>   for the official WhatsApp Cloud API. A fresh install could not have configured online payment or
+>   WhatsApp without the migration chain quietly repairing it on the first request.
+> - **`device_tokens.phone`, `newsletter_subscribers.phone`, `newsletter_subscribers.sms_consent`** —
+>   missing.
+> - **Three indexes** — `ads.idx_ad_tenant`, `members.idx_member_plan`, and the reading-plan index. A
+>   missing index is the quietest divergence there is: everything works, and the fresh install is simply
+>   slower for ever.
+> - **`settings.site_title`'s default** was this congregation's own name on the upgraded database and
+>   `'Church Media'` in the file. The file was right — a product that falls back to one church's name
+>   labels somebody else's church with it — so migration `2026_45_settings_title_default` converges the
+>   live default onto the neutral one, guarded so it cannot re-ALTER on every request.
+>
+> **And the harness that found all this found a bug in a permanent tool on the way.** `Database::splitStatements()`
+> — which splits `schema.sql` into statements before importing it — honoured `'` and the backtick as string
+> delimiters but **not the double quote**, which MySQL also treats as one. The failure it caused was a
+> `COMMENT "The church's own bank details, …"`: one apostrophe inside double quotes left the scanner
+> "inside a string" for the rest of the file and produced a syntax error pointing at a column sixty-six
+> lines further down. The same construct already existed in the file and worked — `COMMENT "'all' or …"`
+> — purely by luck, because its two apostrophes cancelled out. The splitter now honours `"`, which is the
+> correct rule rather than the one that happened to work.
+>
+> **Verified (7h-2): 37 assertions, 0 failures**, and **twelve mutations, twelve caught:** schema.sql
+> dropping `idx_ad_tenant` (2 failures), dropping `attempt_no` (2), truncating `rejection_reason` (2),
+> dropping `device_tokens.phone` (1), dropping the WhatsApp access token (1), shipping one church's name as
+> the default site title (1), dropping the reading-plan index (1), the migration no longer creating
+> `rejection_reason` (7), `attempt_no` defaulting to zero (4), the retry index never being created (1), the
+> backfill losing its guard so it resets the counter on every request (1), and the statement splitter
+> forgetting about double-quoted strings (crash).
+>
+> **The assertion that makes the migration testable at all:** everything else in this harness only proves a
+> column is *there* — and on an install that has already run the migration, it would be there whatever the
+> migration now says, because `addColumnIfMissing` never touches a column that exists. So the harness
+> **drops the seven columns and re-runs the migration chain**, asserting they come back with exactly the
+> specified type, nullability and default. Without that, a migration whose definition was wrong would pass
+> every other assertion and fail on the next fresh install. It is destructive and is why the harness is a
+> throwaway that belongs to a development database only.
+>
+> **Not verified: no fresh install has been performed on a real server.** What is proven is that a scratch
+> database built from `schema.sql` is now identical to the migrated one, column for column and index for
+> index, and that the migration chain rebuilds its own columns correctly. Indexes are compared by the
+> columns they cover rather than by name, because MySQL names an index after the column for an inline
+> `FOREIGN KEY` and after the constraint for a named one — nine of those, and comparing names would have
+> buried the one that was real.
+
 ### Decisions taken, and two worth confirming
 
 - **"Two failed attempts" is counted per advert**, not per publisher: the advert is what is being bought,

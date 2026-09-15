@@ -65,6 +65,13 @@ CREATE TABLE IF NOT EXISTS `settings` (
   `app_download_url` VARCHAR(500) NULL,
   `app_download_pages` TEXT NULL COMMENT "'all' or comma-separated page paths",
   `app_redirect_mode` VARCHAR(12) NOT NULL DEFAULT 'off' COMMENT 'off | interstitial | force',
+  `payhub_enabled` TINYINT(1) NOT NULL DEFAULT 0,
+  `payhub_public_key` VARCHAR(255) NULL,
+  `payhub_secret_key` VARCHAR(255) NULL COMMENT 'Server-side only; never rendered and never sent to a browser',
+  `manual_payment_enabled` TINYINT(1) NOT NULL DEFAULT 1,
+  `manual_payment_instructions` TEXT NULL COMMENT "The church's own bank details, shown to an advertiser paying by transfer",
+  `ad_display_frequency` VARCHAR(20) NOT NULL DEFAULT '5_min',
+  `free_ad_frequency` VARCHAR(20) NOT NULL DEFAULT 'once_daily',
   `footer_about_text` TEXT NULL,
   `meta_description` VARCHAR(255) NULL,
   `bible_source` VARCHAR(20) NOT NULL DEFAULT 'keyless' COMMENT 'keyless or api_bible',
@@ -103,6 +110,19 @@ CREATE TABLE IF NOT EXISTS `settings` (
   `devotional_push_enabled` TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'Whether the daily devotional notification is sent',
   `reading_reminder_enabled` TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'Whether the daily reading-plan reminder is sent',
   `roster_reminder_enabled` TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'Whether rota notices and day-before reminders are emailed',
+  `wa_enabled` TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'WhatsApp Cloud API, official only',
+  `wa_phone_number_id` VARCHAR(40) NULL,
+  `wa_business_account_id` VARCHAR(40) NULL,
+  `wa_access_token` TEXT NULL COMMENT 'Encrypted at rest; never logged or rendered in full',
+  `wa_app_secret` TEXT NULL COMMENT 'Encrypted at rest; used to sign the webhook payload',
+  `wa_verify_token` VARCHAR(120) NULL COMMENT 'Echoed back during Meta webhook verification',
+  `wa_display_name` VARCHAR(60) NULL,
+  `wa_default_language` VARCHAR(12) NOT NULL DEFAULT 'en',
+  `wa_log_retention_days` INT NOT NULL DEFAULT 60,
+  `wa_daily_message_cap` INT NOT NULL DEFAULT 250,
+  `wa_send_delay_ms` INT NOT NULL DEFAULT 250,
+  `wa_batch_size` INT NOT NULL DEFAULT 50,
+  `wa_allow_unit_broadcast` TINYINT(1) NOT NULL DEFAULT 1,
   `timezone` VARCHAR(64) NOT NULL DEFAULT 'Africa/Lagos',
   `default_locale` VARCHAR(12) NOT NULL DEFAULT 'en' COMMENT 'Catalogue code from lang/, e.g. en or yo',
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -537,6 +557,8 @@ CREATE TABLE IF NOT EXISTS `prayer_participants` (
 CREATE TABLE IF NOT EXISTS `newsletter_subscribers` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `email` VARCHAR(150) NOT NULL UNIQUE,
+  `phone` VARCHAR(32) NULL,
+  `sms_consent` TINYINT(1) NOT NULL DEFAULT 0,
   `is_active` TINYINT(1) NOT NULL DEFAULT 1,
   `subscribed_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `org_unit_id` INT NULL,
@@ -856,7 +878,12 @@ CREATE TABLE IF NOT EXISTS `ads` (
   `payment_method` ENUM('online','manual','free') NOT NULL DEFAULT 'free',
   `payment_proof_path` VARCHAR(255) NULL,
   `payment_reference` VARCHAR(100) NULL,
+  `payment_attempts` INT NOT NULL DEFAULT 0 COMMENT 'Cache of how many ad_payments attempts exist; ad_payments.attempt_no is authoritative',
   `status` ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+  `rejection_reason` VARCHAR(500) NULL COMMENT 'Why a reviewer rejected it; shown to the advertiser',
+  `rejected_at` DATETIME NULL,
+  `resubmitted_at` DATETIME NULL,
+  `revision_count` INT NOT NULL DEFAULT 0 COMMENT 'How many times it has been edited and sent back for review',
   `start_at` DATETIME NULL,
   `expires_at` DATETIME NULL,
   `views_count` INT NOT NULL DEFAULT 0,
@@ -864,7 +891,8 @@ CREATE TABLE IF NOT EXISTS `ads` (
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (`publisher_id`) REFERENCES `ad_publishers`(`id`) ON DELETE CASCADE,
-  INDEX `idx_ad_status_expires` (`status`, `start_at`, `expires_at`, `target_platform`)
+  INDEX `idx_ad_status_expires` (`status`, `start_at`, `expires_at`, `target_platform`),
+  INDEX `idx_ad_tenant` (`tenant_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `ad_events` (
@@ -887,11 +915,14 @@ CREATE TABLE IF NOT EXISTS `ad_payments` (
   `payment_method` ENUM('online','manual','free') NOT NULL,
   `reference` VARCHAR(100) NOT NULL,
   `status` ENUM('pending','success','failed') NOT NULL DEFAULT 'pending',
+  `attempt_no` INT NOT NULL DEFAULT 1 COMMENT 'Which attempt at this advert this row records; the authoritative count',
+  `failure_reason` VARCHAR(255) NULL COMMENT 'Why the gateway declined it, as reported to the advertiser',
   `proof_path` VARCHAR(255) NULL,
-  `gateway_response` TEXT NULL,
+  `gateway_response` TEXT NULL COMMENT 'The gateway payload, verbatim, for a dispute years later',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (`ad_id`) REFERENCES `ads`(`id`) ON DELETE CASCADE,
-  FOREIGN KEY (`publisher_id`) REFERENCES `ad_publishers`(`id`) ON DELETE CASCADE
+  FOREIGN KEY (`publisher_id`) REFERENCES `ad_publishers`(`id`) ON DELETE CASCADE,
+  INDEX `idx_ad_payment_attempt` (`ad_id`, `status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `testimonies` (
@@ -985,6 +1016,12 @@ CREATE TABLE IF NOT EXISTS `members` (
   INDEX `idx_member_unit` (`org_unit_id`),
   INDEX `idx_member_verify` (`verify_token_hash`),
   INDEX `idx_member_reset` (`reset_token_hash`),
+  -- The index for the foreign key migration 2026_30 adds. The CONSTRAINT cannot be declared here —
+  -- `reading_plans` is created lower down this one-shot file than `members` is — but the INDEX can,
+  -- because an index has no ordering dependency. InnoDB then reuses it for the constraint rather than
+  -- building a second one, so a fresh install and an upgraded one end up identical instead of one of
+  -- them quietly carrying a table scan on every reading-plan lookup.
+  INDEX `idx_member_plan` (`reading_plan_id`),
   FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -1003,6 +1040,7 @@ CREATE TABLE IF NOT EXISTS `device_tokens` (
   `org_unit_id` INT NULL,
   `tenant_id` INT NOT NULL DEFAULT 0 COMMENT '0 = no church assigned; otherwise Tenant::id(). The church whose app this device belongs to.',
   `member_id` INT NULL COMMENT 'NULL = anonymous device, no stated preferences',
+  `phone` VARCHAR(32) NULL COMMENT 'Dial code + national number; what an SMS fallback would use',
   `user_agent` VARCHAR(255) NULL,
   `last_seen_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
