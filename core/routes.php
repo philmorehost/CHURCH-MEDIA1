@@ -754,12 +754,21 @@ $router->post('/payment/payhub/webhook', function () use ($loadAdByReference) {
 // The page that takes the money, on this site.
 $router->get('/advertise/checkout', function () use ($loadAdByReference) {
     $ref = trim((string) ($_GET['ref'] ?? ''));
-    $sessionRef = (string) ($_SESSION['ad_checkout_ref'] ?? '');
 
-    // Gated on the session that created the reference rather than on the reference alone. This is the one
-    // page on the site that starts a card payment, and a payment page reachable by anybody who is handed
-    // the URL is a payment page that will be.
-    if ($ref === '' || $sessionRef === '' || !hash_equals($sessionRef, $ref)) {
+    /*
+     * The REFERENCE is the credential here, not the session.
+     *
+     * This used to 404 unless the session that created the reference matched — and that is exactly what
+     * made the page disappear for the advertiser it was built for. A revisit, a restored tab, a link opened
+     * in another browser, or a session that expired between the form and the payment all produced a 404 on
+     * the one screen where somebody is trying to give the church money.
+     *
+     * `Payhub::reference()` is 16 hex characters from `random_bytes` — the same class of unguessable bearer
+     * token the publisher portal already accepts as the credential for a whole account. Holding it is the
+     * authorisation. What must NOT be reachable is a reference that resolves to no advert, and that is still
+     * a 404 below.
+     */
+    if ($ref === '') {
         http_response_code(404);
         render('404', [], true);
         return;
@@ -771,6 +780,9 @@ $router->get('/advertise/checkout', function () use ($loadAdByReference) {
         render('404', [], true);
         return;
     }
+
+    // Keep the session pointing at this attempt, so the hosted route and a retry agree with this page.
+    $_SESSION['ad_checkout_ref'] = $ref;
 
     // Already settled — a refresh, a back button, a bookmarked step. Sending them to the report is the
     // only answer that cannot take a second payment for an advert that is already paid for.
@@ -799,9 +811,9 @@ $router->post('/advertise/hosted', function () use ($loadAdByReference) {
     Csrf::requireValid();
 
     $ref = trim((string) ($_POST['ref'] ?? ''));
-    $sessionRef = (string) ($_SESSION['ad_checkout_ref'] ?? '');
 
-    if ($ref === '' || $sessionRef === '' || !hash_equals($sessionRef, $ref)) {
+    // Same rule as the page above: the reference is the credential. See the note there.
+    if ($ref === '') {
         http_response_code(404);
         render('404', [], true);
         return;
@@ -811,6 +823,8 @@ $router->post('/advertise/hosted', function () use ($loadAdByReference) {
     if ($ad === null || (string) $ad['payment_status'] === 'paid') {
         redirect('/advertise/return?ref=' . urlencode($ref));
     }
+
+    $_SESSION['ad_checkout_ref'] = $ref;
 
     $result = Payhub::initialize([
         'email' => (string) $ad['publisher_email'],
@@ -910,10 +924,15 @@ $router->post('/advertise/retry', function () use ($loadAdByReference) {
     Csrf::requireValid();
 
     $ref = trim((string) ($_POST['ref'] ?? ''));
-    $sessionRef = (string) ($_SESSION['ad_checkout_ref'] ?? '');
 
-    // The same session gate as the checkout page, for the same reason: this starts a payment.
-    if ($ref === '' || $sessionRef === '' || !hash_equals($sessionRef, $ref)) {
+    /*
+     * The same rule as the checkout page: the reference is the credential, not the session.
+     *
+     * This gate used to 404 on a session mismatch, so an advertiser whose session had changed could not
+     * retry a payment the report page had just offered them — on the page whose entire purpose is to let
+     * them try again. What must not be reachable is a reference that resolves to no advert, checked below.
+     */
+    if ($ref === '') {
         http_response_code(404);
         render('404', [], true);
         return;
