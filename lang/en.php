@@ -37,6 +37,7 @@ return [
     // The header navigation, grouped into dropdowns — see the $navTree comment in
     // views/partials/layout-open.php for why.
     'nav.home'               => 'Home',
+    'nav.news'               => 'News',
     'nav.media'              => 'Media',
     'nav.video_feed'         => 'Video Feed',
     'nav.media_gallery'      => 'Media Gallery',
@@ -81,6 +82,34 @@ return [
     'footer.search'          => 'Search',
     'footer.privacy'         => 'Privacy Policy',
     'footer.admin'           => 'Admin',
+
+    // News & blog — /news, /news/category/{slug} and /news/{slug}.
+    //
+    // `news.intro` takes the church name as a placeholder rather than being concatenated in the code,
+    // because "Announcements, stories and updates from X" is a different word order in most languages.
+    // `news.min_read` is one string rather than "min" and "read" with a number between them: the number's
+    // position moves, and a language may not use a plural form at all.
+    'news.eyebrow'           => 'News & Blog',
+    'news.title'             => 'News & Updates',
+    'news.intro'             => 'Announcements, stories and updates from :church.',
+    'news.all_categories'    => 'All',
+    'news.search_label'      => 'Search news',
+    'news.search_placeholder' => 'Search stories…',
+    'news.search_button'     => 'Search',
+    'news.lead_badge'        => 'Top story',
+    'news.read_more'         => 'Read story',
+    'news.min_read'          => ':count min read',
+    'news.by'                => 'By :name',
+    'news.updated'           => 'Updated :date',
+    'news.share'             => 'Share',
+    'news.share_url'         => 'Link to this story',
+    'news.related'           => 'More reading',
+    'news.older'             => 'Older',
+    'news.newer'             => 'Newer',
+    'news.breadcrumb'        => 'Breadcrumb',
+    'news.pagination'        => 'News pages',
+    'news.empty'             => 'Nothing has been published yet. Please check back soon.',
+    'news.no_results'        => 'No stories match “:q”.',
 
     // The pages a visitor sees when something has gone wrong — a dead link, too many requests, no
     // connection. They matter more than most: this is where somebody decides whether the site is broken

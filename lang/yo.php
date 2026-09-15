@@ -35,6 +35,7 @@ return [
     '__offered' => false,
 
     'nav.home'           => 'Ilé',
+    'nav.news'           => 'Ìròyìn',
     'nav.sermons'        => 'Ìwàásù',
     'nav.bible'          => 'Bíbélì Mímọ́',
     'nav.events'         => 'Ìṣẹ̀lẹ̀',

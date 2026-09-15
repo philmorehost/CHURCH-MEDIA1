@@ -2540,6 +2540,123 @@ OpenGraph, `NewsArticle` structured data, sitemap entries and a feed.
 > `connect-src 'self'` blocks — it reports that in the console and keeps working, and that is unverified for
 > the same reason.
 
+> **8c and 8d shipped — the public news pages, their SEO, and the feed.** `/news`, `/news/category/{slug}`,
+> `/news/{slug}` and `/news.xml` (`core/routes.php`); `views/news.php`, `views/news-detail.php`,
+> `views/news-feed.php`; `News::publishedCount()`; the nav entry, the footer link, the sitemap and the feed
+> alternate link; 21 new catalogue keys (English), including `nav.news`; and the styles, appended to
+> `site.css` rather than a stylesheet of their own so the news pages stay on the same design tokens as
+> everything else and cost no extra request on the pages that matter most for search.
+>
+> **The layout gained a small, general SEO surface**, because a story page needs things the other views did
+> not: `$metaCanonical`, `$metaOgType`, `$metaImageWidth`/`$metaImageHeight`, `$metaPublishedTime`,
+> `og:site_name`, and a `twitter:card` of `summary` when there is no image — a large card with no image
+> renders as a blank box. Every one of them has a default, so nothing that does not set them changed.
+>
+> **Two real defects were found by writing the tests, and both were live:**
+>
+> - **Search only looked at the headline and the standfirst.** `News::published()` has taken a `$search`
+>   since 8a, but `WHERE title LIKE ? OR excerpt LIKE ?` answers "nothing" to the most ordinary search there
+>   is — a reader looking for a word they remember from the middle of a story. The body is searched now, in
+>   `published()` and in `publishedCount()` clause for clause. It is a `LIKE` against a `MEDIUMTEXT` and
+>   therefore a scan, which is fine at the scale one church publishes and is the reason this is one box on
+>   one archive rather than a site-wide search.
+> - **The feed could never be cached.** `views/news-feed.php` set `lastBuildDate` to `date('r')`, so the
+>   document — and therefore its ETag — differed on every single request, and a reader that already had the
+>   feed re-downloaded it every time it polled. `Cache-Control` and `If-None-Match` were in place and
+>   useless. `lastBuildDate` is now the newest story's date, which is what the element actually means, and
+>   an empty feed claims no date rather than claiming to be new right now.
+>
+> **One deliberate non-use.** The other detail routes call `Analytics::recordEntityBySlug()`; the news route
+> does not. That helper loads its row *by slug with no church filter*, and news is the one content type here
+> whose slugs are explicitly not globally unique — two churches may both publish `announcement` — so its
+> `LIMIT 1` would be free to attribute a view to the other church's post. The story carries its own counter
+> instead (`News::countView()`), which is church-scoped and is the number an editor actually wants.
+>
+> **The SEO decisions, each of which is a decision rather than a default:**
+>
+> - **The canonical link carries the page number.** Without it every page of the archive tells a search
+>   engine it is page one, and pages two onwards are not indexed — which is exactly how the second page of a
+>   story list disappears.
+> - **A search result page is `noindex, follow`.** `/news?q=…` produces a thin near-duplicate list for every
+>   term anybody types; letting a crawler keep those buries the church's own stories under its own search
+>   pages.
+> - **The page count comes from `News::publishedCount()`, not `News::count('published')`.** The two differ
+>   on a story dated ahead of its time, and the difference is a "next" link onto an empty page.
+> - **`og:type` is `article` and `article:published_time` is emitted** on a story, which is what lets a
+>   shared link render as a piece of writing instead of a generic site card.
+> - **`og:image:width`/`:height` are the image's real dimensions**, not the hardcoded 1200×630 — a news
+>   photo is 1280px wide, and declaring the wrong pair of numbers is a claim about an image the crawler is
+>   about to measure.
+> - **The JSON-LD is encoded *without* `JSON_UNESCAPED_SLASHES`.** With it, a headline containing
+>   `</script>` closes the block and everything after it is parsed as page markup. With the default
+>   escaping that becomes `<\/script>`, which is the same string once a JSON parser has read it. The page's
+>   own escaping was tested with a headline of `Harness <script>alert(1)</script> & "quotes"`.
+> - **The archive leads with the featured story, and the lead is one of the twelve on the page.** The page
+>   fetches twelve and drops the lead, rather than fetching twelve *plus* a lead — the other way duplicates
+>   the twelfth story on page two, and is invisible for a church with four posts.
+>
+> **Verified: 160 assertions, 0 failures**, driving the real routes over HTTP against a real database with
+> **two churches**: the archive, its pagination, its search, the category archive, a story, the feed, the
+> sitemap, and every other public route re-checked for regressions. **Fifteen mutations, fifteen caught:**
+> the public lookup ignoring the publish date (1 failure), forgetting the status (1), not scoped to the
+> church (2), the archive list unscoped (5), the page count including a future-dated story (2), the lead
+> story ignoring the editor's featured flag (1), search no longer looking inside the body (1), the canonical
+> ignoring the view's override (1), a search page indexable (1), the lead not removed from the grid it heads
+> (3), the article image declaring no dimensions (1), the JSON-LD leaving slashes unescaped (3), the feed
+> not escaping its values (1), `lastBuildDate` back to the moment of the request (2), and the sitemap
+> dropping stories (1). A sixteenth was added after a real defect was found by accident — see below — and it
+> is caught too: **a page count that searches fewer columns than the list it counts (2 failures)**.
+>
+> ⚠️ **Those results come from more than one sweep pass.** A full pass costs about **two and a half minutes
+> per mutation** on this machine, because every HTTP request re-runs all sixty-four migrations at bootstrap,
+> so a pass over sixteen mutations is roughly forty minutes. The first pass caught fourteen of fifteen and
+> exposed the fixture blind spot below; the second, with that fix, caught every one of the fourteen it
+> reached and was then interrupted; a third, targeted run re-confirmed two of them including the newest.
+> **Every mutation has been caught by some pass**, but no single pass reached the end, and a full one is
+> worth doing when the bootstrap cost is not the bottleneck.
+>
+> ⚠️ **And a hazard that would have been committed as a real defect: killing a mutation run mid-flight leaves
+> the mutation in the working tree.** The runner restores a file only after its harness run returns, so
+> stopping it between those two points leaves the deliberate defect applied. The residue scan written for
+> that had checked a handful of mutation texts rather than all of them, so it reported the tree clean while
+> `core/News.php` was still missing `AND p.published_at <= NOW()` from the page count. What caught it was
+> running the harness, which failed two assertions and pointed straight at it. **Do not interrupt a sweep**,
+> or restore the file explicitly afterwards.
+>
+> ⚠️ **A third defect was mine rather than the product's, and is worth naming because the class is real:** an
+> edit that should have given `News::publishedCount()` the same body-search clause as `News::published()`
+> silently did not apply, and it was missed because a tool error was misread as belonging to a different
+> edit. The class comments claim those two methods mirror each other clause for clause; for one afternoon
+> they did not. A search matching stories only inside their bodies reported a total of zero, computed one
+> page, and left two matches past the last page a reader could click to — the list right and the pagination
+> wrong, which is the hardest combination to see by eye. Both now search the same three columns, and a
+> fixture exists that can tell them apart: fourteen seeded stories carry a word in their bodies that no title
+> or excerpt contains, so a counter searching fewer columns fails a test instead of quietly hiding results.
+>
+> ⚠️ **One mutation was invisible until the fixture was made harder — the same redundancy as 8a/8b.**
+> Deleting `status = 'published'` from the public lookup changed nothing, because `News::save()` leaves
+> `published_at` NULL on a draft, so the `published_at <= NOW()` clause hid it anyway. The two guards are
+> not independent for a normal draft. A draft is now given a publish date directly, which is the only row
+> where the status column is the sole thing between an unpublished story and its public URL — and the
+> harness now asserts that fixture property, so the day that line is dropped the suite says so instead of
+> passing for the wrong reason.
+>
+> **Two smaller things the tests forced, both worth recording:**
+>
+> - **The page count only becomes observable at exactly twelve visible stories.** One row too many — a
+>   draft, a story dated ahead of its time, or another church's post — and the archive grows a second page
+>   with nothing on it. The harness therefore pauses at exactly twelve and asserts that no page-two link
+>   and no pagination bar appear. At any other total an off-by-one in a counter is invisible.
+> - **An inline `onfocus="this.select()"` on the share field was written and then removed.** The public site
+>   sends `script-src 'self'`, which covers inline event handlers, so it would have been silently ignored —
+>   a copy control that did nothing. It is a plain read-only field now.
+>
+> **Not verified: still no browser.** The pages have never been looked at — not on a phone, not at any
+> width. What is proven is the markup, the tags, the structure, the filtering and the escaping. **The
+> design is unverified**, and the CSS in particular has never been rendered; the class vocabulary was taken
+> from the existing stylesheet so it inherits the site's look, but "looks modern" is a claim only a screen
+> can settle. Lighthouse has not been run, and no crawler has read the structured data.
+
 ### What cannot be verified here
 
 **No browser has been used.** The editor is verified by asserting the markup, the pinned version, the CSP

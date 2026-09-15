@@ -738,6 +738,36 @@ $router->get('/sermons/{slug}', function (array $params) {
     render('sermon-detail', ['slug' => $params['slug']]);
 });
 
+// ---------------------------------------------------------------------------
+// News & blog — the public half of the feature whose authoring screens live in admin/news.php.
+//
+// Registered in this order because the router takes the first pattern that matches: an archive URL has
+// two segments after `/news`, so `/news/{slug}` could never have swallowed it — but the day somebody
+// adds a second archive shape, the order is the thing that keeps it working.
+$router->get('/news', function () {
+    render('news', ['action' => 'index']);
+});
+
+$router->get('/news/category/{slug}', function (array $params) {
+    render('news', ['action' => 'category', 'slug' => (string) $params['slug']]);
+});
+
+$router->get('/news/{slug}', function (array $params) {
+    // Deliberately NOT Analytics::recordEntityBySlug(), which every other detail route uses. That helper
+    // loads its row by slug with no church filter, and news is the one content type here whose slugs are
+    // explicitly *not* globally unique — two churches may both publish `announcement`. Its `LIMIT 1` would
+    // then be free to attribute the view to the other church's post. The post carries its own counter
+    // instead (News::countView), which is church-scoped and is the number an editor actually wants.
+    render('news-detail', ['slug' => (string) $params['slug']]);
+});
+
+// The news feed, beside the podcast feed and shaped exactly like it: served straight to the output
+// rather than through render(), because its reader is a machine and the site's layout around the XML
+// would make the document invalid.
+$router->get('/news.xml', function () {
+    require VIEWS_PATH . '/news-feed.php';
+});
+
 $router->get('/series', function () {
     render('series');
 });

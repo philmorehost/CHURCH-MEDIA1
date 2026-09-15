@@ -3,6 +3,12 @@ declare(strict_types=1);
 /** @var string $metaTitle */
 /** @var string $metaDescription */
 /** @var string|null $metaRobots */
+/** @var string|null $metaCanonical */
+/** @var string|null $metaOgType */
+/** @var string|null $metaImage */
+/** @var int|null $metaImageWidth */
+/** @var int|null $metaImageHeight */
+/** @var string|null $metaPublishedTime */
 $s = settings();
 $path = rtrim((string) parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH), '/') ?: '/';
 $metaTitle ??= $s['site_title'];
@@ -28,6 +34,10 @@ $isLive = !empty($s['livestream_is_live']);
  */
 $navTree = [
     ['href' => '/', 'label' => t('nav.home'), 'children' => []],
+    // News sits on the bar itself rather than inside a dropdown. It is the one part of the site that
+    // arrives with a URL somebody typed, a link somebody shared, and a search result somebody tapped,
+    // so it has to be reachable from the front page in one click rather than two.
+    ['href' => '/news', 'label' => t('nav.news'), 'children' => []],
     [
         'href' => '/feed',
         'label' => t('nav.media'),
@@ -123,7 +133,18 @@ try {
 <title><?= e($metaTitle) ?><?= $metaTitle !== $s['site_title'] ? ' · ' . e($s['site_title']) : '' ?></title>
 <meta name="description" content="<?= e($metaDescription) ?>">
 <?php if (!empty($metaRobots)): ?><meta name="robots" content="<?= e($metaRobots) ?>"><?php endif; ?>
-<link rel="canonical" href="<?= e(baseUrl($path === '/' ? '' : ltrim($path, '/'))) ?>">
+<?php
+/*
+ * The canonical URL, derived from the path unless a view overrides it.
+ *
+ * The news archive is the reason `$metaCanonical` exists. Page 2 of `/news` is the same path with
+ * `?page=2`, and a canonical that dropped the query string would tell a search engine that every page
+ * of the archive is one page — which is how the second page of a story list ends up never indexed.
+ * A single canonical is still right for every other view, because nothing else here paginates.
+ */
+$canonical = $metaCanonical ?? baseUrl($path === '/' ? '' : ltrim($path, '/'));
+?>
+<link rel="canonical" href="<?= e($canonical) ?>">
 <?php
 // The icon is served by the /favicon.ico *route*, which reads the favicon saved in
 // Settings — there is deliberately no public/favicon.ico on disk, because the web
@@ -139,10 +160,17 @@ $faviconVersion = $faviconFile !== '' && is_file(UPLOADS_PATH . '/' . $faviconFi
     : 'default';
 ?>
 <link rel="icon" href="/favicon.ico?v=<?= e($faviconVersion) ?>">
+<meta property="og:site_name" content="<?= e($s['site_title']) ?>">
 <meta property="og:title" content="<?= e($metaTitle) ?>">
 <meta property="og:description" content="<?= e($metaDescription) ?>">
-<meta property="og:type" content="website">
-<meta property="og:url" content="<?= e(baseUrl($path)) ?>">
+<?php /* A story says it is a story. `article` is what lets a shared link render as a piece of writing
+         rather than a generic site card, and it is the only type that makes the published time below
+         meaningful to a crawler at all. */ ?>
+<meta property="og:type" content="<?= e($metaOgType ?? 'website') ?>">
+<meta property="og:url" content="<?= e($canonical) ?>">
+<?php if (!empty($metaPublishedTime)): ?>
+  <meta property="article:published_time" content="<?= e($metaPublishedTime) ?>">
+<?php endif; ?>
 <?php
 // og:image prefers a generated share card (views set $metaImage for that), then
 // the church logo. The generated card is what makes a WhatsApp share show a
@@ -151,13 +179,24 @@ $ogImage = $metaImage ?? null;
 if (!$ogImage && ($s['logo_path'] ?? null)) {
     $ogImage = uploadUrl($s['logo_path']);
 }
+
+// A view that knows the image's real size passes it in. A news photo is 1280px wide, not 1200 —
+// declaring the wrong pair of numbers is a claim about an image the crawler is about to measure.
+$ogWidth = (int) ($metaImageWidth ?? 0);
+$ogHeight = (int) ($metaImageHeight ?? 0);
+if ($ogWidth < 1) { $ogWidth = 1200; }
+if ($ogHeight < 1) { $ogHeight = 630; }
 ?>
 <?php if ($ogImage): ?>
   <meta property="og:image" content="<?= e($ogImage) ?>">
-  <meta property="og:image:width" content="1200">
-  <meta property="og:image:height" content="630">
+  <meta property="og:image:width" content="<?= $ogWidth ?>">
+  <meta property="og:image:height" content="<?= $ogHeight ?>">
+  <meta property="og:image:alt" content="<?= e($metaTitle) ?>">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:image" content="<?= e($ogImage) ?>">
+<?php else: ?>
+  <?php /* Without an image a large card renders as a blank box. */ ?>
+  <meta name="twitter:card" content="summary">
 <?php endif; ?>
 <meta name="theme-color" content="#0a0912">
 <?php /*
@@ -177,6 +216,7 @@ if (!$ogImage && ($s['logo_path'] ?? null)) {
 <?php /* Lets a podcast app find the feed from any page, which is how a listener who lands on the
          website ends up subscribing instead of having to be sent the address. */ ?>
 <link rel="alternate" type="application/rss+xml" title="Podcast" href="<?= e(baseUrl('/podcast.xml')) ?>">
+<link rel="alternate" type="application/rss+xml" title="News" href="<?= e(baseUrl('/news.xml')) ?>">
 <link rel="stylesheet" href="<?= asset('css/site.css') ?>">
 <script type="application/ld+json"><?= json_encode([
     '@context' => 'https://schema.org',

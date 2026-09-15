@@ -217,6 +217,41 @@ final class News
         return (int) $stmt->fetchColumn();
     }
 
+    /**
+     * How many posts `published()` would return, so a page count cannot disagree with the pages.
+     *
+     * Deliberately not `count('published')`. That one is the admin count and ignores `published_at`, so a
+     * post dated ahead of its time is counted there and not here — and a page count built from it would
+     * offer a reader a "next" link onto an empty page. Two methods that answer the same question is a smell;
+     * two methods that answer it differently is a bug, so this one mirrors `published()` clause for clause.
+     */
+    public static function publishedCount(?int $categoryId = null, string $search = ''): int
+    {
+        $sql = 'SELECT COUNT(*) FROM news_posts p WHERE p.tenant_id = ? AND p.status = "published" AND p.published_at <= NOW()';
+        $params = [self::tenantId()];
+
+        if ($categoryId !== null) {
+            $sql .= ' AND p.category_id = ?';
+            $params[] = $categoryId;
+        }
+        if (trim($search) !== '') {
+            // Clause for clause with `published()` — see the note there about why the body is searched.
+            // This is not tidiness: a counter that searched less than its list would under-report the
+            // total, and the page number computed from it would leave matching stories unreachable —
+            // they would exist in the query and be past the last page a reader can click to.
+            $sql .= ' AND (p.title LIKE ? OR p.excerpt LIKE ? OR p.body LIKE ?)';
+            $like = '%' . trim($search) . '%';
+            $params[] = $like;
+            $params[] = $like;
+            $params[] = $like;
+        }
+
+        $stmt = self::db()->prepare($sql);
+        $stmt->execute($params);
+
+        return (int) $stmt->fetchColumn();
+    }
+
     /** One post, scoped to this church. The loader the admin screens must use before acting on an id. */
     public static function find(int $id): ?array
     {
@@ -259,8 +294,14 @@ final class News
             $params[] = $categoryId;
         }
         if (trim($search) !== '') {
-            $sql .= ' AND (p.title LIKE ? OR p.excerpt LIKE ?)';
+            // The body is searched, not only the headline and the standfirst. A reader looking for a
+            // story they half remember is looking for a word from the middle of it, and a search that
+            // answers "nothing" to a question this site can plainly answer is worse than no search box.
+            // It is a LIKE against a MEDIUMTEXT and therefore a scan — which is fine at the scale one
+            // church publishes, and is the reason this is a box on the news archive only.
+            $sql .= ' AND (p.title LIKE ? OR p.excerpt LIKE ? OR p.body LIKE ?)';
             $like = '%' . trim($search) . '%';
+            $params[] = $like;
             $params[] = $like;
             $params[] = $like;
         }

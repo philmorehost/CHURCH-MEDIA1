@@ -728,3 +728,232 @@ select option:disabled{color:var(--ink-faint);}
   .app-banner__text small{ display:none; }
   .app-banner__cta{ font-size:11px; padding:9px 11px; }
 }
+
+/* ---------------------------------------------------------------------------
+   News & blog — /news, /news/category/{slug}, /news/{slug}
+
+   Kept in the site stylesheet rather than a file of its own so the news pages
+   stay inside the same design tokens as everything else: the dark ground, the
+   gold accent, the serif headings. A separate stylesheet would be one more
+   request on the pages that matter most for search, and it would drift.
+
+   Three shapes here:
+     - the archive head and its filter row,
+     - the lead story, a two-column card that collapses to one on a phone,
+     - the reading page, deliberately narrow (68 characters is what a line of
+       body text can hold before the eye loses its place on the way back).
+   --------------------------------------------------------------------------- */
+
+.news-archive{padding-top:56px;}
+.news-title{font-size:clamp(30px,5vw,46px);}
+
+/* Breadcrumbs. Quiet on purpose: they are navigation for a visitor who is already lost, not a
+   decoration for one who is not. */
+.news-crumbs{
+  display:flex; flex-wrap:wrap; align-items:center; gap:8px;
+  font-size:13px; color:var(--ink-faint); margin-bottom:22px;
+}
+.news-crumbs a{color:var(--ink-faint);}
+.news-crumbs a:hover{color:var(--gold-soft);}
+.news-crumbs span[aria-current]{color:var(--ink-dim);}
+
+/* The filter row. Chips on the left, search on the right, and both wrap rather than overlap when a
+   church has six categories and a narrow window. */
+.news-tools{
+  display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between;
+  gap:18px; margin-bottom:34px;
+}
+.news-chips{justify-content:flex-start; margin-bottom:0;}
+.news-chips .chip{display:inline-flex; align-items:center; gap:7px;}
+.news-chip-count{
+  font-size:11px; font-weight:700; color:var(--ink-faint);
+  background:#ffffff0f; border-radius:999px; padding:1px 7px; min-width:20px; text-align:center;
+}
+.news-chips .chip.active .news-chip-count{color:var(--gold-soft); background:#e8b95f22;}
+
+.news-search{display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
+/* The label is for a screen reader: a magnifier and a placeholder carry no meaning to software, and a
+   visible "Search news" beside a box that says "Search stories…" says it twice. */
+.news-search-label{
+  position:absolute; width:1px; height:1px; padding:0; margin:-1px;
+  overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0;
+}
+.news-search input[type="search"]{
+  background:var(--panel-solid); border:1px solid var(--border-soft); color:var(--ink);
+  border-radius:999px; padding:9px 16px; font-size:13.5px; font-family:var(--sans); min-width:190px;
+}
+.news-search input[type="search"]:focus{outline:none; border-color:var(--gold);}
+.news-search input[type="search"]::placeholder{color:var(--ink-faint);}
+
+/* ---- The lead story ---- */
+
+.news-lead{
+  display:grid; grid-template-columns:1.15fr 1fr; gap:0;
+  background:linear-gradient(135deg,#181530,#141126);
+  border:1px solid var(--border-soft); border-radius:var(--radius);
+  overflow:hidden; margin-bottom:44px;
+  transition:border-color .3s ease;
+}
+.news-lead:hover{border-color:#e8b95f44;}
+.news-lead-media{display:block; min-height:260px; background:var(--bg-2); position:relative;}
+.news-lead-media img{width:100%; height:100%; object-fit:cover;}
+.news-lead-body{padding:34px 34px 30px; display:flex; flex-direction:column; align-items:flex-start; gap:12px;}
+.news-lead-title{font-size:clamp(24px,3.2vw,32px); margin:0;}
+.news-lead-title a{color:var(--ink);}
+.news-lead-title a:hover{color:var(--gold-soft);}
+.news-lead-text{color:var(--ink-dim); font-size:15px; margin:0;}
+
+.news-flag{
+  text-transform:uppercase; letter-spacing:.14em; font-size:10.5px; font-weight:800;
+  color:#1a1530; background:linear-gradient(135deg,var(--gold-soft),var(--gold));
+  border-radius:999px; padding:5px 12px;
+}
+
+/* ---- The category label, on both the card and the article ---- */
+
+.news-pill{
+  display:inline-block; font-size:11.5px; font-weight:700; letter-spacing:.04em;
+  color:var(--gold-soft); background:var(--gold-dim);
+  border:1px solid #e8b95f33; border-radius:999px; padding:4px 12px;
+}
+a.news-pill:hover{background:#e8b95f33;}
+
+.news-meta{
+  display:flex; align-items:center; flex-wrap:wrap; gap:8px;
+  font-size:12.5px; color:var(--ink-faint);
+}
+
+/* ---- The grid of cards ---- */
+
+.news-grid{align-items:stretch;}
+.news-card{
+  display:flex; flex-direction:column;
+  background:var(--panel); border:1px solid var(--border-soft); border-radius:var(--radius);
+  overflow:hidden; transition:transform .3s ease, border-color .3s ease, box-shadow .3s ease;
+}
+.news-card:hover{
+  transform:translateY(-4px); border-color:#e8b95f44;
+  box-shadow:0 18px 44px -22px #000000cc;
+}
+.news-card-media{display:block; aspect-ratio:16/9; background:var(--bg-2); overflow:hidden;}
+.news-card-media img{width:100%; height:100%; object-fit:cover; transition:transform .5s ease;}
+.news-card:hover .news-card-media img{transform:scale(1.04);}
+.news-card-body{padding:22px 22px 24px; display:flex; flex-direction:column; align-items:flex-start; gap:10px; flex:1;}
+.news-card-title{font-size:18.5px; margin:0; line-height:1.3;}
+.news-card-title a{color:var(--ink);}
+.news-card-title a:hover{color:var(--gold-soft);}
+.news-card-text{color:var(--ink-dim); font-size:14px; margin:0; line-height:1.6;}
+.news-card-body .news-meta{margin-top:auto; padding-top:8px;}
+
+/* The placeholder for a story with no photo. A gradient rather than a broken icon: a church that has
+   not been sent a picture yet should not be advertising that fact on its front page. */
+.news-blank{
+  display:block; width:100%; height:100%;
+  background:linear-gradient(135deg,#1d1938,#141126 60%,#1a1630);
+  position:relative;
+}
+.news-blank::after{
+  content:""; position:absolute; inset:0;
+  background:radial-gradient(circle at 30% 25%, #e8b95f1f, transparent 60%);
+}
+
+.news-gap{color:var(--ink-faint); align-self:center; padding:0 2px;}
+.news-pagination{flex-wrap:wrap; align-items:center;}
+
+/* A keyboard user has to be able to see where they are. The card is one big target and the title link
+   inside it is the real one, so the ring goes on the link rather than on the whole card. */
+.news-card a:focus-visible,
+.news-lead a:focus-visible,
+.news-crumbs a:focus-visible{outline:2px solid var(--gold); outline-offset:3px; border-radius:6px;}
+
+/* ---- The reading page ---- */
+
+.news-article{padding:56px 0 8px;}
+.news-article-inner{max-width:760px;}
+.news-article-head{text-align:center; margin-bottom:32px;}
+.news-article-head .news-pill{margin-bottom:14px;}
+.news-article-title{font-size:clamp(30px,5vw,46px); letter-spacing:-.01em; margin:0 0 16px;}
+.news-article-standfirst{color:var(--ink-dim); font-size:18px; line-height:1.65; margin:0 0 18px;}
+.news-article-meta{justify-content:center;}
+
+.news-article-figure{
+  margin:0 0 36px; border-radius:var(--radius); overflow:hidden;
+  border:1px solid var(--border-soft); background:var(--bg-2);
+}
+.news-article-figure img{width:100%; height:auto;}
+
+/* Body copy. The inherited styles stop at headings and paragraphs, so everything a rich-text editor
+   can produce — lists, quotes, tables, figures, code — is styled here rather than left at browser
+   defaults, which on a dark background means black text on a black box. */
+.news-body{font-size:17px; line-height:1.85; color:var(--ink-dim);}
+.news-body > *:first-child{margin-top:0;}
+.news-body h2{font-size:clamp(22px,3vw,29px); color:var(--ink); margin:38px 0 14px;}
+.news-body h3{font-size:clamp(19px,2.4vw,23px); color:var(--ink); margin:32px 0 12px;}
+.news-body h4{font-size:17px; color:var(--ink); margin:26px 0 10px;}
+.news-body p{margin:0 0 20px;}
+.news-body a{color:var(--gold-soft); text-decoration:underline; text-underline-offset:2px;}
+.news-body a:hover{color:var(--gold);}
+.news-body strong,.news-body b{color:var(--ink);}
+.news-body ul,.news-body ol{margin:0 0 20px; padding-left:24px;}
+.news-body li{margin-bottom:8px;}
+.news-body blockquote{
+  margin:26px 0; padding:4px 0 4px 22px; border-left:3px solid var(--gold);
+  font-family:var(--serif); font-style:italic; font-size:19px; color:var(--ink);
+}
+.news-body blockquote p:last-child{margin-bottom:0;}
+.news-body img{border-radius:16px; margin:26px 0; height:auto;}
+.news-body figure{margin:26px 0;}
+.news-body figure img{margin:0;}
+.news-body figcaption{color:var(--ink-faint); font-size:13px; text-align:center; padding-top:10px;}
+.news-body hr{border:0; border-top:1px solid var(--border-soft); margin:34px 0;}
+.news-body code{
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.9em;
+  background:#ffffff0f; border-radius:6px; padding:2px 6px; color:var(--ink);
+}
+.news-body pre{
+  background:#0d0b18; border:1px solid var(--border-soft); border-radius:14px;
+  padding:16px 18px; overflow-x:auto; margin:0 0 22px;
+}
+.news-body pre code{background:none; padding:0; font-size:13.5px; line-height:1.6;}
+/* A table from the editor can be wider than a phone. It scrolls rather than pushing the whole page
+   sideways, which is what an unstyled table does. */
+.news-body table{
+  width:100%; border-collapse:collapse; margin:0 0 22px;
+  font-size:15px; display:block; overflow-x:auto; white-space:nowrap;
+}
+.news-body th,.news-body td{border:1px solid var(--border-soft); padding:10px 14px; text-align:left;}
+.news-body th{background:#ffffff0a; color:var(--ink); font-weight:700;}
+
+.news-updated{color:var(--ink-faint); font-size:13px; margin:26px 0 0; font-style:italic;}
+
+.news-share{
+  display:flex; flex-wrap:wrap; align-items:center; gap:10px;
+  margin-top:36px; padding-top:24px; border-top:1px solid var(--border-soft);
+}
+.news-share-label{
+  text-transform:uppercase; letter-spacing:.12em; font-size:11px; font-weight:700; color:var(--ink-faint);
+}
+.news-share-url{
+  flex:1 1 200px; min-width:0;
+  background:var(--panel-solid); border:1px solid var(--border-soft); color:var(--ink-faint);
+  border-radius:999px; padding:9px 16px; font-size:12.5px; font-family:var(--sans);
+}
+.news-share-url:focus{outline:none; border-color:var(--gold); color:var(--ink-dim);}
+
+.news-back{margin-top:28px; text-align:center;}
+.news-related{border-top:1px solid var(--border-soft); padding-top:56px;}
+
+@media (max-width:900px){
+  .news-lead{grid-template-columns:1fr;}
+  .news-lead-media{aspect-ratio:16/9; min-height:0;}
+  .news-lead-body{padding:26px 24px 28px;}
+  .news-tools{justify-content:flex-start;}
+}
+@media (max-width:620px){
+  .news-article{padding-top:40px;}
+  .news-article-standfirst{font-size:16.5px;}
+  .news-body{font-size:16px;}
+  .news-search{width:100%;}
+  .news-search input[type="search"]{flex:1;}
+  .news-share-url{flex:1 1 100%;}
+}

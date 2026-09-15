@@ -69,6 +69,7 @@ if ($langQuery !== '') {
       </div>
       <div>
         <h4><?= e(t('footer.explore')) ?></h4>
+        <a href="/news"><?= e(t('nav.news')) ?></a>
         <a href="/feed"><?= e(t('footer.media_feed')) ?></a>
         <a href="/events"><?= e(t('footer.events')) ?></a>
         <a href="/sermons"><?= e(t('footer.sermons')) ?></a>
