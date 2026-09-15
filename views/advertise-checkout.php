@@ -64,7 +64,25 @@ if ($inlineReady && !empty($ad['id'])) {
         if (!empty($initRes['authorization_url'])) {
             $authorizationUrl = (string) $initRes['authorization_url'];
         }
-    } catch (Throwable $e) {}
+
+        /*
+         * Store the reference the GATEWAY minted for this attempt.
+         *
+         * PayHub ignores the reference we send and invents its own, so this is the only name the payment can
+         * be asked about afterwards. Written here, on the page that shows the checkout, because this is the
+         * transaction the payment window is about to charge — verifying anything else is how a completed
+         * payment came to be reported as "The reference not found" to an advertiser who had already paid.
+         *
+         * Last write wins, deliberately: if the page is reloaded before payment the newest reference is the
+         * one the visible window is using.
+         */
+        if (!empty($initRes['gateway_reference'])) {
+            AdPayments::recordGatewayReference((int) $ad['id'], $reference, (string) $initRes['gateway_reference']);
+        }
+    } catch (Throwable $e) {
+        // The gateway could not be reached. The page still renders, the hosted-payment form below still
+        // works, and the lookup above keeps whatever reference the previous attempt stored.
+    }
 }
 
 $inlineSettings = [

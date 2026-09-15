@@ -133,6 +133,10 @@ try {
     // columns. A composite key is the easiest thing for a naive statement splitter to mangle, so it is
     // checked rather than assumed.
     $check('ad_payments', 'idx_ad_payment_attempt', 2);
+    // The gateway's own reference is how a payment is found after the fact — every verify and every webhook
+    // looks a transaction up by it, so it is indexed rather than scanned.
+    $check('ad_payments', 'idx_ad_payment_gateway_ref', 1);
+    $check('donations', 'idx_donation_gateway_ref', 1);
 } catch (Throwable $e) {
     echo 'FAILED: ' . $e->getMessage() . "\n";
     $failed[] = 'the import threw';

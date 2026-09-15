@@ -22,6 +22,12 @@ declare(strict_types=1);
  * 4. **The counter is derived, never incremented.** `ads.payment_attempts` is re-read from the attempt rows
  *    after every outcome, so a webhook arriving first, a replayed return, or a crash between two writes
  *    cannot leave it disagreeing with what happened.
+ *
+ * **Where the gateway reference is kept** (`recordGatewayReference()` and the three lookups beside it) is
+ * deliberately here as well, although the advert and the giving flow are different features. It is one
+ * question — *which reference do we ask the gateway about?* — with one answer per table, and splitting it
+ * across two classes is how the two would come to disagree. The donation pair is the same lookup against
+ * `donations`, because a gift has no attempt rows: the donation row is its own record.
  */
 final class AdPayments
 {
@@ -114,6 +120,114 @@ final class AdPayments
     {
         self::db()->prepare('UPDATE ads SET payment_attempts = (SELECT COUNT(*) FROM ad_payments p WHERE p.ad_id = ads.id) WHERE id = ?')
             ->execute([$adId]);
+    }
+
+    /**
+     * Remembers the reference **the gateway** minted for one attempt.
+     *
+     * PayHub ignores the reference we send, so the attempt has two: ours (`reference`) — the identity in the
+     * advertiser's URL, and what the retry counter is keyed on — and the gateway's, which is the only one
+     * PayHub will answer a question about. Without this column a real payment is unverifiable, which is
+     * exactly what happened: the advertiser paid, the site asked about a reference the gateway had never
+     * heard of, and answered "The reference not found".
+     *
+     * The write is intentionally **last-write-wins**: the newest gateway reference belongs to the window the
+     * checkout page is currently offering, and a page reloaded before payment mints a new one. Refusing to
+     * overwrite would leave the attempt pointing at a transaction nobody can pay any more. The return URL
+     * covers the other direction — see the reference-match guard in `core/routes.php`.
+     */
+    public static function recordGatewayReference(int $adId, string $attemptReference, string $gatewayReference): void
+    {
+        self::writeGatewayReference($attemptReference, $gatewayReference, $adId);
+    }
+
+    /**
+     * The same, when only the attempt reference is known.
+     *
+     * `/payment/payhub/callback` is handed a reference and nothing else — it has no advert in hand to pass,
+     * and looking one up first would just be this write with an extra query in front of it.
+     */
+    public static function recordGatewayReferenceByReference(string $attemptReference, string $gatewayReference): void
+    {
+        self::writeGatewayReference($attemptReference, $gatewayReference, null);
+    }
+
+    private static function writeGatewayReference(string $attemptReference, string $gatewayReference, ?int $adId): void
+    {
+        $attemptReference = trim($attemptReference);
+        $gatewayReference = trim($gatewayReference);
+
+        // Nothing to remember: the gateway either did not answer or answered with the reference we sent.
+        if ($attemptReference === '' || $gatewayReference === '' || $gatewayReference === $attemptReference) {
+            return;
+        }
+
+        $sql = 'UPDATE ad_payments SET gateway_reference = ? WHERE reference = ?';
+        $params = [mb_substr($gatewayReference, 0, 120), $attemptReference];
+
+        if ($adId !== null) {
+            $sql .= ' AND ad_id = ?';
+            $params[] = $adId;
+        }
+
+        self::db()->prepare($sql)->execute($params);
+    }
+
+    /**
+     * The reference to **ask the gateway about**, given the one the browser is holding.
+     *
+     * Falls back to the attempt reference itself, which is right for a gateway that honours what it is given
+     * and is the only thing to try for an attempt that was never initialized (or whose initialization failed,
+     * in which case the gateway will simply say it does not know it).
+     */
+    public static function gatewayReferenceFor(string $attemptReference): string
+    {
+        $attemptReference = trim($attemptReference);
+        if ($attemptReference === '') {
+            return '';
+        }
+
+        $stmt = self::db()->prepare('SELECT gateway_reference FROM ad_payments
+                                     WHERE reference = ? AND gateway_reference IS NOT NULL AND gateway_reference <> "" LIMIT 1');
+        $stmt->execute([$attemptReference]);
+        $stored = trim((string) ($stmt->fetchColumn() ?: ''));
+
+        return $stored !== '' ? $stored : $attemptReference;
+    }
+
+    /**
+     * The gateway reference stored for one *donation*, by the reference the giver was given.
+     *
+     * Giving has no attempt rows — the donation row is its own record — so it needs the same lookup against
+     * a different table. Same reasoning, same hole: the giver pays, and the gift cannot be found.
+     */
+    public static function donationGatewayReference(string $donationReference): string
+    {
+        $donationReference = trim($donationReference);
+        if ($donationReference === '') {
+            return '';
+        }
+
+        $stmt = self::db()->prepare('SELECT gateway_reference FROM donations
+                                     WHERE payment_reference = ? AND gateway_reference IS NOT NULL AND gateway_reference <> "" LIMIT 1');
+        $stmt->execute([$donationReference]);
+        $stored = trim((string) ($stmt->fetchColumn() ?: ''));
+
+        return $stored !== '' ? $stored : $donationReference;
+    }
+
+    /** Records the gateway reference against a donation. Last write wins, for the same reason as above. */
+    public static function recordDonationGatewayReference(string $donationReference, string $gatewayReference): void
+    {
+        $donationReference = trim($donationReference);
+        $gatewayReference = trim($gatewayReference);
+
+        if ($donationReference === '' || $gatewayReference === '' || $gatewayReference === $donationReference) {
+            return;
+        }
+
+        self::db()->prepare('UPDATE donations SET gateway_reference = ? WHERE payment_reference = ?')
+            ->execute([mb_substr($gatewayReference, 0, 120), $donationReference]);
     }
 
     /** How many online attempts this advert has actually failed. The retry rule is measured on this. */

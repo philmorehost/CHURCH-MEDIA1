@@ -153,25 +153,154 @@ final class Payhub
     /**
      * Starts a transaction server-side and returns the hosted checkout URL.
      *
-     * Used by the flows that redirect, and by anything that wants a payment link to send somebody.
+     * ⚠️ **PayHub mints its OWN reference and ignores the one we send.** This is the fact the whole money
+     * path turns on, and it is the reason a real card payment could be taken and then reported to the
+     * advertiser as *"The reference not found"*: the money sits at the gateway against a reference PayHub
+     * invented (`PH_<hex>`), while every later question — the return URL, the webhook, the retry — was asked
+     * with OUR reference, which PayHub has never heard of. The working PayHub integration this was checked
+     * against says so in as many words: *"Verify against a local reference would return Transaction not
+     * found."*
      *
-     * @param  array<string, mixed> $payload email, amount (kobo), reference, callback_url, metadata…
-     * @return array{ok:bool,authorization_url:string,reference:string,error:string,raw:array<string,mixed>}
+     * So the gateway's reference is returned **separately**, as `gateway_reference`, for the caller to store
+     * on the payment attempt. `reference` stays exactly what we sent and is **never substituted** — it is
+     * the attempt's identity, the credential in the advertiser's URL, and the thing the retry counter is
+     * keyed on. Replacing it (which this method's callers used to do) breaks every guarded write that
+     * follows, because those writes match on the reference the browser is holding.
+     *
+     * The gateway reference is looked for in the three places the response can carry it, because the shape
+     * is not consistent between calls: `data.reference`, then `data.access_code`, then the `ref` query
+     * parameter of the `authorization_url` handed back — which is where it very often is, since that URL is
+     * shaped `checkout.php?ref=PH_abc&amount=500000`.
+     *
+     * @param  array<string, mixed> $payload email, amount (naira), reference, callback_url, metadata…
+     * @return array{ok:bool,authorization_url:string,reference:string,gateway_reference:string,error:string,raw:array<string,mixed>}
      */
     public static function initialize(array $payload): array
     {
+        $localReference = trim((string) ($payload['reference'] ?? ''));
+
+        /*
+         * `metadata` is sent as a JSON **string**, with our own reference and the callback URL inside it.
+         *
+         * That is the shape the gateway's own working integration uses, and its webhook reads it back with
+         * `json_decode`. Nested as an object instead, whether it survives depends on the endpoint — and the
+         * metadata is the one reconciliation route that does not depend on the gateway echoing anything
+         * back, so it is worth carrying in the shape that is known to arrive. A webhook that arrives with
+         * the browser's reference inside it can always be tied to the right advert, even if every other
+         * identifier is missing.
+         */
+        $metadata = $payload['metadata'] ?? [];
+        if (is_string($metadata)) {
+            $decoded = json_decode($metadata, true);
+            $metadata = is_array($decoded) ? $decoded : [];
+        }
+        if (!is_array($metadata)) {
+            $metadata = [];
+        }
+        if ($localReference !== '') {
+            $metadata['reference'] = $localReference;
+        }
+        if (!empty($payload['callback_url'])) {
+            $metadata['callback_url'] = (string) $payload['callback_url'];
+        }
+        if ($metadata !== []) {
+            $payload['metadata'] = (string) json_encode($metadata);
+        }
+
         $result = self::call('POST', '/api/transaction/initialize', $payload);
         $body = $result['body'];
 
-        $url = (string) ($body['data']['authorization_url'] ?? ($body['checkout_url'] ?? ''));
+        $url = (string) ($body['data']['authorization_url'] ?? ($body['checkout_url'] ?? ($body['authorization_url'] ?? '')));
+        $gatewayReference = self::referenceFromPayload($body, $url);
+
+        self::log('initialize', [
+            'ok' => $result['ok'],
+            'error' => $result['error'],
+            'amount' => $payload['amount'] ?? '',
+            'local_reference' => $localReference,
+            'gateway_reference' => $gatewayReference,
+            'authorization_url' => $url,
+            'response' => $body,
+        ]);
 
         return [
             'ok' => $result['ok'] && $url !== '',
             'authorization_url' => $url,
-            'reference' => (string) ($body['data']['reference'] ?? ($body['reference'] ?? ($payload['reference'] ?? ''))),
+            'reference' => $localReference,
+            'gateway_reference' => $gatewayReference,
             'error' => $url !== '' ? '' : ($result['error'] !== '' ? $result['error'] : (string) ($body['message'] ?? 'The gateway did not return a checkout URL.')),
             'raw' => $body,
         ];
+    }
+
+    /**
+     * Wherever the gateway put its own reference — see `initialize()`.
+     *
+     * @param array<string, mixed> $body the decoded response
+     */
+    public static function referenceFromPayload(array $body, string $authorizationUrl = ''): string
+    {
+        $data = is_array($body['data'] ?? null) ? $body['data'] : [];
+
+        foreach ([
+            $data['reference'] ?? '',
+            $data['access_code'] ?? '',
+            $body['reference'] ?? '',
+            self::referenceFromUrl($authorizationUrl),
+        ] as $candidate) {
+            $candidate = trim((string) $candidate);
+            if ($candidate !== '') {
+                return $candidate;
+            }
+        }
+
+        return '';
+    }
+
+    /** The `ref` the gateway put on its own checkout URL. */
+    public static function referenceFromUrl(string $url): string
+    {
+        $url = trim($url);
+        if ($url === '') {
+            return '';
+        }
+
+        $query = (string) parse_url($url, PHP_URL_QUERY);
+        if ($query === '') {
+            return '';
+        }
+
+        parse_str($query, $params);
+
+        return trim((string) ($params['ref'] ?? ($params['reference'] ?? ($params['trxref'] ?? ''))));
+    }
+
+    /**
+     * The reference the gateway recorded in a transaction's own metadata.
+     *
+     * This is *our* reference, echoed back by PayHub — which makes it the safe way to decide that a gateway
+     * transaction belongs to a particular advert. A reference quoted by a browser proves nothing on its own;
+     * one that the gateway itself says was created with our metadata proves the two are the same payment.
+     *
+     * @param array<string, mixed> $payload a `verify()` raw body, or a webhook payload
+     */
+    public static function metadataReference(array $payload): string
+    {
+        foreach ([$payload['data'] ?? null, $payload] as $scope) {
+            if (!is_array($scope) || !isset($scope['metadata'])) {
+                continue;
+            }
+            $meta = $scope['metadata'];
+            if (is_string($meta)) {
+                $decoded = json_decode($meta, true);
+                $meta = is_array($decoded) ? $decoded : [];
+            }
+            if (is_array($meta) && trim((string) ($meta['reference'] ?? '')) !== '') {
+                return trim((string) $meta['reference']);
+            }
+        }
+
+        return '';
     }
 
     /**
@@ -200,16 +329,30 @@ final class Payhub
         $body = $result['body'];
 
         if (!$result['ok']) {
+            self::log('verify-failed', ['reference' => $reference, 'error' => $result['error']]);
+
             return ['ok' => false, 'paid' => false, 'status' => '', 'reason' => '', 'error' => $result['error'], 'raw' => []];
         }
 
         $status = strtolower((string) ($body['data']['status'] ?? ($body['data']['payment_status'] ?? '')));
         $paid = !empty($body['paid']) || !empty($body['data']['paid']) || $status === 'success';
 
+        self::log('verify', [
+            'reference' => $reference,
+            'status' => $status,
+            'paid' => $paid,
+            'gateway_reference' => self::referenceFromPayload($body),
+            'metadata_reference' => self::metadataReference($body),
+            'response' => $body,
+        ]);
+
         return [
             'ok' => true,
             'paid' => $paid,
             'status' => $status !== '' ? $status : ($paid ? 'success' : 'failed'),
+            // What the gateway calls this transaction. The caller stores it, so the next question can be
+            // asked with the name the gateway recognises — see `initialize()`.
+            'gateway_reference' => self::referenceFromPayload($body),
             // What a person can be shown. `gateway_response` is the gateway's own words ("Insufficient
             // funds"), which is what an advertiser needs to see to know what to do next.
             'reason' => trim((string) ($body['data']['gateway_response'] ?? ($body['message'] ?? ''))),
@@ -236,6 +379,38 @@ final class Payhub
         }
 
         return hash_equals(hash_hmac('sha256', $rawBody, $secret), $signature);
+    }
+
+    /**
+     * One line per gateway conversation, in `storage/logs/payment.log`.
+     *
+     * This exists because the failure it was written for could not be reproduced: a live card payment was
+     * taken and the site reported "The reference not found", and *which reference was asked about* — let
+     * alone what the gateway answered — was recorded nowhere. Reading the code could only produce a theory.
+     *
+     * Nothing secret is written: the API keys never appear in a log line, and the response body holds only a
+     * reference and a status — the same JSON that `ad_payments.gateway_response` already keeps.
+     *
+     * @param array<string, mixed> $data
+     */
+    private static function log(string $event, array $data = []): void
+    {
+        if (!defined('STORAGE_PATH')) {
+            return;
+        }
+
+        $dir = STORAGE_PATH . '/logs';
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0775, true);
+        }
+
+        $line = date('c') . ' payhub ' . $event . ' ' . json_encode($data, JSON_UNESCAPED_SLASHES);
+
+        // Never let a diagnostic become an error on a page that takes money.
+        try {
+            @file_put_contents($dir . '/payment.log', $line . PHP_EOL, FILE_APPEND | LOCK_EX);
+        } catch (Throwable $e) {
+        }
     }
 
     /**

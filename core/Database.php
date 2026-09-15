@@ -2467,6 +2467,30 @@ class Database
                     // site, so it is not worth failing a page render over.
                 }
             },
+
+            // ⚠️ **The column that makes a PayHub payment findable, and the reason a live one was not.**
+            //
+            // PayHub's `api/transaction/initialize` **ignores the reference we send** and mints its own
+            // `PH_<hex>` one. So the money is recorded at the gateway against a reference this application
+            // had never stored anywhere — while every later question (the return URL, the webhook, the
+            // retry) was asked with *our* reference, which PayHub has never heard of. The gateway's answer
+            // to that is "The reference not found", which is exactly what the advertiser was shown after
+            // paying. The working PayHub integration this was checked against says the same thing in its own
+            // comments: *"Verify against a local reference would return Transaction not found."*
+            //
+            // `reference` stays the attempt's identity — it is the credential in the advertiser's URL and
+            // the thing the retry counter is keyed on — and this column holds the gateway's own reference
+            // beside it. Verifying asks the gateway about THIS one.
+            //
+            // `donations` gets it too, because online giving goes through the same gateway and had the same
+            // hole: a giver could pay and the gift would sit at `pending` for ever.
+            '2026_46_payhub_gateway_reference' => function (PDO $pdo): void {
+                self::addColumnIfMissing($pdo, 'ad_payments', 'gateway_reference', 'VARCHAR(120) NULL', 'reference');
+                self::addIndexIfMissing($pdo, 'ad_payments', 'idx_ad_payment_gateway_ref', 'INDEX `idx_ad_payment_gateway_ref` (`gateway_reference`)');
+
+                self::addColumnIfMissing($pdo, 'donations', 'gateway_reference', 'VARCHAR(120) NULL', 'payment_reference');
+                self::addIndexIfMissing($pdo, 'donations', 'idx_donation_gateway_ref', 'INDEX `idx_donation_gateway_ref` (`gateway_reference`)');
+            },
         ];
     }
 

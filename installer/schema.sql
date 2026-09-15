@@ -696,12 +696,14 @@ CREATE TABLE IF NOT EXISTS `donations` (
   `payment_method` ENUM('online', 'manual_bank') NOT NULL DEFAULT 'online',
   `payment_status` ENUM('pending', 'completed', 'failed') NOT NULL DEFAULT 'pending',
   `payment_reference` VARCHAR(100) NULL,
+  `gateway_reference` VARCHAR(120) NULL COMMENT 'The reference PayHub minted for this gift; ours is not known to the gateway',
   `receipt_path` VARCHAR(255) NULL,
   `campaign_id` INT NULL COMMENT 'The giving campaign this gift counts towards, if any',
   `org_unit_id` INT NULL,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX `idx_donation_status` (`payment_status`, `payment_method`),
+  INDEX `idx_donation_gateway_ref` (`gateway_reference`),
   INDEX `idx_donation_category` (`category`),
   INDEX `idx_donation_member` (`member_id`, `payment_status`),
   INDEX `idx_donation_campaign` (`campaign_id`, `payment_status`),
@@ -914,6 +916,7 @@ CREATE TABLE IF NOT EXISTS `ad_payments` (
   `amount` DECIMAL(10,2) NOT NULL,
   `payment_method` ENUM('online','manual','free') NOT NULL,
   `reference` VARCHAR(100) NOT NULL,
+  `gateway_reference` VARCHAR(120) NULL COMMENT 'The reference PayHub minted and ignores our own — the one the gateway must be asked about',
   `status` ENUM('pending','success','failed') NOT NULL DEFAULT 'pending',
   `attempt_no` INT NOT NULL DEFAULT 1 COMMENT 'Which attempt at this advert this row records; the authoritative count',
   `failure_reason` VARCHAR(255) NULL COMMENT 'Why the gateway declined it, as reported to the advertiser',
@@ -922,7 +925,8 @@ CREATE TABLE IF NOT EXISTS `ad_payments` (
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (`ad_id`) REFERENCES `ads`(`id`) ON DELETE CASCADE,
   FOREIGN KEY (`publisher_id`) REFERENCES `ad_publishers`(`id`) ON DELETE CASCADE,
-  INDEX `idx_ad_payment_attempt` (`ad_id`, `status`)
+  INDEX `idx_ad_payment_attempt` (`ad_id`, `status`),
+  INDEX `idx_ad_payment_gateway_ref` (`gateway_reference`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `testimonies` (

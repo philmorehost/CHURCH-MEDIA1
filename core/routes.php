@@ -389,11 +389,31 @@ $router->get('/payment/payhub/callback', function () {
      * a timeout — so `?ref=…` on this URL marked a donation completed with no money behind it, and marked
      * an advert paid. A verification that cannot be made is not a payment, and `Payhub::verify()` says so
      * with the reason instead.
+     *
+     * ⚠️ And it asks about **the reference the gateway minted**, not the one in the URL. PayHub ignores the
+     * reference it is given when a transaction is created, so this URL's reference — the one the giver or
+     * the advertiser is holding — is the only one the gateway has never heard of. Asking with it returns
+     * "The reference not found" for a payment that has already been taken. The stored reference is looked up
+     * here; the URL's own reference remains the fallback for a gateway that honours what it is sent.
      */
-    $verified = Payhub::verify($reference);
+    $verifyRef = $isGiving
+        ? AdPayments::donationGatewayReference($reference)
+        : AdPayments::gatewayReferenceFor($reference);
+
+    $verified = Payhub::verify($verifyRef);
     $paid = $verified['paid'];
     $gatewayNote = $verified['error'] !== '' ? $verified['error'] : $verified['reason'];
     $gatewayPayload = $verified['raw'] === [] ? null : (string) json_encode($verified['raw']);
+
+    // Remember the gateway's own reference against the row it belongs to, so a later webhook, a fresh
+    // callback and anybody looking at the transaction in six months all name the same thing.
+    if ($paid && (string) ($verified['gateway_reference'] ?? '') !== '') {
+        if ($isGiving) {
+            AdPayments::recordDonationGatewayReference($reference, (string) $verified['gateway_reference']);
+        } else {
+            AdPayments::recordGatewayReferenceByReference($reference, (string) $verified['gateway_reference']);
+        }
+    }
 
     if ($paid) {
         if ($isGiving) {
@@ -628,26 +648,17 @@ $router->post('/advertise', function () {
     // inline checkout — so this is a redirect to our own page rather than to PayHub's website, and the
     // browser is never handed off. It is a redirect and not a render because a render would re-run this
     // whole handler on a refresh, creating a second advert and a second attempt for one payment.
+    //
+    // ⚠️ **The gateway is deliberately NOT called here, and it used to be.**
+    //
+    // This block initialized a transaction and then *replaced* the attempt's reference with whatever PayHub
+    // returned — and PayHub returns its own reference, always, ignoring the one we send. The substitution
+    // broke the two things the reference is for: the browser was redirected with the NEW reference while
+    // the attempt row's guarded writes match on the reference the browser holds, and the checkout page then
+    // initialized a SECOND transaction, so the attempt pointed at a reference nobody could pay while the
+    // money was taken against a third one. One initialize, on the page that shows the checkout, is what
+    // this flow needs — and that page now stores the gateway's reference where verification can find it.
     if (!$isFree && $paymentMethod === 'online') {
-        if (Payhub::configured()) {
-            try {
-                $initRes = Payhub::initialize([
-                    'email' => $pubEmail,
-                    'amount' => Payhub::amountInNaira($price),
-                    'reference' => $reference,
-                    'callback_url' => baseUrl('advertise/return?ref=' . urlencode($reference)),
-                    'name' => $pubName,
-                    'phone' => $pubPhone ?: null,
-                    'metadata' => ['ad_id' => $adId, 'publisher_id' => $publisherId],
-                ]);
-                if (!empty($initRes['reference']) && $initRes['reference'] !== $reference) {
-                    $origRef = $reference;
-                    $reference = (string) $initRes['reference'];
-                    $pdo->prepare('UPDATE ads SET payment_reference = ? WHERE id = ?')->execute([$reference, $adId]);
-                    $pdo->prepare('UPDATE ad_payments SET reference = ? WHERE ad_id = ? AND reference = ?')->execute([$reference, $adId, $origRef]);
-                }
-            } catch (Throwable $e) {}
-        }
         $_SESSION['ad_checkout_ref'] = $reference;
         clearFormOld();
         redirect('/advertise/checkout?ref=' . urlencode($reference));
@@ -692,6 +703,30 @@ $loadAdByReference = function (string $reference): ?array {
         return $row;
     }
 
+    /*
+     * Second try: the **gateway's** reference.
+     *
+     * A webhook names the transaction by the reference PayHub minted (`PH_<hex>`), not by ours, because
+     * PayHub ignores the one we send. Looked up only after ours fails, so an advert whose attempt
+     * reference happens to be a gateway reference still resolves the same way it always did.
+     *
+     * This is the half that never worked: the webhook used to resolve only on our reference, matched
+     * nothing, and therefore marked nothing — the money arrived and the advert stayed unpaid. It is the
+     * same shape as the note above: one reference for "this attempt exists", another for "this transaction
+     * exists", and the row is the only place that knows both.
+     */
+    $stmt = $pdo->prepare('SELECT a.*, p.name AS publisher_name, p.email AS publisher_email, p.token AS publisher_token, pay.reference AS attempt_reference
+                           FROM ad_payments pay
+                           JOIN ads a ON a.id = pay.ad_id
+                           JOIN ad_publishers p ON p.id = a.publisher_id
+                           WHERE pay.gateway_reference = ? AND ' . $tenantClause . ' LIMIT 1');
+    $stmt->execute(array_merge([trim($reference)], $tenantParams));
+    $row = $stmt->fetch();
+
+    if ($row) {
+        return $row;
+    }
+
     // An advert whose attempt row is missing: the submission handler writes both, so this is a state it
     // cannot normally produce, and the fallback exists so that a half-written advert is still reachable
     // rather than showing the advertiser a 404 for a payment they may have made.
@@ -708,18 +743,26 @@ $loadAdByReference = function (string $reference): ?array {
 /*
  * The webhook — how PayHub tells this site that money arrived when the browser never came back.
  *
- * Per the API reference: the event is `charge.success`, the reference is at `data.reference`, and the
- * signature is `HMAC-SHA256(raw body, secret)` in `X-Payhub-Signature`. An unverifiable webhook is refused
- * rather than trusted, and an unconfigured secret key refuses every one — the safe way round.
+ * Per the API reference: the event is `charge.success` and the reference is at `data.reference`. The
+ * signature is `HMAC-SHA256(raw body, secret)` in `X-Payhub-Signature`, and it is checked when it is
+ * present — but it is **not required**, because PayHub does not reliably send it, and a webhook refused over
+ * a missing header is a real payment that is never recorded. The body is worth nothing either way: the
+ * payment is re-verified with the gateway server-side and only the gateway's own answer is acted on.
  *
- * Two things it used to get wrong, both of which lost money:
+ * Three things it used to get wrong, all of which lost money:
  *
  * 1. It resolved the advert by `ads.payment_reference`, which tracks only the NEWEST attempt. A webhook for
  *    any earlier attempt therefore matched nothing, so the attempt row was marked successful while the
- *    advert stayed unpaid. It now resolves through the same attempt-reference lookup the return URL uses.
+ *    advert stayed unpaid. It resolves through the same attempt-reference lookup the return URL uses.
  * 2. It wrote payment state by hand instead of calling `AdPayments::recordOutcome()`. That duplicated the
  *    paid guard and the attempt-counter sync in a second place, which is the class of drift 7h-0 removed
  *    from the gateway client. Both money paths now go through the one decision.
+ * 3. ⚠️ **It looked everything up by OUR reference, and a webhook never carries our reference.** PayHub
+ *    names the transaction by the reference it minted. So this route matched nothing, ever — and it also
+ *    refused every genuinely delivered webhook with 401 when the signature header was absent. A payment
+ *    taken while the advertiser closed the tab had no way of reaching the books at all. It now resolves by
+ *    the gateway's reference, falls back to ours when the metadata echoed it, and only ever credits what
+ *    the gateway confirms.
  *
  * It is registered here, below the lookup, because a closure's `use` binds at creation — above this point
  * the variable does not exist yet.
@@ -727,43 +770,118 @@ $loadAdByReference = function (string $reference): ?array {
 $router->post('/payment/payhub/webhook', function () use ($loadAdByReference) {
     $pdo = Database::getInstance()->getConnection();
     $body = (string) file_get_contents('php://input');
-    $signature = $_SERVER['HTTP_X_PAYHUB_SIGNATURE'] ?? '';
-
-    if (!Payhub::verifyWebhook($body, $signature)) {
-        http_response_code(401);
-        exit('Invalid signature');
-    }
+    $signature = (string) ($_SERVER['HTTP_X_PAYHUB_SIGNATURE'] ?? '');
 
     $payload = json_decode($body, true);
+    $payload = is_array($payload) ? $payload : [];
     $event = (string) ($payload['event'] ?? '');
-    $data = is_array($payload['data'] ?? null) ? $payload['data'] : [];
-    $reference = trim((string) ($data['reference'] ?? ''));
+    $data = is_array($payload['data'] ?? null) ? $payload['data'] : $payload;
 
-    // Anything we have no use for is still acknowledged, or the gateway retries it for ever.
-    if ($event === 'charge.success' && $reference !== '') {
-        if (str_starts_with($reference, 'GIVE_') || str_starts_with($reference, 'DON_')) {
-            // Giving has no attempt rows; the donation row is its own record.
-            if ((string) ($data['status'] ?? '') === 'success' || !empty($data['paid'])) {
-                $pdo->prepare('UPDATE donations SET payment_status = "completed" WHERE payment_reference = ?')
-                    ->execute([$reference]);
-            }
-        } else {
-            $ad = $loadAdByReference($reference);
-            if ($ad !== null) {
-                // The shape `Payhub::verify()` returns, built from a payload whose signature we have
-                // already checked. The decision itself belongs to AdPayments, exactly as on the return URL.
-                AdPayments::recordOutcome($ad, [
-                    'paid' => ((string) ($data['status'] ?? '') === 'success') || !empty($data['paid']),
-                    'reason' => (string) ($data['gateway_response'] ?? ''),
-                    'error' => '',
-                    'raw' => $data,
-                ], $reference);
-            }
+    // The reference the GATEWAY minted. PayHub ignores the one we send, so this — and never our own
+    // reference — is what a webhook names, and asking the gateway about anything else is the fault.
+    $gatewayRef = trim((string) ($data['reference'] ?? ($payload['reference'] ?? '')));
+
+    // Our own reference, if the gateway echoed the metadata back. The safety net: it ties the transaction to
+    // an advert even when the gateway reference matches nothing we stored.
+    $metadataRef = Payhub::metadataReference($payload);
+
+    /*
+     * Nothing to act on. Acknowledged rather than refused, or the gateway retries it for ever.
+     */
+    if ($gatewayRef === '' && $metadataRef === '') {
+        http_response_code(200);
+        echo json_encode(['status' => 'ignored', 'reason' => 'no reference']);
+        exit;
+    }
+
+    /*
+     * ⚠️ **The payment is re-verified with the gateway, and only the gateway's answer is acted on.**
+     *
+     * This is the contract the working PayHub integration uses, and it is stricter than trusting the body:
+     * its note says it plainly — *"A webhook payload can be forged (anyone can POST {"status":"success"}),
+     * so we must confirm PayHub actually received the money."* The signature is checked as well when it is
+     * present, but it is not *required*, because PayHub does not reliably send `X-Payhub-Signature` — and a
+     * webhook refused for a missing header is a paid advert that stays unpaid for ever. Since the credit
+     * decision below comes from the gateway's own answer and every write is guarded to fire once, accepting
+     * an unsigned body and verifying it is safe; refusing it is not.
+     */
+    $signed = Payhub::verifyWebhook($body, $signature);
+    $verifyRef = $gatewayRef !== '' ? $gatewayRef : $metadataRef;
+
+    // Reported back, never acted on: it is the one fact that tells a church whether its merchant dashboard
+    // is set up to sign, and no decision here depends on it — the verification below is the decision.
+    $signatureNote = $signed ? 'verified' : 'absent-or-invalid';
+
+    /*
+     * An install with no secret key cannot verify anything, ever. Acknowledged, not retried: a 500 here
+     * would have the gateway redeliver this event for as long as it cares to, and nothing could ever come
+     * of it. This is the state a church is in before it pastes its keys in — and, importantly, it is also
+     * the state that used to refuse every webhook with 401 even when the keys were fine.
+     */
+    if (!Payhub::configured()) {
+        http_response_code(200);
+        echo json_encode(['status' => 'ignored', 'reason' => 'the gateway is not configured']);
+        exit;
+    }
+
+    $verified = Payhub::verify($verifyRef);
+
+    if (!$verified['ok']) {
+        // The gateway could not be asked, so nothing is known. A 500 asks it to deliver the webhook again
+        // rather than swallowing an event that may be the only record of a real payment.
+        http_response_code(500);
+        echo json_encode(['status' => 'retry', 'reason' => $verified['error']]);
+        exit;
+    }
+
+    if (!$verified['paid']) {
+        http_response_code(200);
+        echo json_encode(['status' => 'ignored', 'reason' => 'not paid']);
+        exit;
+    }
+
+    /*
+     * Giving first, and by *lookup* rather than by the reference's prefix.
+     *
+     * The old test was `str_starts_with($reference, 'GIVE_')` — which can only ever have been true for our
+     * own reference, never for the `PH_<hex>` one a webhook actually carries, so a gift could not be
+     * credited by this route at all. Resolving the row is the only test that works for both.
+     */
+    $donRef = $gatewayRef !== '' ? $gatewayRef : $metadataRef;
+    $stmt = $pdo->prepare('SELECT id, payment_reference FROM donations
+                           WHERE (gateway_reference = ? OR payment_reference = ? OR payment_reference = ?) LIMIT 1');
+    $stmt->execute([$donRef, $metadataRef, $gatewayRef]);
+    $donation = $stmt->fetch();
+
+    if ($donation) {
+        $pdo->prepare('UPDATE donations SET payment_status = "completed", gateway_reference = COALESCE(NULLIF(?, ""), gateway_reference)
+                       WHERE id = ? AND payment_status <> "completed"')
+            ->execute([$gatewayRef, (int) $donation['id']]);
+
+        http_response_code(200);
+        echo json_encode(['status' => 'success']);
+        exit;
+    }
+
+    // Then the advert, resolved by the gateway's reference (and by our own as a fallback).
+    $ad = $loadAdByReference($gatewayRef) ?? ($metadataRef !== '' ? $loadAdByReference($metadataRef) : null);
+
+    if ($ad !== null) {
+        $attemptRef = (string) ($ad['attempt_reference'] ?? '');
+        if ($attemptRef === '') {
+            $attemptRef = $metadataRef !== '' ? $metadataRef : $gatewayRef;
         }
+
+        AdPayments::recordGatewayReference((int) $ad['id'], $attemptRef, $gatewayRef);
+
+        // The decision belongs to `AdPayments`, exactly as on the return URL — and the answer is the
+        // gateway's own, not the body's. A forged webhook can name a reference; it cannot make the gateway
+        // say that reference was paid.
+        AdPayments::recordOutcome($ad, $verified, $attemptRef);
     }
 
     http_response_code(200);
-    echo json_encode(['status' => 'success']);
+    echo json_encode(['status' => 'success', 'event' => $event, 'signature' => $signatureNote]);
     exit;
 });
 
@@ -887,6 +1005,18 @@ $router->post('/advertise/hosted', function () use ($loadAdByReference) {
         'metadata' => ['ad_id' => (int) $ad['id'], 'publisher_id' => (int) $ad['publisher_id']],
     ]);
 
+    /*
+     * The reference the gateway minted goes on the attempt row BEFORE the browser leaves.
+     *
+     * Order matters: PayHub ignores our `callback_url`, so the browser may come back through the gateway's
+     * own page, or not at all. Whatever brings it back, the only way to ask about this payment afterwards is
+     * with the gateway's reference — and this is the last moment at which we know it and the advertiser is
+     * still on our site. It is also what makes the advertiser's own return URL work if they bookmark it.
+     */
+    if ($result['ok'] && $result['gateway_reference'] !== '') {
+        AdPayments::recordGatewayReference((int) $ad['id'], (string) ($ad['attempt_reference'] ?? $ref), $result['gateway_reference']);
+    }
+
     if ($result['ok'] && $result['authorization_url'] !== '') {
         redirect($result['authorization_url']);
     }
@@ -921,15 +1051,44 @@ $router->get('/advertise/return', function () use ($loadAdByReference) {
     if ((string) $ad['payment_status'] === 'paid') {
         $result = ['outcome' => 'paid', 'reason' => ''];
     } else {
-        $verifyRes = Payhub::verify($ref);
+        /*
+         * ASK ABOUT THE GATEWAY'S REFERENCE, NOT OURS.
+         *
+         * This is the line the whole fault was in. PayHub ignores the reference we send and mints its own,
+         * so asking about ours gets "The reference not found" **for a payment that has actually been taken**
+         * — which is what the advertiser was shown, twice, while the money sat at the gateway.
+         * `gatewayReferenceFor()` returns the reference stored for this attempt when there is one and the
+         * attempt reference itself when there is not.
+         */
+        $attemptRef = trim((string) ($ad['attempt_reference'] ?? '')) !== '' ? (string) $ad['attempt_reference'] : $ref;
+        $gatewayRef = AdPayments::gatewayReferenceFor($attemptRef);
+
+        $verifyRes = Payhub::verify($gatewayRef);
+
+        if ($verifyRes['paid']) {
+            // Written down so the webhook, an admin looking at the attempt years later, and a replayed
+            // return URL all name the same transaction.
+            AdPayments::recordGatewayReference((int) $ad['id'], $attemptRef, $gatewayRef);
+        }
+
+        /*
+         * The gateway's own report of what it charged, handed to our page by the inline iframe.
+         *
+         * Used only as a fallback, and only when the gateway itself says the transaction was created with
+         * THIS attempt's reference in its metadata. A reference quoted in a URL is worth nothing on its own
+         * — an advertiser can put any reference there, including one belonging to a stranger's paid
+         * transaction — so a `trxref` is believed only when the metadata ties it back to this advert.
+         */
         $trxref = trim((string) ($_GET['trxref'] ?? ($_GET['reference'] ?? '')));
-        if (!$verifyRes['paid'] && $trxref !== '' && $trxref !== $ref) {
+        if (!$verifyRes['paid'] && $trxref !== '' && $trxref !== $gatewayRef) {
             $secondVerify = Payhub::verify($trxref);
-            if ($secondVerify['paid'] || $secondVerify['status'] === 'success') {
+            if ($secondVerify['paid'] && Payhub::metadataReference($secondVerify['raw']) === $attemptRef) {
                 $verifyRes = $secondVerify;
+                AdPayments::recordGatewayReference((int) $ad['id'], $attemptRef, $trxref);
             }
         }
-        $result = AdPayments::recordOutcome($ad, $verifyRes, $ref);
+
+        $result = AdPayments::recordOutcome($ad, $verifyRes, $attemptRef);
     }
 
     $fresh = $loadAdByReference($ref) ?? $ad;
@@ -1525,7 +1684,22 @@ $router->post('/give', function () {
             'callback_url' => $callbackUrl,
             'description' => 'Church Giving: ' . $category . ($description ? ' - ' . substr($description, 0, 80) : ''),
             'currency' => 'NGN',
+            // Carried so the webhook can tie a transaction back to this gift even when it names a reference
+            // we have never seen — see `Payhub::metadataReference()`.
+            'metadata' => ['gift' => $category],
         ]);
+
+        /*
+         * Store the reference the gateway minted, before the giver leaves for the gateway's page.
+         *
+         * PayHub ignores ours, so this is the only name the gift can be verified by afterwards — and this is
+         * the last moment at which we have it. Without it a completed gift sits at `pending` for ever: the
+         * callback URL we send is ignored along with the reference, so the giver may never come back here at
+         * all, and the webhook names a reference this row did not hold.
+         */
+        if ($result['ok'] && $result['gateway_reference'] !== '') {
+            AdPayments::recordDonationGatewayReference($ref, (string) $result['gateway_reference']);
+        }
 
         if ($result['ok'] && $result['authorization_url'] !== '') {
             redirect($result['authorization_url']);

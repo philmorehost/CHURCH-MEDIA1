@@ -2918,6 +2918,64 @@ PayHub documents all of it at `https://merchant.payhub.com.ng/api-reference.php`
 > **Not verified:** no browser has run it and no live payment has been taken. The gateway source also confirms
 > the amount fix — `checkout.php` renders `formatCurrency($tx['amount'])`, the **stored naira** figure.
 
+> **7h-16 shipped — the money was taken and the site said "The reference not found".**
+>
+> **Reported from the live site, with a screenshot:** an advertiser paid ₦5,000, and the report page told them
+> *"Payment was not completed — Gateway: The reference not found"*, on the second of two attempts. The money
+> was at the gateway. The advert was not.
+>
+> ⚠️ **The cause is one documented fact, and it was in the integration this was copied from.** PayHub's
+> `api/transaction/initialize` **ignores the reference we send and mints its own.** Every later question —
+> the return URL, the webhook, the retry — was therefore asked with *our* reference (`PH_AD_…`), which PayHub
+> has never heard of, and its honest answer to that is "The reference not found". The working PayHub
+> integration in `DGV7.0-SAAS` says so in as many words above its own `initialize` call: *"PayHub generates
+> its own PH_<hex> reference (it ignores our local one), so we must verify with THAT. Verify against a local
+> reference would return Transaction not found."*
+>
+> **What shipped:**
+>
+> - **`2026_46_payhub_gateway_reference`** — `ad_payments.gateway_reference` and `donations.gateway_reference`
+>   (migration + `installer/schema.sql` + a `cli/schema_check.php` spot-check, because a fresh install and an
+>   upgraded one have to agree). `reference` stays the attempt's **identity** — it is the credential in the
+>   advertiser's URL and what the retry counter is keyed on — and the gateway's reference sits beside it.
+> - **`Payhub::initialize()` returns `gateway_reference` separately and never substitutes ours.** The reference
+>   is looked for in `data.reference`, then `data.access_code`, then the **`ref` query parameter of the
+>   `authorization_url`** — the last of which is where it usually is, since that URL is shaped
+>   `checkout.php?ref=PH_abc&amount=500000`. `metadata` is sent as a JSON **string** carrying our own
+>   reference, matching the shape the working integration uses.
+> - **`POST /advertise` no longer calls the gateway at all.** It used to initialize a transaction and then
+>   *overwrite the attempt's reference* with whatever came back — so the browser was redirected holding a
+>   reference the attempt row's guarded writes no longer matched, while the checkout page initialized a
+>   *second* transaction and the money was taken against a third. One initialize, on the page that shows the
+>   checkout, which stores the reference it got.
+> - ⚠️ **The webhook was refusing every real PayHub webhook.** It 401'd whenever `X-Payhub-Signature` was
+>   absent — and the reference implementation's own note is that PayHub's bodies are *unsigned* and must be
+>   re-verified through the API instead. That is now the contract here: the signature is checked when present,
+>   but the **payment is always re-verified server-side and only the gateway's answer is acted on**. Its two
+>   lookups were also both dead: it resolved adverts only by *our* reference (which a webhook never carries)
+>   and it detected giving by `str_starts_with($reference, 'GIVE_')` — a test no `PH_<hex>` reference can ever
+>   pass, so a completed gift could not be credited by this route at all.
+> - **A quoted `trxref` is believed only when the gateway itself ties it to the attempt** (its metadata echoes
+>   our reference). A reference in a URL is worth nothing — an advertiser can type any reference there,
+>   including one from a stranger's paid transaction.
+> - **`storage/logs/payment.log`** now records every initialize and verify with the reference asked about and
+>   the gateway's answer. This fault was unanswerable from the outside for two days because *which reference
+>   was asked about* was recorded nowhere; that diagnosis is now one file read.
+>
+> **Verified: 19 assertions, 0 failures** — the real routes driven over HTTP against a stubbed gateway (the
+> `Sms::setTransport()` seam, used for the same reason), on the local install's own database — and **four
+> mutations, four caught:** not reading the reference out of the checkout URL (1 failure), the return URL
+> asking about our own reference again (1 — and it reproduces the live symptom exactly: *unpaid*, "reference
+> not found"), refusing an unsigned webhook (7), and dropping the gateway-reference lookup (2).
+>
+> **Not verified: no live PayHub transaction.** No account is configured here, so what is proven is which
+> reference is asked about, that a real gateway answer is read correctly, and that every branch writes what it
+> should; what is not proven is that a card is charged. ⚠️ **And one step outside this code is required:** the
+> church's PayHub merchant dashboard must have
+> `https://<their-domain>/payment/payhub/webhook` registered as its webhook URL — PayHub has **no**
+> `callback_url` parameter at all (see 7h-9), so for a hosted payment the webhook is the only thing that can
+> ever tell this site the money arrived.
+
 ### Decisions taken, and two worth confirming
 
 - **"Two failed attempts" is counted per advert**, not per publisher: the advert is what is being bought,
