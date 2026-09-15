@@ -18,6 +18,16 @@ declare(strict_types=1);
  *    sat disabled and the status stayed on "Loading the secure payment window…" for every advertiser, on
  *    every browser, permanently. The harness had asserted the *markup* and the payload, and neither of
  *    those is the thing that takes a payment.
+ *  - **And the page must therefore never DEPEND on that script.** It shipped with the hosted-payment form
+ *    hidden until JavaScript revealed it — so a missing `advertise.js` (404 on the live site, from a stale
+ *    deployment) left the advertiser with a disabled button, a message that never changed, and no way to
+ *    pay at all. The hosted form is now always rendered and always visible: a fallback that appears only
+ *    when a script reveals it fails together with the script it was meant to cover for.
+ *  - **And the page must therefore never DEPEND on that script.** It was shipped once with the hosted-payment
+ *    form hidden until JavaScript showed it, which meant a missing `advertise.js` (404 on the live site, for
+ *    a stale deployment) left an advertiser with a disabled button, a "loading" message that never changed,
+ *    and no way to pay. The hosted form is now always rendered and always visible: a fallback that appears
+ *    only when a script reveals it fails with the script it was meant to cover for.
  *  - **The server decides the amount, not the page.** `amountInKobo()` is called here from the advert row;
  *    nothing on this page can be edited to change what is charged, and the public key in the markup cannot
  *    be used to charge a different figure because the reference is what the server verifies.
@@ -109,18 +119,24 @@ $inlineSettings = [
   </div>
 
   <?php /*
-   * The fallback, and on a church without the inline checkout this is the only thing here.
+   * The alternative route, and it is ALWAYS on the page.
    *
-   * It is hidden until it is needed rather than shown always: with JavaScript working, the reader pays in
-   * the frame above and never sees a second, competing payment button. Without JavaScript it stays hidden,
-   * which is why the "not available" wording above is server-rendered and not script-dependent.
+   * It used to be hidden until JavaScript revealed it, which made the entire page depend on
+   * public/assets/js/advertise.js arriving — and on the live site it did not arrive (404, from a stale
+   * deployment), so every advertiser was left with a disabled button, a "loading" message that never
+   * changed, and no way to pay at all. A fallback that only appears when a script says so is not a
+   * fallback; it is a second thing that breaks with the first.
+   *
+   * It is a plain POST with no JavaScript in it, so it works with scripting off, with the gateway's script
+   * blocked, and with our own script missing entirely — which is exactly the case that stranded the live
+   * site. The button above stays the primary action and gets the inline window when it can.
    */
   ?>
-  <div id="payhub-fallback" <?= $inlineReady ? 'hidden' : '' ?> class="glass-card" style="padding:24px; border-radius:12px; margin-top:20px;">
-    <h2 style="font-size:17px; margin:0 0 8px;">Pay on the gateway's own page instead</h2>
+  <div id="payhub-fallback" class="glass-card" style="padding:24px; border-radius:12px; margin-top:20px;">
+    <h2 style="font-size:17px; margin:0 0 8px;"><?= $inlineReady ? 'Or pay on the gateway\'s own page' : 'Pay on the gateway\'s own page' ?></h2>
     <p style="font-size:13.5px; color:var(--ink-dim); margin:0 0 16px;">
-      Same payment, same reference, on PayHub's secure page rather than inside this one. Use this if the
-      button above does not work.
+      The same payment, for the same reference, on PayHub's secure page rather than inside this one. Use this
+      if the payment window above does not open — it always works.
     </p>
     <form method="post" action="/advertise/hosted">
       <?= Csrf::field() ?>

@@ -2776,6 +2776,29 @@ PayHub documents all of it at `https://merchant.payhub.com.ng/api-reference.php`
 > call, not by a fixture with two adverts and one slot to share between them. That is the next thing to add
 > if this area is touched again.
 
+> **7h-9 shipped — a payment route that does not depend on a script arriving at all.** *(Reported again from
+> the live site: still "Loading the secure payment window…", button disabled.)*
+>
+> The demo was serving a **stale deployment**. `/assets/js/feed.js` and `/assets/js/site.js` load from
+> `/assets/js/…` correctly, but `/assets/js/advertise.js` **returns 404**, and the `feed.js` being served is
+> the pre-7h-4b one (no ad branch, no query-separator fix). So `advertise.js` — committed in `a40cffb` and
+> fixed in `181ab70` — is simply not on that server, and the page it should drive sat inert. **Nothing in the
+> repository can fix a file that was never deployed**; the demo needs the current `main`.
+>
+> But the incident exposed a real design fault, which is what this stage fixes. The hosted-payment form was
+> **hidden until JavaScript revealed it**, so a missing `advertise.js` left the advertiser with a disabled
+> button, a message that never changed, and **no way to pay at all** — the fallback failed together with the
+> thing it was meant to cover for. **A fallback that a script must reveal is not a fallback.** The form is
+> now always rendered and always visible: a plain POST with no JavaScript in it, so it works with scripting
+> off, with the gateway's script blocked, and with our own script missing entirely. The inline button stays
+> the primary action, and the hosted page is offered beneath it as "Or pay on the gateway's own page".
+>
+> **Verified: 16 assertions, 0 failures**, rendering the view directly with the gateway both configured and
+> unconfigured, asserting the hosted form is present, **not hidden**, and carries the CSRF token and the
+> reference in **both** cases. **Not verified: no mutation sweep for this change** — it is a markup fact
+> asserted literally against the rendered page, and re-adding the `hidden` attribute is exactly what that
+> assertion names, but that was reasoned rather than run. Recorded that way rather than implying a sweep.
+
 ### Decisions taken, and two worth confirming
 
 - **"Two failed attempts" is counted per advert**, not per publisher: the advert is what is being bought,
