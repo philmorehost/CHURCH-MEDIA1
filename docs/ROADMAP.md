@@ -65,7 +65,7 @@
 | **4** | WhatsApp channel | Official Cloud API integration (templates, 24-h window, webhooks) | 5–7 sessions | Per-conversation | ✅ closed (4.1–4.3; 4.4 rejected) |
 | **5** | Members & daily engagement | Member accounts, daily devotional, Bible reading plans + streaks, offline sermon downloads | 10–12 sessions | None | ✅ shipped (S1–S6) |
 | **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ✅ **complete** — 6a–6g shipped |
-| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings), 7b shipped (an account belongs to one church), 7c shipped (a unit belongs to one church), 7d-i shipped (worker tenancy plumbing), 7d-ii parts 1–2 and 4 shipped (the SMS worker, the sender-ID poller and the daily publisher report act as one church at a time), 7d-iii shipped (the SMS screens only touch their own church), 7d-iv shipped (the ads tables carry a church), 7d-v shipped (the public advert flow was driven over HTTP, clearing 7d-iv's verification debt), 7d-ii part 3 shipped (the devotional push and the reading reminder act as one church at a time), 7d-ii part 5 shipped (the follow-up and rota emails act as one church at a time), 7d-ii part 6 shipped (the WhatsApp broadcast acts as one church at a time), 7d-ii part 7 shipped (the roll-up and the backup were read, and neither needs a church), 7d-ii leftovers shipped (the SMS counters write and the dashboard spend tiles) |
+| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings), 7b shipped (an account belongs to one church), 7c shipped (a unit belongs to one church), 7d-i shipped (worker tenancy plumbing), 7d-ii parts 1–2 and 4 shipped (the SMS worker, the sender-ID poller and the daily publisher report act as one church at a time), 7d-iii shipped (the SMS screens only touch their own church), 7d-iv shipped (the ads tables carry a church), 7d-v shipped (the public advert flow was driven over HTTP, clearing 7d-iv's verification debt), 7d-ii part 3 shipped (the devotional push and the reading reminder act as one church at a time), 7d-ii part 5 shipped (the follow-up and rota emails act as one church at a time), 7d-ii part 6 shipped (the WhatsApp broadcast acts as one church at a time), 7d-ii part 7 shipped (the roll-up and the backup were read, and neither needs a church), 7d-ii leftovers shipped (the SMS counters write and the dashboard spend tiles), 7e shipped (a church admin edits its own branding, and nothing else) |
 
 **Confirmed 2026-09-12:** multi-tenant **SaaS is a real goal**. That is why **Phase 0
 (tenancy foundation) runs before everything else** — the SMS token, sender IDs, country
@@ -2035,11 +2035,58 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > without a fatal error"* line sitting next to them. That pairing is not optional; it is the only thing
 > that turns an empty page into a failure.
 
-> **Not built yet in Phase 7 (beyond 7d):** letting a church admin edit its own branding
-> (`admin/settings.php` is super-admin only, and letting one in needs a decision about which fields are
-> theirs — name, logo, service times — and which belong to the platform: SMTP, the Payment Gateway, SMS
-> credentials, backups and the licence key). Then self-service tenant provisioning with plan limits,
-> per-tenant upload/cache namespacing, and tenant-scoped analytics and reporting.
+> **7e shipped — a church admin edits its own branding, and nothing else.** New screen `admin/branding.php`,
+> reachable at `/admin/branding` for role `admin`, plus one nav entry. `admin/settings.php` was left exactly
+> as it was: still super-admin only, still holding everything that is not a church's to change.
+>
+> **The boundary is a whitelist, not a blacklist.** The handler reads only the keys named in the screen's
+> own `$branding` array, so a POST carrying `smtp_password`, `license_key` or `payhub_secret_key` changes
+> nothing at all — and adding a field to that array is the only way to make it editable. One array drives
+> both the handler and the form, so what is saved and what is shown cannot drift apart.
+>
+> | Editable by the church | Platform only, never on this screen |
+> |---|---|
+> | Site name, tagline, search description, logo, favicon | SMTP host/user/password/from |
+> | Hero: style, image, eyebrow, headline, scripture, video link, both buttons | Payhub keys, `manual_payment_*` |
+> | Contact email, phone, address | SMS token and sender IDs, all `wa_*` (Meta) credentials |
+> | Social links, giving link | cPanel host/user/token, email domain and quota |
+> | Livestream embed and the live banner | `license_key`, Firebase |
+> | Declaration strip, footer text | `backup_retention_days`, `backup_offsite_path`, `analytics_retention_days` |
+>
+> The last row is why part 7 mattered here: those three are stored in the per-church settings row but
+> applied install-wide, so they are **platform** settings that merely live beside the per-church ones.
+>
+> **Verified (7e): 34 assertions, 0 failures**, and **12 failures** under mutation. The mutation was the
+> honest one — replace the whitelist with "accept everything posted" — and every forbidden column then
+> landed with its posted value (`smtp_password` = `evil-password`, `license_key` = `evil-licence`,
+> `backup_retention_days` = 1).
+>
+> Three things that audit found, each now said in the code:
+>
+> - **`settingSave()` falls back to the SHARED row when no church resolves.** That row is the defaults every
+>   church inherits, so on a host with no church this screen would have rewritten every church's branding
+>   at once. It now refuses to save in that state. Measured: the request is in fact refused *earlier*, by
+>   `Auth`, because an admin session is only valid on a church that resolves — so the screen's own guard is
+>   the second line rather than the first. It is still a real one: deactivating a church while somebody is
+>   signed in produces exactly that state with a live session.
+> - **Link fields are now checked for a scheme.** `javascript:` in an `href` is the reason, and it matters
+>   more now that the people writing these fields are not the platform owner. Only `http(s)://` or empty is
+>   accepted, and only on the fields that hold links.
+> - **`hero_type` cannot silently downgrade.** A church whose hero is currently a video keeps that value
+>   selectable even though `video_upload` is not offered here — uploading a video is the one path on the old
+>   screen that trusts a file extension, and this screen is offered to more people.
+>
+> **Not verified:** the image uploads. `MediaProcessor::processImage()` is called exactly as the existing
+> settings screen calls it, but no file was uploaded in this stage, so logo, favicon and hero image were
+> exercised by reading and not by running.
+
+> **Not built yet in Phase 7 (beyond 7d and 7e):** self-service tenant provisioning with plan limits,
+> per-tenant upload/cache namespacing, and tenant-scoped analytics and reporting. Localisation (`lang/` +
+> a `t()` helper + Flutter ARB), the PWA (manifest, service worker, offline page) and the app
+> widgets/shortcuts have not been started at all.
+>
+> *(The line that used to be here said church-admin branding was still to build. It shipped as 7e below —
+> and the field decision it was waiting on is the whitelist recorded there.)*
 >
 > **"7d-ii part 1 shipped" must not be read as Phase 7 being nearly done.** That commit is one worker of
 > eleven. Phase 7's own scope line is *multi-tenant onboarding, localisation, PWA, app widgets*, and of

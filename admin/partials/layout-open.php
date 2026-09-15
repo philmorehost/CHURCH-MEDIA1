@@ -35,6 +35,7 @@ $navGroups = [
         'key' => 'content',
         'label' => 'Content',
         'items' => [
+            ['key' => 'branding', 'href' => '/admin/branding', 'label' => 'Branding', 'roles' => ['admin']],
             ['key' => 'media', 'href' => '/admin/media', 'label' => 'Media & Reels'],
             ['key' => 'comments', 'href' => '/admin/comments', 'label' => 'Comments'],
             ['key' => 'ads', 'href' => '/admin/ads', 'label' => 'Ads Management'],
