@@ -776,6 +776,40 @@ $router->get('/advertise/checkout', function () use ($loadAdByReference) {
 
     $ad = $loadAdByReference($ref);
     if ($ad === null) {
+        /*
+         * This 404 is invisible from the outside, and that has cost several rounds of guessing. It looks
+         * identical whether the reference was never written, was written for a different church (the lookup
+         * is church-scoped), or was typed wrong — three different faults with one symptom. So it is recorded
+         * in one line, with the two facts that tell them apart: the church this request resolved to, and
+         * whether a row for that reference exists at all, and under whose church.
+         *
+         * The page stays a plain 404. Nothing here reaches the visitor: a stranger must not be able to probe
+         * references and read the answer back.
+         */
+        try {
+            $diag = Database::getInstance()->getConnection()->prepare(
+                'SELECT a.tenant_id, a.status, a.payment_status FROM ad_payments pay'
+                . ' JOIN ads a ON a.id = pay.ad_id WHERE pay.reference = ? LIMIT 1'
+            );
+            $diag->execute([$ref]);
+            $row = $diag->fetch(PDO::FETCH_ASSOC);
+
+            $logDir = STORAGE_PATH . '/logs';
+            if (!is_dir($logDir)) { @mkdir($logDir, 0775, true); }
+            @file_put_contents(
+                $logDir . '/payment.log',
+                date('c') . ' checkout 404'
+                . ' ref=' . $ref
+                . ' resolved_tenant=' . var_export(Tenant::id(), true)
+                . ' session_ref=' . ((string) ($_SESSION['ad_checkout_ref'] ?? '') !== '' ? 'set' : 'none')
+                . ' row_anywhere=' . ($row ? json_encode($row) : 'NONE')
+                . PHP_EOL,
+                FILE_APPEND
+            );
+        } catch (Throwable $e) {
+            // Diagnosing a 404 must never itself become a 500.
+        }
+
         http_response_code(404);
         render('404', [], true);
         return;
