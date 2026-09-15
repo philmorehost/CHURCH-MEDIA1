@@ -95,10 +95,40 @@ final class Payhub
         return trim((string) setting('payhub_secret_key'));
     }
 
-    /** Naira to kobo. The single conversion in the application. */
+    /**
+     * Naira to kobo — for the INLINE window only.
+     *
+     * The gateway's own inline example is `amount: document.getElementById("amount").value * 100`, and
+     * `PayhubPop.setup()` takes that kobo figure. This is the conversion the checkout page puts in
+     * `data-payhub`.
+     */
     public static function amountInKobo($amount): int
     {
         return (int) round(((float) $amount) * 100);
+    }
+
+    /**
+     * Naira, unchanged — for the HOSTED checkout only.
+     *
+     * The API reference says "Amount is in kobo" for `Initialize Transaction`, and then shows its own
+     * example: `authorization_url: https://merchant.payhub.com.ng/checkout.php?ref=PH_abc&amount=500000`.
+     * A real transaction proves which of those is true: an advert priced at **₦9,000** was sent as 900000
+     * kobo, and the gateway's checkout page **displayed ₦900,000** — a hundred times the price the
+     * advertiser had chosen and seen on our own page.
+     *
+     * So the two paths disagree, and the money decides it. Inline takes kobo (its own documentation says
+     * so, and it multiplies by 100 itself). The hosted checkout takes the naira figure. Sending kobo to the
+     * hosted page charges a hundred times what the advertiser agreed to; sending naira to the inline window
+     * would charge a hundredth. Hence two functions with names that cannot be confused, rather than one
+     * helper used by both — which is exactly the mistake this replaces.
+     *
+     * ⚠️ The hosted figure was confirmed against a live test transaction on 2026-09-15. If PayHub later
+     * corrects `checkout.php` to divide by 100, this must be re-checked with a small real payment; nothing
+     * here can detect that from the outside, because their page echoes the number it was given either way.
+     */
+    public static function amountInNaira($amount): int
+    {
+        return (int) round((float) $amount);
     }
 
     /** A reference the gateway will accept and we can find again. Unique by construction. */

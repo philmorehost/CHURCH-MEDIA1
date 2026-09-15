@@ -51,8 +51,10 @@ $metaRobots = 'noindex, nofollow';
 $inlineReady = Payhub::inlineReady();
 
 /*
- * What the checkout script is given. `amount` is in KOBO — see Payhub::amountInKobo() — because the
- * gateway documents kobo and a naira figure here would charge a hundredth of the price. It is passed as
+ * What the checkout script is given. `amount` is in KOBO — the inline window's unit, per the gateway's own
+ * example (`value * 100`) — while the HOSTED route sends the naira figure, because the hosted checkout page
+ * renders what it is given as naira and sending it kobo displayed ₦900,000 for a ₦9,000 advert. Two units,
+ * two functions: Payhub::amountInKobo() and Payhub::amountInNaira(). It is passed as
  * JSON in a data attribute rather than interpolated into a JavaScript literal, so no value can end the
  * attribute or the string it lands in.
  */

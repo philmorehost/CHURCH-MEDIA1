@@ -2799,6 +2799,38 @@ PayHub documents all of it at `https://merchant.payhub.com.ng/api-reference.php`
 > asserted literally against the rendered page, and re-adding the `hidden` attribute is exactly what that
 > assertion names, but that was reasoned rather than run. Recorded that way rather than implying a sweep.
 
+> **7h-10 shipped — the gateway was being charged a hundred times the advertiser's price.** *(Reported from a
+> live test transaction: a ₦9,000 package appeared on PayHub's checkout as ₦900,000.)*
+>
+> `Payhub::amountInKobo()` was applied to **both** PayHub paths. The API reference documents kobo for
+> `Initialize Transaction`, and its own example returns
+> `checkout.php?ref=PH_abc&amount=500000` — but the live gateway **renders that number as naira**, so the
+> ₦9,000 advert we sent as `900000` was presented as ₦900,000. The advertiser saw one price on our page and
+> a hundred times it on the gateway's. **Their prose said kobo; their page said naira; the money decides.**
+>
+> There are now **two named functions and no shared helper**, because one helper used by both was the bug:
+> `amountInKobo()` for the **inline window** (the gateway's own example is `value * 100`, and inline takes
+> kobo) and `amountInNaira()` for the **hosted checkout** (which renders what it is given as naira). The
+> giving flow's `initialize()` call is hosted, so it moves to naira too — it had the same hundred-fold fault
+> waiting on its first real donation.
+>
+> ⚠️ **This cannot be detected from the outside**, because PayHub's page echoes whatever number it was given:
+> a unit mismatch looks identical to a correct figure until a human reads the amount on the gateway's screen.
+> The hosted figure was confirmed against a live test transaction on 2026-09-15; if PayHub later changes
+> `checkout.php`, it must be re-checked with a small real payment.
+>
+> **`callback_url` is not in PayHub's documented `Initialize Transaction` parameters** — which is why the
+> advertiser is left on the gateway's success page with no way back. The inline window's `callback` **is**
+> documented and does work, so the inline path is now the primary one and the hosted page the fallback.
+> Reliable crediting on the hosted path therefore depends on **the webhook** (`POST /payment/payhub/webhook`,
+> HMAC-SHA256 over the raw body — implemented and correct per the docs) being registered in the PayHub
+> merchant dashboard, which is a dashboard setting rather than code.
+>
+> **Verified: 13 assertions, 0 failures**, and **both unit assertions caught a deliberate reversion** (six
+> failures each) when `amountInNaira` was made to multiply by 100 again, and when `amountInKobo` stopped
+> doing so. Not verified: no real payment was made at the corrected figure — the next test transaction with a
+> small amount is what proves the hosted page now shows the advertiser's own price.
+
 ### Decisions taken, and two worth confirming
 
 - **"Two failed attempts" is counted per advert**, not per publisher: the advert is what is being bought,

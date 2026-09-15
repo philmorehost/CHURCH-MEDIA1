@@ -749,7 +749,9 @@ $router->post('/advertise/hosted', function () use ($loadAdByReference) {
 
     $result = Payhub::initialize([
         'email' => (string) $ad['publisher_email'],
-        'amount' => Payhub::amountInKobo((float) $ad['price']),
+        // NAIRA, not kobo: the hosted checkout renders the figure it is given as naira. See
+        // Payhub::amountInNaira() — sending kobo here charged ₦900,000 for a ₦9,000 advert.
+        'amount' => Payhub::amountInNaira((float) $ad['price']),
         'reference' => $ref,
         'name' => (string) $ad['publisher_name'],
         'callback_url' => baseUrl('advertise/return?ref=' . urlencode($ref)),
@@ -1374,7 +1376,8 @@ $router->post('/give', function () {
         $result = Payhub::initialize([
             // Kobo, per the gateway's documentation: `500000` is ₦5,000. This used to send naira here and
             // kobo in the advert flow, so one of the two was always going to be a hundred times out.
-            'amount' => Payhub::amountInKobo($amount),
+            // NAIRA, not kobo — the hosted route's unit. See Payhub::amountInNaira().
+            'amount' => Payhub::amountInNaira($amount),
             'email' => $donorEmail,
             'reference' => $ref,
             'callback_url' => $callbackUrl,
