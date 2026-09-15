@@ -2350,7 +2350,8 @@ PayHub documents all of it at `https://merchant.payhub.com.ng/api-reference.php`
   opens the iframe in the page. `callback` → `/advertise/return`; `onClose` → the retry path.
   **If `inline.js` cannot be loaded the button must say so and fall back to the hosted checkout**, because
   the alternative is a payment button that silently does nothing.
-- **7h-4 — `/advertise/return` and the real report.** The reference is verified **server-side** — never
+- **7h-4 — `/advertise/return` and the real report.** ✅ **shipped** — see the note under *What has shipped
+  so far*. The reference is verified **server-side** — never
   trusted from the browser. Success: attempt `success`, advert `paid`, straight to the advertiser dashboard
   with the advert listed as pending review. Failure: attempt `failed` with the gateway's reason,
   `payment_attempts++`, and a report page that says what happened and offers **Retry**. After **two**
@@ -2569,6 +2570,48 @@ PayHub documents all of it at `https://merchant.payhub.com.ng/api-reference.php`
 > two failed online attempts, and the proof upload. `/advertise/return` records the outcome and reports it;
 > it does not yet offer the next step, and `views/advertise-return.php` says so in as many words rather than
 > offering a button that leads nowhere.
+
+> **7h-4 shipped — the advertiser can try again, and after two failures the card simply stops being
+> offered.** *(The report, the return page, the proof upload and the new routes are all `core/routes.php`,
+> `core/AdPayments.php` and `views/advertise-return.php`; no new table was needed — 7h-2 had already put
+> `attempt_no`, `payment_proof_path` and `payment_method` there.)*
+>
+> **Each attempt is now its own reference, and that is the whole point of the stage.** A retry mints a
+> **new** `PH_AD` reference, inserts a new attempt row with `attempt_no = MAX+1`, and moves
+> `ads.payment_reference` to the new one. The old attempt is left exactly as it was — `pending` is a
+> perfectly good final state for an attempt nobody ever came back from, and it keeps the history honest:
+> "this advertiser tried twice, and the second one is the one that matters."
+>
+> **Two real defects were found by strengthening the assertions, not by reading the code:**
+>
+> 1. **The attempt writes were not scoped by reference.** They matched `ad_id = ? AND status = 'pending'`,
+>    which is *whichever attempt happens to be waiting* — so an **old attempt's return URL settled the
+>    newest attempt**, marking it failed with the old failure's reason and burning the advertiser's second
+>    try. Both writes (the success and the failure) now carry `AND reference = ?`. With one attempt this is
+>    invisible; the moment retries exist it is a money bug.
+> 2. **`recordProof()` had no paid guard.** A stray receipt upload could take an advert that had already
+>    been paid — by card, an hour ago — and push it back to `pending_review`. It now returns early when
+>    `payment_status === 'paid'`. A receipt may never un-pay an advert.
+>
+> **And one more, found only because an assertion was rewritten to ask *which* refusal came back:**
+> `views/advertise-return.php` **did not render the flash message at all.** Every refusal in the proof
+> handler redirects to exactly that page, so an advertiser who picked a PDF or a 40MB photo was bounced back
+> to a report with no explanation whatsoever — the sentence written for them was read by nobody. The first
+> version of the assertion only checked *that the upload was refused*, and it passed with the file guard
+> deleted, because `MediaProcessor::processImage('')` fails too. Asking which message came back found both
+> the missing render **and** the vacuity. **A flash message that no page displays is not a message.**
+>
+> **Verified (7h-4): 67 assertions, 0 failures**, and **thirteen mutations, thirteen caught** — including
+> the two that the first sweep missed ("a success settles whichever attempt is waiting rather than the one
+> the reference names", "a proof upload with no file is accepted") and the missing flash render. The runner
+> confirmed every file it touched was byte-identical afterwards.
+>
+> **Not verified: no live PayHub transaction, and no browser.** No account is configured, so the retry is
+> proven against a stubbed transport — the *new reference*, the *new attempt row*, and the *refusal after
+> two failures* are all proven, but no second card has ever actually been charged. The retry form, the
+> bank-transfer card and the file input have **never been rendered by a browser**; the multipart upload is
+> driven from PHP, which is why it is worth saying that the browser-side version of the same form has not
+> been exercised.
 
 ### Decisions taken, and two worth confirming
 

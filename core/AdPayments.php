@@ -36,14 +36,19 @@ final class AdPayments
     /**
      * Records the outcome of one verification against one advert.
      *
-     * @param  array<string, mixed> $ad       the advert row
-     * @param  array<string, mixed> $verified the array `Payhub::verify()` returned
+     * @param  array<string, mixed> $ad        the advert row
+     * @param  array<string, mixed> $verified  the array `Payhub::verify()` returned
+     * @param  string               $reference the reference the return URL arrived with
      * @return array{outcome:string,reason:string} 'paid' | 'pending' | 'failed', and what to tell the advertiser
      */
-    public static function recordOutcome(array $ad, array $verified): array
+    public static function recordOutcome(array $ad, array $verified, string $reference): array
     {
         $adId = (int) $ad['id'];
-        $reference = (string) $ad['payment_reference'];
+
+        // The reference the URL carried, not the advert's current one. A retry gets its own reference, so
+        // an older attempt's return URL is still a return URL — and the attempt it settles is the attempt
+        // that reference belongs to, which is exactly what the delete below has to match.
+        $reference = trim($reference) !== '' ? trim($reference) : (string) $ad['payment_reference'];
 
         // Already settled. A return URL that has been visited once will be visited again — by a refresh, a
         // back button, a mail client prefetching the link — and none of those may record anything twice.
@@ -62,11 +67,14 @@ final class AdPayments
             self::db()->prepare('UPDATE ads SET payment_status = "paid" WHERE id = ? AND tenant_id = ?')
                 ->execute([$adId, (int) $ad['tenant_id']]);
 
-            // `AND status = "pending"` is the second half of the replay guard: the attempt that was waiting
-            // is settled, and a later visit finds nothing left to settle.
+            // `AND status = "pending"` and `AND reference = ?` together are what make a replayed return
+            // harmless — and the reference is not decoration. With retries there can be several attempts on
+            // one advert, and `status = "pending"` alone settles whichever of them is waiting: visiting an
+            // OLD attempt's return URL would mark the NEWEST attempt failed with the old one's reason. The
+            // reference is what identifies the attempt this answer is about.
             self::db()->prepare('UPDATE ad_payments SET status = "success", gateway_response = ?, failure_reason = NULL
-                                 WHERE ad_id = ? AND status = "pending" AND payment_method = "online"')
-                ->execute([$payload, $adId]);
+                                 WHERE ad_id = ? AND reference = ? AND status = "pending" AND payment_method = "online"')
+                ->execute([$payload, $adId, $reference]);
 
             self::syncAttemptCount($adId);
 
@@ -93,8 +101,8 @@ final class AdPayments
         }
 
         self::db()->prepare('UPDATE ad_payments SET status = "failed", failure_reason = ?, gateway_response = ?
-                             WHERE ad_id = ? AND status = "pending" AND payment_method = "online"')
-            ->execute([mb_substr($reason, 0, 255), $payload, $adId]);
+                             WHERE ad_id = ? AND reference = ? AND status = "pending" AND payment_method = "online"')
+            ->execute([mb_substr($reason, 0, 255), $payload, $adId, $reference]);
 
         self::syncAttemptCount($adId);
 
@@ -127,5 +135,92 @@ final class AdPayments
     public static function remainingOnlineAttempts(int $adId): int
     {
         return max(0, self::MAX_ONLINE_ATTEMPTS - self::failedOnlineAttempts($adId));
+    }
+
+    /** Whether the advertiser may still try a card payment. False means bank transfer is the only option. */
+    public static function canRetryOnline(int $adId): bool
+    {
+        return self::remainingOnlineAttempts($adId) > 0;
+    }
+
+    /**
+     * Opens a new payment attempt and returns it.
+     *
+     * **A new reference every time, and this is the point of the method.** Two reasons, either of which is
+     * enough: a gateway identifies a transaction by its reference, so re-offering one that has already been
+     * used is asking it to refuse or — worse — to answer about the old one; and the attempt is the unit this
+     * whole stage counts, so a reference that belonged to a previous attempt would make two attempts
+     * indistinguishable in the log.
+     *
+     * `ads.payment_reference` is kept pointing at the newest attempt so a callback or a webhook quote still
+     * resolves, and the attempt row is the record of the one before it.
+     *
+     * @return array{reference:string,attempt_no:int}
+     */
+    public static function startAttempt(array $ad): array
+    {
+        $adId = (int) $ad['id'];
+        $reference = Payhub::reference('PH_AD');
+
+        $next = (int) self::db()->query('SELECT COALESCE(MAX(attempt_no), 0) FROM ad_payments WHERE ad_id = ' . $adId)->fetchColumn() + 1;
+
+        self::db()->prepare('INSERT INTO ad_payments (ad_id, publisher_id, amount, payment_method, reference, status, attempt_no)
+                             VALUES (?, ?, ?, "online", ?, "pending", ?)')->execute([
+            $adId,
+            (int) $ad['publisher_id'],
+            (float) $ad['price'],
+            $reference,
+            $next,
+        ]);
+
+        self::db()->prepare('UPDATE ads SET payment_reference = ? WHERE id = ? AND tenant_id = ?')
+            ->execute([$reference, $adId, (int) $ad['tenant_id']]);
+
+        self::syncAttemptCount($adId);
+
+        return ['reference' => $reference, 'attempt_no' => $next];
+    }
+
+    /**
+     * Records a bank-transfer proof against an advert.
+     *
+     * The advert moves to `pending_review`, which is the value the enum was designed for and which nothing
+     * wrote until now: the money has been sent but nobody has seen it arrive. It is **not** `paid` — an
+     * advertiser's photograph of a receipt is a claim, not a payment, and the admin screen is what confirms
+     * it. The attempt row is written for the same reason the online ones are: the log should show how the
+     * money is expected to arrive, and an admin looking at six weeks of adverts should not have to guess
+     * which ones were bank transfers.
+     */
+    public static function recordProof(array $ad, string $proofPath): void
+    {
+        $adId = (int) $ad['id'];
+
+        // A receipt cannot un-pay an advert.
+        //
+        // The route refuses this too, but the guard belongs here as well: "upload a transfer receipt" must
+        // never be a way to move a paid advert back to `pending_review`, because that would put money the
+        // church has already collected back into the queue of payments nobody has confirmed. Same reasoning
+        // as the early return in `recordOutcome()` — the caller is not the only thing that can be wrong.
+        if ((string) $ad['payment_status'] === 'paid') {
+            return;
+        }
+
+        self::db()->prepare('UPDATE ads SET payment_status = "pending_review", payment_method = "manual", payment_proof_path = ?
+                             WHERE id = ? AND tenant_id = ?')
+            ->execute([$proofPath, $adId, (int) $ad['tenant_id']]);
+
+        $next = (int) self::db()->query('SELECT COALESCE(MAX(attempt_no), 0) FROM ad_payments WHERE ad_id = ' . $adId)->fetchColumn() + 1;
+
+        self::db()->prepare('INSERT INTO ad_payments (ad_id, publisher_id, amount, payment_method, reference, status, attempt_no, proof_path)
+                             VALUES (?, ?, ?, "manual", ?, "pending", ?, ?)')->execute([
+            $adId,
+            (int) $ad['publisher_id'],
+            (float) $ad['price'],
+            'MANUAL_' . strtoupper(bin2hex(random_bytes(6))),
+            $next,
+            $proofPath,
+        ]);
+
+        self::syncAttemptCount($adId);
     }
 }

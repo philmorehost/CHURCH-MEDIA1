@@ -10,10 +10,14 @@ declare(strict_types=1);
  * before the redirect ever lands.
  *
  * @var array<string, mixed> $ad        the advert row after the outcome was recorded
+ * @var string               $reference the reference the advertiser arrived with
  * @var string               $outcome   'paid' | 'failed' | 'pending'
  * @var string               $reason    what the gateway said, empty when it said nothing useful
  * @var int                  $attempts  how many payment attempts this advert now has on record
  * @var int                  $remaining online attempts left before bank transfer is the only option
+ * @var bool                 $canRetry  whether a card payment may be attempted again at all
+ * @var bool                 $manualEnabled
+ * @var string               $manualInstructions the church's own bank details
  */
 
 $metaTitle = 'Payment result';
@@ -34,6 +38,22 @@ $headline = [
 ][$outcome] ?? 'Payment was not completed';
 ?>
 <div class="container section" style="max-width:640px; padding-top:40px; padding-bottom:60px;">
+
+  <?php
+  /*
+   * The message from whatever sent the advertiser here — a receipt that could not be read, a card payment
+   * that could not be started.
+   *
+   * This page did not render it, and every refusal in the proof handler redirects to exactly here: so an
+   * advertiser who chose a PDF or a 40MB photo was bounced back to a report with no explanation whatsoever,
+   * and the sentence written for them was read by nobody. A flash message that no page displays is not a
+   * message.
+   */
+  ?>
+  <?php if ($msg = flash('advertise_error')): ?>
+    <div style="margin-bottom:20px; padding:12px 16px; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); color:#f87171; border-radius:8px; font-size:14px;"><?= e($msg) ?></div>
+  <?php endif; ?>
+
   <div class="glass-card" style="padding:32px; border-radius:12px; text-align:center;">
 
     <div style="font-size:44px; margin-bottom:10px;">
@@ -76,20 +96,26 @@ $headline = [
 
     <?php if ($outcome !== 'paid'): ?>
       <p style="font-size:13.5px; color:var(--ink-dim); margin:0 0 18px;">
-        <?php if ($remaining > 0): ?>
+        <?php if ($canRetry): ?>
           You can try the card payment again — you have
           <?= (int) $remaining ?> <?= $remaining === 1 ? 'attempt' : 'attempts' ?> left before bank transfer
           becomes the only option.
         <?php else: ?>
-          Card payment has not worked, so please pay by bank transfer and upload the receipt.
+          Card payment has not worked after <?= (int) $attempts ?> attempts, so please pay by bank transfer.
         <?php endif; ?>
       </p>
 
       <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+        <?php if ($canRetry): ?>
+          <?php /* A POST, because retrying creates a payment attempt. A GET that creates anything is a GET
+                   that a mail client pre-fetches and a crawler follows. */ ?>
+          <form method="post" action="/advertise/retry" style="display:inline;">
+            <?= Csrf::field() ?>
+            <input type="hidden" name="ref" value="<?= e($reference) ?>">
+            <button type="submit" class="btn btn-gold">Try the card payment again</button>
+          </form>
+        <?php endif; ?>
         <a class="btn btn-ghost" href="/advertise?sent=1">Go to my advert</a>
-        <?php /* The retry route and the bank-transfer upload are 7h-4. Until they exist this is honest
-                 about where things stand rather than offering a button that leads nowhere. */ ?>
-        <a class="btn btn-outline" href="/ad-manager">Open the Publisher Portal</a>
       </div>
     <?php else: ?>
       <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
@@ -98,4 +124,50 @@ $headline = [
       </div>
     <?php endif; ?>
   </div>
+
+  <?php
+  /*
+   * Bank transfer.
+   *
+   * Shown as the only route once the card attempts are used up, and as an alternative before that for
+   * anyone who would rather not use a card. The instructions are the church's own — `settings` has carried
+   * `manual_payment_instructions` since the ads screens were built, and printing it here is the first time
+   * an advertiser has actually been shown it.
+   */
+  ?>
+  <?php if ($outcome !== 'paid' && $manualEnabled): ?>
+    <div class="glass-card" style="padding:26px; border-radius:12px; margin-top:20px;">
+      <h2 style="font-size:18px; margin:0 0 10px;">
+        <?= $canRetry ? 'Or pay by bank transfer' : 'Pay by bank transfer' ?>
+      </h2>
+
+      <div style="font-size:13.5px; color:var(--ink-dim); line-height:1.7; margin-bottom:18px;">
+        <?php if (trim($manualInstructions) !== ''): ?>
+          <?= nl2br(e($manualInstructions)) ?>
+        <?php else: ?>
+          Please contact the church office for the account to transfer to, then upload your receipt here.
+        <?php endif; ?>
+      </div>
+
+      <p style="font-size:12.5px; color:var(--ink-faint); margin:0 0 14px;">
+        Transfer <strong>₦<?= e(number_format((float) $ad['price'], 2)) ?></strong> and quote
+        <code><?= e((string) $ad['payment_reference']) ?></code> as the reference, then upload the receipt
+        or a screenshot of it below. Your advert is reviewed once the payment is confirmed.
+      </p>
+
+      <form method="post" action="/advertise/proof" enctype="multipart/form-data">
+        <?= Csrf::field() ?>
+        <input type="hidden" name="ref" value="<?= e($reference) ?>">
+        <label for="payment_proof" style="display:block; font-size:12.5px; color:var(--ink-dim); margin-bottom:6px; font-weight:600;">
+          Receipt or screenshot
+        </label>
+        <input type="file" id="payment_proof" name="payment_proof" accept="image/*" required
+               style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border-soft); background:rgba(255,255,255,0.05); color:inherit;">
+        <p style="font-size:12px; color:var(--ink-faint); margin:8px 0 14px;">
+          A photo or a screenshot is fine. Nothing is charged automatically — our team confirms the transfer.
+        </p>
+        <button type="submit" class="btn btn-outline">Upload my receipt</button>
+      </form>
+    </div>
+  <?php endif; ?>
 </div>

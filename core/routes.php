@@ -545,7 +545,30 @@ $loadAdByReference = function (string $reference): ?array {
     }
     $pdo = Database::getInstance()->getConnection();
     [$tenantClause, $tenantParams] = tenantScope(null, 'a.tenant_id');
-    $stmt = $pdo->prepare('SELECT a.*, p.name AS publisher_name, p.email AS publisher_email
+
+    // Resolved through the ATTEMPT, not through `ads.payment_reference`.
+    //
+    // A retry gets its own reference — a gateway identifies a transaction by its reference, so re-offering
+    // one it has already seen is asking it to answer about the previous attempt. That makes the reference an
+    // identifier for the attempt, and an older attempt's return URL has to keep routing after a newer one
+    // exists. `ads.payment_reference` tracks the newest attempt; `ad_payments.reference` remembers all of
+    // them, and it is the one that can answer the question.
+    $stmt = $pdo->prepare('SELECT a.*, p.name AS publisher_name, p.email AS publisher_email, pay.reference AS attempt_reference
+                           FROM ad_payments pay
+                           JOIN ads a ON a.id = pay.ad_id
+                           JOIN ad_publishers p ON p.id = a.publisher_id
+                           WHERE pay.reference = ? AND ' . $tenantClause . ' LIMIT 1');
+    $stmt->execute(array_merge([trim($reference)], $tenantParams));
+    $row = $stmt->fetch();
+
+    if ($row) {
+        return $row;
+    }
+
+    // An advert whose attempt row is missing: the submission handler writes both, so this is a state it
+    // cannot normally produce, and the fallback exists so that a half-written advert is still reachable
+    // rather than showing the advertiser a 404 for a payment they may have made.
+    $stmt = $pdo->prepare('SELECT a.*, p.name AS publisher_name, p.email AS publisher_email, a.payment_reference AS attempt_reference
                            FROM ads a JOIN ad_publishers p ON p.id = a.publisher_id
                            WHERE a.payment_reference = ? AND ' . $tenantClause . ' LIMIT 1');
     $stmt->execute(array_merge([trim($reference)], $tenantParams));
@@ -659,18 +682,113 @@ $router->get('/advertise/return', function () use ($loadAdByReference) {
     if ((string) $ad['payment_status'] === 'paid') {
         $result = ['outcome' => 'paid', 'reason' => ''];
     } else {
-        $result = AdPayments::recordOutcome($ad, Payhub::verify($ref));
+        $result = AdPayments::recordOutcome($ad, Payhub::verify($ref), $ref);
     }
 
     $fresh = $loadAdByReference($ref) ?? $ad;
 
     render('advertise-return', [
         'ad' => $fresh,
+        'reference' => $ref,
         'outcome' => $result['outcome'],
         'reason' => $result['reason'],
         'attempts' => (int) $fresh['payment_attempts'],
         'remaining' => AdPayments::remainingOnlineAttempts((int) $fresh['id']),
+        // The retry offer is decided here and not in the view: whether the advertiser may try a card payment
+        // again is a rule about their money, and a view is the wrong place for it.
+        //
+        // Deliberately NOT also requiring that the inline checkout is available. Those are different
+        // questions: a church with a verification key but no public key can still take and confirm a card
+        // payment, it just does so on the gateway's own page — and hiding the retry from that church's
+        // advertisers would strand a payment they can perfectly well make. The checkout page chooses
+        // between the frame and the hosted form; the report only decides whether to offer a retry.
+        'canRetry' => (string) $fresh['payment_status'] !== 'paid'
+            && AdPayments::canRetryOnline((int) $fresh['id']),
+        'manualEnabled' => (bool) setting('manual_payment_enabled', 1),
+        'manualInstructions' => (string) setting('manual_payment_instructions', ''),
     ]);
+});
+
+// Retry: opens a new attempt and sends the advertiser back to the checkout for it.
+//
+// A POST rather than a link, because it creates a payment attempt and a GET that creates anything is a GET
+// that a mail client will pre-fetch, or a crawler will follow, or somebody will bookmark and reload.
+$router->post('/advertise/retry', function () use ($loadAdByReference) {
+    Csrf::requireValid();
+
+    $ref = trim((string) ($_POST['ref'] ?? ''));
+    $sessionRef = (string) ($_SESSION['ad_checkout_ref'] ?? '');
+
+    // The same session gate as the checkout page, for the same reason: this starts a payment.
+    if ($ref === '' || $sessionRef === '' || !hash_equals($sessionRef, $ref)) {
+        http_response_code(404);
+        render('404', [], true);
+        return;
+    }
+
+    $ad = $loadAdByReference($ref);
+    if ($ad === null) {
+        http_response_code(404);
+        render('404', [], true);
+        return;
+    }
+
+    if ((string) $ad['payment_status'] === 'paid') {
+        redirect('/advertise/return?ref=' . urlencode($ref));
+    }
+
+    // Refused in the handler, not merely hidden in the view. Two failed attempts is the advertiser's own
+    // rule and a hidden button is not an enforcement of it.
+    if (!AdPayments::canRetryOnline((int) $ad['id'])) {
+        flash('advertise_error', 'Card payment has not worked after two attempts. Please pay by bank transfer instead.');
+        redirect('/advertise/return?ref=' . urlencode($ref));
+    }
+
+    $attempt = AdPayments::startAttempt($ad);
+
+    // The session follows the newest attempt, so the earlier attempt's checkout page stops being payable the
+    // moment a new one exists — otherwise going back in the browser would offer to charge twice.
+    $_SESSION['ad_checkout_ref'] = $attempt['reference'];
+
+    redirect('/advertise/checkout?ref=' . urlencode($attempt['reference']));
+});
+
+// The bank-transfer proof. What an advertiser uploads as evidence of a transfer they have made.
+$router->post('/advertise/proof', function () use ($loadAdByReference) {
+    Csrf::requireValid();
+
+    $ref = trim((string) ($_POST['ref'] ?? ''));
+    $ad = $loadAdByReference($ref);
+
+    if ($ad === null) {
+        http_response_code(404);
+        render('404', [], true);
+        return;
+    }
+
+    if ((string) $ad['payment_status'] === 'paid') {
+        redirect('/advertise/return?ref=' . urlencode($ref));
+    }
+
+    $upload = $_FILES['payment_proof'] ?? null;
+    if (!$upload || empty($upload['tmp_name']) || ($upload['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        flash('advertise_error', 'Please choose the receipt or screenshot of your bank transfer.');
+        redirect('/advertise/return?ref=' . urlencode($ref));
+    }
+
+    // The same processor the submission form has always used for a proof, so a receipt is stored one way.
+    $proofName = MediaProcessor::processImage($upload['tmp_name'], UPLOADS_PATH . '/ads/proofs');
+    if (!$proofName) {
+        flash('advertise_error', 'That file could not be read as an image. A photo or a screenshot of the receipt is fine.');
+        redirect('/advertise/return?ref=' . urlencode($ref));
+    }
+
+    AdPayments::recordProof($ad, 'ads/proofs/' . $proofName);
+
+    // `pending_review` is not one of the three outcomes the report page renders, so the advertiser is sent
+    // to the page that says what happens next rather than to one that would have to invent a fourth state.
+    flash('advertise_sent', '1');
+    redirect('/advertise?sent=1');
 });
 
 // Public church-admin self-registration (super admin approves afterwards).
