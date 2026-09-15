@@ -661,7 +661,7 @@ $loadAdByReference = function (string $reference): ?array {
     // identifier for the attempt, and an older attempt's return URL has to keep routing after a newer one
     // exists. `ads.payment_reference` tracks the newest attempt; `ad_payments.reference` remembers all of
     // them, and it is the one that can answer the question.
-    $stmt = $pdo->prepare('SELECT a.*, p.name AS publisher_name, p.email AS publisher_email, pay.reference AS attempt_reference
+    $stmt = $pdo->prepare('SELECT a.*, p.name AS publisher_name, p.email AS publisher_email, p.token AS publisher_token, pay.reference AS attempt_reference
                            FROM ad_payments pay
                            JOIN ads a ON a.id = pay.ad_id
                            JOIN ad_publishers p ON p.id = a.publisher_id
@@ -676,7 +676,7 @@ $loadAdByReference = function (string $reference): ?array {
     // An advert whose attempt row is missing: the submission handler writes both, so this is a state it
     // cannot normally produce, and the fallback exists so that a half-written advert is still reachable
     // rather than showing the advertiser a 404 for a payment they may have made.
-    $stmt = $pdo->prepare('SELECT a.*, p.name AS publisher_name, p.email AS publisher_email, a.payment_reference AS attempt_reference
+    $stmt = $pdo->prepare('SELECT a.*, p.name AS publisher_name, p.email AS publisher_email, p.token AS publisher_token, a.payment_reference AS attempt_reference
                            FROM ads a JOIN ad_publishers p ON p.id = a.publisher_id
                            WHERE a.payment_reference = ? AND ' . $tenantClause . ' LIMIT 1');
     $stmt->execute(array_merge([trim($reference)], $tenantParams));
@@ -794,6 +794,24 @@ $router->get('/advertise/return', function () use ($loadAdByReference) {
     }
 
     $fresh = $loadAdByReference($ref) ?? $ad;
+
+    /*
+     * A payment that succeeded goes to the advertiser's own dashboard, not to a report.
+     *
+     * The report page exists to explain a failure and to offer the retry and the bank-transfer proof; a
+     * successful payment has nothing to explain, and the advertiser's next question is about the advert,
+     * not the transaction. So they land where the advert lives, told what happened to their money and what
+     * happens next — pending review and approval — with the advert itself listed below the message.
+     *
+     * A failure still renders the report, because retry and proof upload are the whole point of it.
+     */
+    if ($result['outcome'] === 'paid' && !empty($fresh['publisher_token'])) {
+        flash('pub_success', 'Payment received — ₦' . number_format((float) $fresh['price'], 2)
+            . ' for "' . (string) $fresh['title'] . '".'
+            . ' Transaction status: PAID (reference ' . $ref . ').'
+            . ' Your advert is now pending review and approval — we will email you the moment it goes live.');
+        redirect('/ad-manager?token=' . rawurlencode((string) $fresh['publisher_token']));
+    }
 
     render('advertise-return', [
         'ad' => $fresh,

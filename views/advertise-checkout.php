@@ -12,6 +12,12 @@ declare(strict_types=1);
  *    is the upgrade, not the floor — which is the only shape that satisfies "if `inline.js` cannot be
  *    loaded the button must say so and fall back", because a fallback that is assembled by the same
  *    JavaScript that failed is not a fallback.
+ *  - **Nothing here works without `advertise.js`.** This page renders the settings and the button, but the
+ *    script that reads them and calls `PayhubPop.setup()`/`openIframe()` is `public/assets/js/advertise.js`,
+ *    and this page did not load it. The result was not a degraded checkout — it was a dead one: the button
+ *    sat disabled and the status stayed on "Loading the secure payment window…" for every advertiser, on
+ *    every browser, permanently. The harness had asserted the *markup* and the payload, and neither of
+ *    those is the thing that takes a payment.
  *  - **The server decides the amount, not the page.** `amountInKobo()` is called here from the advert row;
  *    nothing on this page can be edited to change what is charged, and the public key in the markup cannot
  *    be used to charge a different figure because the reference is what the server verifies.
@@ -88,14 +94,16 @@ $inlineSettings = [
       </p>
     <?php else: ?>
       <p style="font-size:13.5px; color:var(--ink-dim); margin:0 0 4px;">
-        Card payment is not available right now. Use the bank transfer option below, and our team will
-        confirm your advert as soon as the payment is seen.
+        Card payment opens on PayHub's own secure page. Use the button below — the payment is the same, and
+        our team confirms your advert as soon as it is seen.
       </p>
     <?php endif; ?>
 
     <?php /* Loaded only when the inline checkout can actually run. The route's CSP exception is scoped to
              this gateway origin and to this page, so nothing else on the site can load it. */ ?>
     <?php if ($inlineReady): ?>
+      <?php /* Order matters: both scripts are deferred, and deferred scripts run in document order, so
+               inline.js defines PayhubPop before advertise.js asks for it. */ ?>
       <script src="<?= e(Payhub::INLINE_SCRIPT) ?>" defer></script>
     <?php endif; ?>
   </div>
@@ -125,3 +133,11 @@ $inlineSettings = [
     <a href="/advertise" style="color:var(--ink-faint); font-size:13px;">Cancel and go back</a>
   </div>
 </div>
+
+<?php /*
+ * The script that drives the checkout. Without this line the page is inert: nothing reads the settings
+ * above, nothing calls the gateway, and the advertiser is left looking at a disabled button and a
+ * "loading" message that will never change. It loads after the page's own markup so that it also runs on
+ * a church whose inline checkout is unavailable, where it reveals the hosted-payment fallback.
+ */ ?>
+<script src="<?= asset('js/advertise.js') ?>" defer></script>

@@ -143,19 +143,42 @@
       }
     });
 
-    if (fallback) { fallback.hidden = false; }
-    say('Your payment is taken by the gateway inside this page. Nothing is charged until you confirm.');
+    /*
+     * The window opens immediately rather than waiting for a click.
+     *
+     * The advertiser has just submitted the form and chosen to pay by card. Making them press a second
+     * button that only opens the thing they already asked for is a step that exists for no reason, and it
+     * is a step they can walk away from believing the payment has already failed. The button below is kept
+     * as the way to reopen the window after it is closed.
+     */
+    var openOnce = function () {
+      try {
+        handler.openIframe();
+        return true;
+      } catch (error) {
+        useFallback('The secure payment window could not be opened, so the button above will not work. Use the payment option below instead.');
+        return false;
+      }
+    };
 
-    if (button) {
-      button.disabled = false;
-      button.addEventListener('click', function (event) {
-        event.preventDefault();
-        try {
-          handler.openIframe();
-        } catch (error) {
-          useFallback('The secure payment window could not be opened, so the button above will not work. Use the payment option below instead.');
-        }
-      });
+    if (openOnce()) {
+      /*
+       * The hosted form stays hidden while the frame is open.
+       *
+       * Revealing it here too would put two payment routes on screen at once, and the second one asks the
+       * advertiser to leave for the gateway's own page having already been shown a working payment window.
+       * It is a fallback, so it appears when something has fallen back.
+       */
+      say('Finish your payment in the secure window. Nothing is charged until you confirm.');
+
+      if (button) {
+        button.disabled = false;
+        button.textContent = 'Reopen the payment window';
+        button.addEventListener('click', function (event) {
+          event.preventDefault();
+          openOnce();
+        });
+      }
     }
   }
 
