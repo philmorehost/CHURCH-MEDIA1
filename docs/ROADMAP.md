@@ -65,7 +65,7 @@
 | **4** | WhatsApp channel | Official Cloud API integration (templates, 24-h window, webhooks) | 5–7 sessions | Per-conversation | ✅ closed (4.1–4.3; 4.4 rejected) |
 | **5** | Members & daily engagement | Member accounts, daily devotional, Bible reading plans + streaks, offline sermon downloads | 10–12 sessions | None | ✅ shipped (S1–S6) |
 | **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ✅ **complete** — 6a–6g shipped |
-| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings), 7b shipped (an account belongs to one church), 7c shipped (a unit belongs to one church), 7d-i shipped (worker tenancy plumbing), 7d-ii parts 1–2 and 4 shipped (the SMS worker, the sender-ID poller and the daily publisher report act as one church at a time), 7d-iii shipped (the SMS screens only touch their own church), 7d-iv shipped (the ads tables carry a church), 7d-v shipped (the public advert flow was driven over HTTP, clearing 7d-iv's verification debt), 7d-ii part 3 shipped (the devotional push and the reading reminder act as one church at a time), 7d-ii part 5 shipped (the follow-up and rota emails act as one church at a time), 7d-ii part 6 shipped (the WhatsApp broadcast acts as one church at a time) |
+| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings), 7b shipped (an account belongs to one church), 7c shipped (a unit belongs to one church), 7d-i shipped (worker tenancy plumbing), 7d-ii parts 1–2 and 4 shipped (the SMS worker, the sender-ID poller and the daily publisher report act as one church at a time), 7d-iii shipped (the SMS screens only touch their own church), 7d-iv shipped (the ads tables carry a church), 7d-v shipped (the public advert flow was driven over HTTP, clearing 7d-iv's verification debt), 7d-ii part 3 shipped (the devotional push and the reading reminder act as one church at a time), 7d-ii part 5 shipped (the follow-up and rota emails act as one church at a time), 7d-ii part 6 shipped (the WhatsApp broadcast acts as one church at a time), 7d-ii part 7 shipped (the roll-up and the backup were read, and neither needs a church) |
 
 **Confirmed 2026-09-12:** multi-tenant **SaaS is a real goal**. That is why **Phase 0
 (tenancy foundation) runs before everything else** — the SMS token, sender IDs, country
@@ -1648,10 +1648,15 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > `device_tokens.tenant_id` — **shipped as part 3**), then `followup_worker` and `roster_worker` (email —
 > **shipped as part 5**), then `wa_worker` (partly converted already — it stamps `Tenant::id()` on
 > new conversations — **shipped as part 6**), and finally `analytics_rollup` and `backup`, which send
-> nothing and need reading
-> rather than rewriting. `sms_maintenance` is already correct: it deliberately uses the un-scoped
-> `activeAll()`. Each of the rest becomes `Tenant::each(...)`, so a failure in one church cannot stop
-> another's run.
+> nothing and needed reading rather than rewriting — **read in part 7, and neither needs changing.**
+> `sms_maintenance` is already correct: it deliberately uses the un-scoped `activeAll()`.
+>
+> **Corrected, because the plan below was wrong:** the line that used to end this paragraph said "each of
+> the rest becomes `Tenant::each(...)`". That was right for nine of the eleven and wrong for the last two.
+> A backup is the whole database and `storage/backups` is one directory, so a pass per church would write
+> N files that each restore half a schema; and the analytics roll-up already groups `analytics_daily` by
+> `tenant_id` in one statement, so N passes would do the same work N times over. Wrapping either in
+> `Tenant::each()` would be a regression — which is why part 7 read them instead.
 >
 > **Also outstanding, found while doing part 2:** `admin/partials/sms/sender-ids.php`'s `$loadSender()`
 > guard, which was **fixed in 7d-iii below** — along with four identical instances of it.
@@ -1972,6 +1977,34 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > **Not verified:** an actual broadcast. No template was submitted to Meta, no approval state was
 > exercised, and no delivery webhook (`applyStatus()`) was driven — the counts asserted here are the
 > worker's own bookkeeping, not Meta's answers.
+
+> **7d-ii part 7 shipped — the last two workers were read, and neither needs changing.** No product
+> change: this stage's job was to answer "do these two need the same treatment?" and the answer is no, for
+> a reason each worth keeping.
+>
+> - **`cli/analytics_rollup.php` must not be one pass per church.** `Analytics::rollup()` computes
+>   `analytics_daily` with `GROUP BY tenant_id` and inserts the `tenant_id` it grouped on, so one pass
+>   separates the churches and N passes would do the same work N times. Verified rather than assumed: two
+>   fixture churches with **three and five** events of the same kind and the same day produced two
+>   separate rows holding exactly those counts, with nothing filed as `tenant_id = 0`, and a second pass
+>   left the figures unchanged. The dashboard reads were checked the same way — `Analytics::counts()`
+>   under each church returned its own traffic and not the other's.
+> - **`cli/backup.php` must not be one pass per church either.** A database backup is the whole database
+>   and `storage/backups` is one directory: N passes would write N files that each restore half a schema.
+>   `core/Backup.php` contains no `tenant_id`, no `Tenant::` and no per-church pass at all, which is
+>   asserted rather than asserted-about. `Backup::run()` and `Backup::prune()` were **not executed** — a
+>   reading job must not begin by letting a worker delete real backups.
+>
+> **Verified (7d-ii part 7): 16 assertions, 0 failures.** No mutation check, because there is no new
+> guard to mutate: the property under test is that the existing `GROUP BY tenant_id` is what keeps the
+> churches apart, and the two fixture counts are what show it.
+>
+> **Found here, and it belongs to 7e:** `backup_retention_days`, `backup_offsite_path` and
+> `analytics_retention_days` are stored in the per-church settings row but applied install-wide — a cron
+> resolves to the default church and uses that value for the one shared backup directory. They are
+> **platform** settings that happen to live beside the per-church ones, so a church admin must not be able
+> to change them; that is a whitelist decision. Both workers now carry a comment saying why they are not
+> per-church, so the next reader does not "fix" them into N half-dumps.
 
 > **Not built yet in Phase 7 (beyond 7d):** letting a church admin edit its own branding
 > (`admin/settings.php` is super-admin only, and letting one in needs a decision about which fields are

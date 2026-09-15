@@ -13,6 +13,16 @@ declare(strict_types=1);
  *   2. Prunes raw events past the retention window. The roll-ups are kept.
  *
  * Usage: php cli/analytics_rollup.php [--days=7] [--keep=180] [--no-prune]
+ *
+ * **Deliberately NOT one pass per church.** `Analytics::rollup()` computes `analytics_daily` grouped by
+ * `tenant_id` in a single statement, so one pass already keeps the churches apart and N passes would do
+ * the same work N times over. This was checked when the other workers were converted (7d-ii part 7): two
+ * churches with three and five events of the same kind produced two separate rows with those exact
+ * counts, and nothing was filed as unattributed. Wrapping this in `Tenant::each()` would be a
+ * regression, not a fix.
+ *
+ * The retention window is an installation-wide policy over a shared, derived table, not a per-church
+ * setting — see the note on `backup.php`.
  */
 
 require dirname(__DIR__) . '/bootstrap.php';

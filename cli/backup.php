@@ -16,6 +16,16 @@ declare(strict_types=1);
  *   php cli/backup.php --no-prune   keep every backup this run
  *   php cli/backup.php --list       list existing backups and exit
  *   php cli/backup.php --prune-only just apply the retention setting
+ *
+ * **Deliberately NOT one pass per church, and it would be wrong if it were.** A database backup is the
+ * whole database: `storage/backups` is one directory, a dump has no church dimension, and splitting it
+ * per church would write N files that each restore half a schema. `core/Backup.php` contains no
+ * `tenant_id`, no `Tenant::` and no per-church pass, which is what makes it safe to run once.
+ *
+ * That means `backup_retention_days` and `backup_offsite_path` are read from the church the run resolves
+ * to — the default one, from a cron — while applying to the one shared directory. They are in effect
+ * **platform** settings that happen to be stored beside the per-church ones, and a church admin must not
+ * be able to change them. That belongs in the 7e whitelist; see the roadmap.
  */
 
 if (!defined('STDERR')) {
