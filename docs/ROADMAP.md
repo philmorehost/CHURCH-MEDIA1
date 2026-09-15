@@ -2995,6 +2995,42 @@ PayHub documents all of it at `https://merchant.payhub.com.ng/api-reference.php`
 > `callback_url` parameter at all (see 7h-9), so for a hosted payment the webhook is the only thing that can
 > ever tell this site the money arrived.
 
+> **7h-17 — `callback_url` now exists in the gateway itself (2026-09-16).** *(Not this repository: the change
+> is in the PayHub merchant platform's own source, `MERCHANT.PAYHUB`.)*
+>
+> Reading the gateway's source settled three things this plan had been treating as inference:
+>
+> - ⚠️ **`api/transaction/initialize.php` mints its own reference**, exactly as 7h-16 assumed:
+>   `$ref = 'PH_' . bin2hex(random_bytes(8));`. The merchant's `reference` is never read. So the fix in
+>   7h-16 is not a workaround for a quirk — it is the only way a payment can be found again.
+> - **`initialize` takes the amount in NAIRA, not kobo.** The column stores it unchanged and
+>   `checkout.php` renders it with `formatCurrency()`, while the amount handed to Paystack is
+>   `$amount * 100`. The API reference's "amounts are in kobo" line applies to the *webhook* payload
+>   (`to_minor_units()`), not to initialize. `Payhub::amountInNaira()` is right; **do not "fix" it to kobo.**
+> - **`callback_url` was not implemented at all** — not one reference to it, anywhere, which is why the
+>   hosted checkout left the payer on the gateway's own `verify.php` and why the `callback_url` this script
+>   has always sent was silently discarded.
+>
+> The gateway now accepts, validates and stores it, and `verify.php` redirects a **successful** payer back to
+> it with `reference`, `trxref` and `status` appended. So both flows here close their loop without depending
+> on the webhook: the advertiser returns to `/advertise/return` and the giver to `/payment/payhub/callback`,
+> each carrying the gateway's own reference now. Nothing in this repository had to change to benefit — it was
+> already sending the parameter.
+>
+> ⚠️ **That gateway edit is NOT committed.** `MERCHANT.PAYHUB` is not its own repository, and the parent
+> repository has ~1,500 unrelated pending changes (a whole Android project deleted from the tree), so
+> committing there would have swept all of it up. The three changed files are
+> `includes/functions.php`, `api/transaction/initialize.php` and `verify.php`.
+>
+> **Also found in the gateway, and left alone deliberately:** `verify.php` sends its own merchant webhook
+> that duplicates `includes/functions.php`'s `trigger_merchant_webhook()`. They disagree — the newer one signs
+> with `X-Payhub-Signature` and reports `amount` in **kobo**; the older one sent **no signature** and reports
+> `amount` in **naira**. (That is the origin of the "PayHub's webhooks are unsigned" note in the DGV7.0
+> integration, and the reason `Payhub::setTransport()`'s sibling `verifyWebhook()` must not be the only gate
+> here — see 7h-16b.) The signature has been added to the older sender, which is additive; the **amount unit
+> has not been changed**, because a live merchant parsing that webhook would read every amount as 100× its
+> value. Unifying the two is an announced change, not a silent one.
+
 ### Decisions taken, and two worth confirming
 
 - **"Two failed attempts" is counted per advert**, not per publisher: the advert is what is being bought,
