@@ -65,7 +65,7 @@
 | **4** | WhatsApp channel | Official Cloud API integration (templates, 24-h window, webhooks) | 5–7 sessions | Per-conversation | ✅ closed (4.1–4.3; 4.4 rejected) |
 | **5** | Members & daily engagement | Member accounts, daily devotional, Bible reading plans + streaks, offline sermon downloads | 10–12 sessions | None | ✅ shipped (S1–S6) |
 | **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ✅ **complete** — 6a–6g shipped |
-| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings), 7b shipped (an account belongs to one church), 7c shipped (a unit belongs to one church), 7d-i shipped (worker tenancy plumbing), 7d-ii parts 1–2 and 4 shipped (the SMS worker, the sender-ID poller and the daily publisher report act as one church at a time), 7d-iii shipped (the SMS screens only touch their own church), 7d-iv shipped (the ads tables carry a church), 7d-v shipped (the public advert flow was driven over HTTP, clearing 7d-iv's verification debt), 7d-ii part 3 shipped (the devotional push and the reading reminder act as one church at a time), 7d-ii part 5 shipped (the follow-up and rota emails act as one church at a time) |
+| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings), 7b shipped (an account belongs to one church), 7c shipped (a unit belongs to one church), 7d-i shipped (worker tenancy plumbing), 7d-ii parts 1–2 and 4 shipped (the SMS worker, the sender-ID poller and the daily publisher report act as one church at a time), 7d-iii shipped (the SMS screens only touch their own church), 7d-iv shipped (the ads tables carry a church), 7d-v shipped (the public advert flow was driven over HTTP, clearing 7d-iv's verification debt), 7d-ii part 3 shipped (the devotional push and the reading reminder act as one church at a time), 7d-ii part 5 shipped (the follow-up and rota emails act as one church at a time), 7d-ii part 6 shipped (the WhatsApp broadcast acts as one church at a time) |
 
 **Confirmed 2026-09-12:** multi-tenant **SaaS is a real goal**. That is why **Phase 0
 (tenancy foundation) runs before everything else** — the SMS token, sender IDs, country
@@ -1647,7 +1647,8 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > `devotional_worker` and `reading_worker` (push to devices; both needed the new
 > `device_tokens.tenant_id` — **shipped as part 3**), then `followup_worker` and `roster_worker` (email —
 > **shipped as part 5**), then `wa_worker` (partly converted already — it stamps `Tenant::id()` on
-> new conversations), and finally `analytics_rollup` and `backup`, which send nothing and need reading
+> new conversations — **shipped as part 6**), and finally `analytics_rollup` and `backup`, which send
+> nothing and need reading
 > rather than rewriting. `sms_maintenance` is already correct: it deliberately uses the un-scoped
 > `activeAll()`. Each of the rest becomes `Tenant::each(...)`, so a failure in one church cannot stop
 > another's run.
@@ -1931,6 +1932,46 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > every message in this stage went to a captured closure rather than to an SMTP server. What is established
 > is which church's queue produced which message, to which address, with which church's name in it. No
 > email was delivered.
+
+> **7d-ii part 6 shipped — the WhatsApp broadcast acts as one church at a time.** Two files:
+> `core/WaCampaign.php` and `cli/wa_worker.php`.
+>
+> This one has the clearest harm of the batch, because **the credentials are per church**: `WhatsApp`
+> reads its number ID, access token and app secret from `setting('wa_*')`, so each church sends from its
+> own Meta number. A cron run was reading every church's campaign queue and sending it through whichever
+> church resolved first — the default one — which is one church's congregation broadcast to from another
+> church's WhatsApp number, and it would be billed to that number's account.
+>
+> - The gates were hoisted **above** the tenant loop, which was the whole bug: the quiet-hours window, the
+>   daily cap and the `WhatsApp::problem()` pre-flight all read per-church settings, so the default
+>   church's settings were deciding for everybody — and one church with no number configured stopped every
+>   other church's queue from being worked at all. Every gate now lives inside the pass.
+> - `find()` and `active()` are scoped on `wa_campaigns.tenant_id`. `find()` is what `--campaign=ID`
+>   resolves through, so an operator naming another church's campaign now finds nothing — as does
+>   `admin/partials/whatsapp/broadcast.php`, which used the same call and could be handed a foreign id.
+> - `claim()` and `releaseStale()` carry the guard too, on the recipients' own `tenant_id`. That is the
+>   quiet failure of the pair: a pass that claims rows it should not have seen locks another church's
+>   campaign, which then sits looking stuck while that church's own cron finds nothing to do.
+> - `--status` reports per church, and the run's final line is the run total only. There is no honest
+>   install-wide "today" figure, because each church has its own daily ceiling — each church's own line
+>   says it instead.
+>
+> **Verified (7d-ii part 6): 35 assertions, 0 failures**, under two separate mutations:
+>
+> - The two reads made church-blind → **7 failures**, the one that names the defect being *"alpha's queue
+>   holds only alpha's campaign — 5,6"*: alpha's pass was handed both churches' campaigns. The
+>   `--campaign` case failed too, with alpha's pass finding beta's named campaign.
+> - The two write guards made church-blind → **6 failures** on their own: *"alpha claims none of beta's
+>   recipients"* returned beta's rows, and *"alpha releases none of beta's stale claims"* released 2. So
+>   each pair is load-bearing independently and neither may be dropped on the grounds that the other
+>   covers it.
+>
+> **Everything ran with `--dry-run`**, which claims a batch, prints what it would send and releases it
+> again. **No Meta request was made and no message was sent** to anybody.
+>
+> **Not verified:** an actual broadcast. No template was submitted to Meta, no approval state was
+> exercised, and no delivery webhook (`applyStatus()`) was driven — the counts asserted here are the
+> worker's own bookkeeping, not Meta's answers.
 
 > **Not built yet in Phase 7 (beyond 7d):** letting a church admin edit its own branding
 > (`admin/settings.php` is super-admin only, and letting one in needs a decision about which fields are

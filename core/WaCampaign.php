@@ -25,6 +25,19 @@ declare(strict_types=1);
  *
  * What it does share with SMS is the claiming model: `claimed_at` + `lock_token` stop an
  * overlapping cron run, or a worker killed mid-batch, from messaging the same person twice.
+ *
+ * **One church at a time.** The credentials are per church — `WhatsApp` reads `setting('wa_*')`, so
+ * each church has its own Meta number and token — and `wa_campaigns.tenant_id` is the church a
+ * campaign belongs to. `find()` and `active()` are therefore scoped to the church being served, and
+ * the caller (`cli/wa_worker.php`) makes one pass per church through `Tenant::each()`. Without that,
+ * a cron run picked up every church's campaigns and sent them from whichever church resolved first —
+ * the default one — which is messaging one church's congregation from another church's number.
+ *
+ * `claim()` and `releaseStale()` are scoped as well, on the recipients' own `tenant_id`: an id is a
+ * weak thing to trust, and the failure there is the quiet one — a pass that claims rows it should not
+ * have seen locks another church's campaign, which then sits looking stuck while its own cron finds
+ * nothing to do. The remaining methods take a campaign id that came from one of those two reads and
+ * touch only that campaign's rows, so they inherit the scope rather than repeating it.
  */
 final class WaCampaign
 {
@@ -95,8 +108,10 @@ final class WaCampaign
         if ($id <= 0) {
             return null;
         }
-        $stmt = self::db()->prepare('SELECT * FROM wa_campaigns WHERE id = ? LIMIT 1');
-        $stmt->execute([$id]);
+        // Scoped, because this is what `--campaign=ID` resolves through: an operator naming another
+        // church's campaign should find nothing, exactly as the admin screen would.
+        $stmt = self::db()->prepare('SELECT * FROM wa_campaigns WHERE id = ? AND tenant_id <=> ? LIMIT 1');
+        $stmt->execute([$id, self::tenantId()]);
         return $stmt->fetch() ?: null;
     }
 
@@ -104,9 +119,9 @@ final class WaCampaign
     public static function active(int $limit = self::CAMPAIGNS_PER_RUN): array
     {
         $stmt = self::db()->prepare(
-            'SELECT * FROM wa_campaigns WHERE status IN ("queued", "sending") ORDER BY id ASC LIMIT ' . max(1, $limit)
+            'SELECT * FROM wa_campaigns WHERE status IN ("queued", "sending") AND tenant_id <=> ? ORDER BY id ASC LIMIT ' . max(1, $limit)
         );
-        $stmt->execute();
+        $stmt->execute([self::tenantId()]);
         return $stmt->fetchAll();
     }
 
@@ -251,10 +266,10 @@ final class WaCampaign
         try {
             $stmt = $pdo->prepare(
                 'SELECT * FROM wa_campaign_recipients
-                 WHERE campaign_id = ? AND status = "queued" AND claimed_at IS NULL
+                 WHERE campaign_id = ? AND tenant_id <=> ? AND status = "queued" AND claimed_at IS NULL
                  ORDER BY id ASC LIMIT ' . max(1, $limit) . ' FOR UPDATE'
             );
-            $stmt->execute([$campaignId]);
+            $stmt->execute([$campaignId, self::tenantId()]);
             $rows = $stmt->fetchAll();
 
             if ($rows) {
@@ -313,9 +328,9 @@ final class WaCampaign
         $stmt = self::db()->prepare(
             'UPDATE wa_campaign_recipients
              SET claimed_at = NULL, lock_token = NULL
-             WHERE campaign_id = ? AND claimed_at IS NOT NULL AND claimed_at < (NOW() - INTERVAL ? MINUTE)'
+             WHERE campaign_id = ? AND tenant_id <=> ? AND claimed_at IS NOT NULL AND claimed_at < (NOW() - INTERVAL ? MINUTE)'
         );
-        $stmt->execute([$campaignId, max(1, $minutes)]);
+        $stmt->execute([$campaignId, self::tenantId(), max(1, $minutes)]);
         return $stmt->rowCount();
     }
 
