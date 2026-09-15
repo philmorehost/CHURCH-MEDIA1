@@ -418,36 +418,6 @@ $router->get('/payment/payhub/callback', function () {
     }
 });
 
-$router->post('/payment/payhub/webhook', function () {
-    $pdo = Database::getInstance()->getConnection();
-    $body = (string) file_get_contents('php://input');
-    $sig = $_SERVER['HTTP_X_PAYHUB_SIGNATURE'] ?? '';
-
-    // The signature is over the raw body — see Payhub::verifyWebhook(). A webhook that cannot be verified
-    // is refused rather than trusted, and an unconfigured key means every webhook is refused, which is the
-    // safe way round.
-    if (!Payhub::verifyWebhook($body, $sig)) {
-        http_response_code(401);
-        exit('Invalid signature');
-    }
-
-    $payload = json_decode($body, true);
-    if (($payload['event'] ?? '') === 'charge.success' && !empty($payload['data']['reference'])) {
-        $ref = (string) $payload['data']['reference'];
-        $note = (string) json_encode($payload['data']);
-        if (str_starts_with($ref, 'GIVE_') || str_starts_with($ref, 'DON_')) {
-            $pdo->prepare('UPDATE donations SET payment_status = "completed" WHERE payment_reference = ?')->execute([$ref]);
-        } else {
-            $pdo->prepare('UPDATE ads SET payment_status = "paid" WHERE payment_reference = ?')->execute([$ref]);
-            $pdo->prepare('UPDATE ad_payments SET status = "success", gateway_response = ? WHERE reference = ?')->execute([$note, $ref]);
-        }
-    }
-
-    http_response_code(200);
-    echo json_encode(['status' => 'success']);
-    exit;
-});
-
 // Public Ad placement page and submission handler
 $router->get('/advertise', function () {
     render('advertise', [
@@ -685,6 +655,68 @@ $loadAdByReference = function (string $reference): ?array {
 };
 
 /** How many online attempts this advert has actually failed. The retry rule is measured on this. */
+
+/*
+ * The webhook — how PayHub tells this site that money arrived when the browser never came back.
+ *
+ * Per the API reference: the event is `charge.success`, the reference is at `data.reference`, and the
+ * signature is `HMAC-SHA256(raw body, secret)` in `X-Payhub-Signature`. An unverifiable webhook is refused
+ * rather than trusted, and an unconfigured secret key refuses every one — the safe way round.
+ *
+ * Two things it used to get wrong, both of which lost money:
+ *
+ * 1. It resolved the advert by `ads.payment_reference`, which tracks only the NEWEST attempt. A webhook for
+ *    any earlier attempt therefore matched nothing, so the attempt row was marked successful while the
+ *    advert stayed unpaid. It now resolves through the same attempt-reference lookup the return URL uses.
+ * 2. It wrote payment state by hand instead of calling `AdPayments::recordOutcome()`. That duplicated the
+ *    paid guard and the attempt-counter sync in a second place, which is the class of drift 7h-0 removed
+ *    from the gateway client. Both money paths now go through the one decision.
+ *
+ * It is registered here, below the lookup, because a closure's `use` binds at creation — above this point
+ * the variable does not exist yet.
+ */
+$router->post('/payment/payhub/webhook', function () use ($loadAdByReference) {
+    $pdo = Database::getInstance()->getConnection();
+    $body = (string) file_get_contents('php://input');
+    $signature = $_SERVER['HTTP_X_PAYHUB_SIGNATURE'] ?? '';
+
+    if (!Payhub::verifyWebhook($body, $signature)) {
+        http_response_code(401);
+        exit('Invalid signature');
+    }
+
+    $payload = json_decode($body, true);
+    $event = (string) ($payload['event'] ?? '');
+    $data = is_array($payload['data'] ?? null) ? $payload['data'] : [];
+    $reference = trim((string) ($data['reference'] ?? ''));
+
+    // Anything we have no use for is still acknowledged, or the gateway retries it for ever.
+    if ($event === 'charge.success' && $reference !== '') {
+        if (str_starts_with($reference, 'GIVE_') || str_starts_with($reference, 'DON_')) {
+            // Giving has no attempt rows; the donation row is its own record.
+            if ((string) ($data['status'] ?? '') === 'success' || !empty($data['paid'])) {
+                $pdo->prepare('UPDATE donations SET payment_status = "completed" WHERE payment_reference = ?')
+                    ->execute([$reference]);
+            }
+        } else {
+            $ad = $loadAdByReference($reference);
+            if ($ad !== null) {
+                // The shape `Payhub::verify()` returns, built from a payload whose signature we have
+                // already checked. The decision itself belongs to AdPayments, exactly as on the return URL.
+                AdPayments::recordOutcome($ad, [
+                    'paid' => ((string) ($data['status'] ?? '') === 'success') || !empty($data['paid']),
+                    'reason' => (string) ($data['gateway_response'] ?? ''),
+                    'error' => '',
+                    'raw' => $data,
+                ], $reference);
+            }
+        }
+    }
+
+    http_response_code(200);
+    echo json_encode(['status' => 'success']);
+    exit;
+});
 
 // The page that takes the money, on this site.
 $router->get('/advertise/checkout', function () use ($loadAdByReference) {

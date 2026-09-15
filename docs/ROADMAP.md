@@ -2831,6 +2831,37 @@ PayHub documents all of it at `https://merchant.payhub.com.ng/api-reference.php`
 > doing so. Not verified: no real payment was made at the corrected figure — the next test transaction with a
 > small amount is what proves the hosted page now shows the advertiser's own price.
 
+> **7h-11 shipped — the webhook was crediting the attempt and not the advert.** *(Found while reading the
+> Webhooks & Callback section against our own handler.)*
+>
+> The signature contract was already right (`HMAC-SHA256` over the **raw** body in `X-Payhub-Signature`,
+> `charge.success`, reference at `data.reference`). Two other things were wrong, and both lost money:
+>
+> 1. **It resolved the advert by `ads.payment_reference`** — which tracks only the **newest** attempt after a
+>    retry. A webhook for any earlier attempt matched nothing, so the attempt row was marked successful while
+>    the advert stayed **unpaid**: money received, advert not credited, and the two records disagreeing about
+>    it. It now resolves through the same attempt-reference lookup the return URL uses, so an older attempt's
+>    webhook credits the same advert the return URL would.
+> 2. **It wrote payment state by hand** instead of calling `AdPayments::recordOutcome()` — duplicating the
+>    paid guard and the counter sync in a second place. That is the class of drift 7h-0 removed from the
+>    gateway client, and it had grown back. Both money paths now go through the one decision, so the webhook
+>    and the return URL cannot disagree about what a gateway answer means.
+>
+> The handler moved **below** the advert lookup deliberately: a closure's `use` binds at creation, so above
+> that point the variable does not exist and the route would have captured `null` and silently credited
+> nothing. Also tightened: an event we have no use for is acknowledged with 200 (or the gateway retries it for
+> ever) but acted on not at all, and a donation is completed only on `status: success` or `paid: true` rather
+> than on any `charge.success`.
+>
+> **Verified: 11 assertions, 0 failures, nothing left behind** — including the exact broken case: a signed
+> `charge.success` for the **older** attempt, while `ads.payment_reference` points at the newer one, must pay
+> the advert. Plus a wrong signature and an unconfigured secret key both refused with 401, a `charge.failed`
+> acknowledged and ignored, and a giving reference still completing its donation.
+>
+> **Still not verified, and it is the same gap as 7h-10:** no real PayHub webhook has ever arrived, because the
+> URL has to be registered in the merchant dashboard. This makes the handler correct; it cannot make the
+> gateway call it.
+
 ### Decisions taken, and two worth confirming
 
 - **"Two failed attempts" is counted per advert**, not per publisher: the advert is what is being bought,
