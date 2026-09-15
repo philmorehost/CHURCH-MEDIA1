@@ -168,13 +168,15 @@ unset($post);
  * one approved advert made the feed unparseable in BOTH apps); and nothing anywhere rendered an advert —
  * no ad branch existed in `feed.js`, so the web feed drew a post that could never be clicked.
  *
- * The per-advert display frequency is deliberately not consulted. `setting('ad_display_frequency')` was
- * read here and its result, `$paidMinInterval`, was then never used by anything — the advert was served on
- * every page regardless. That is a real gap against what the packages promise, but applying it needs a
- * per-visitor "when did this advert last appear" record, which is its own piece of work rather than
- * something to fake here. Recorded in the roadmap under 7h-4b.
+ * The per-advert display frequency IS consulted now, and it is applied per visitor.
+ *
+ * `setting('ad_display_frequency')` used to be read here and its result, `$paidMinInterval`, was then used
+ * by nothing — every advert was served on every page to every visitor, whatever the package promised. The
+ * package the advertiser chose says "Every 5 Minutes" or "Once Daily"; that promise is now kept by
+ * `AdFeed::dueForVisitor()`, which skips an advert this visitor has seen inside its own window.
  */
-$activeAds = AdFeed::activeFor('web', AdFeed::PER_PAGE);
+$adViewerKey = Fingerprint::hash();
+$activeAds = array_slice(AdFeed::dueForVisitor(AdFeed::activeFor('web', 20), $adViewerKey), 0, AdFeed::PER_PAGE);
 
 $feedItems = [];
 $adIdx = 0;
@@ -184,5 +186,23 @@ foreach ($posts as $i => $post) {
         $feedItems[] = AdFeed::feedItem($activeAds[$adIdx++]);
     }
 }
+
+/*
+ * A short page still shows an advert.
+ *
+ * Placement is after every third post, so on a page with one or two posts the condition never fires and NO
+ * advert is served at all however many advertisers have paid — the one failure an advertiser cannot detect
+ * and cannot usefully complain about. If the page was too short to place one naturally, it goes at the end.
+ *
+ * A page with no posts at all still shows none: an advert standing alone in an empty feed reads as the feed
+ * being broken rather than as advertising.
+ */
+if ($adIdx === 0 && $activeAds && count($posts) > 0) {
+    $feedItems[] = AdFeed::feedItem($activeAds[$adIdx++]);
+}
+
+// Only what actually reached the page counts as served. Recording every candidate would burn the window on
+// adverts that lost the two slots and were never shown.
+AdFeed::recordServed(array_slice($activeAds, 0, $adIdx), $adViewerKey);
 
 jsonResponse(['status' => 'success', 'page' => $page, 'has_more' => $hasMore, 'data' => $feedItems]);

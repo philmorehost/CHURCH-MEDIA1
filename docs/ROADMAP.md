@@ -2660,11 +2660,13 @@ PayHub documents all of it at `https://merchant.payhub.com.ng/api-reference.php`
 >
 > **Two known gaps, recorded rather than papered over:**
 >
-> - **The per-advert and global display frequency is still not applied.** `setting('ad_display_frequency')`
+> - **The per-advert and global display frequency is still not applied.** ✅ **Fixed in 7h-8** (see below).
+>   `setting('ad_display_frequency')`
 >   was read on every feed request and its result, `$paidMinInterval`, was then used by nothing — the advert
 >   was served on every page regardless. Packages promise a frequency; nothing honours it. Applying it needs
 >   a per-visitor "when did this advert last appear" record, which is its own piece of work.
-> - **With fewer than three posts on a page, no advert is ever served.** Placement is `($i + 1) % 3 === 0`,
+> - **With fewer than three posts on a page, no advert is ever served.** ✅ **Fixed in 7h-8** (see below).
+>   Placement is `($i + 1) % 3 === 0`,
 >   so a quiet church — or any church whose feed has under three published posts — sells an advert and shows
 >   nothing at all. This is why the harness has to create six posts to test placement, and it is a product
 >   decision, not a bug to fix silently.
@@ -2734,7 +2736,47 @@ PayHub documents all of it at `https://merchant.payhub.com.ng/api-reference.php`
 > - **No live PayHub transaction**, still — and no second church exists in production, so every two-church
 >   assertion above is a local fixture.
 
-> **7h-7 shipped — the checkout that could never take a payment.** *(Reported by the user from the live\n> site: the payment step sat on \"Loading the secure payment window…\" with the button disabled.)*\n>\n> **The cause was one missing line.** `views/advertise-checkout.php` rendered the settings, the button and\n> the gateway's own `inline.js` — but it **never loaded `public/assets/js/advertise.js`**, the only thing\n> that reads those settings and calls `PayhubPop.setup()` and `openIframe()`. So the button stayed\n> `disabled` and the status stayed on its initial \"Loading…\" text **for every advertiser, on every browser,\n> permanently**. The payment step was not degraded; it was inert, and nothing downstream of it had ever run\n> for anybody.\n>\n> **Nothing in the 7h-3 verification could have caught it**, and that is the part worth writing down: the\n> harness asserted the *markup* (the public key, the amount in kobo, the reference) and the *payload*\n> (`Payhub::inlineReady()`), and neither of those takes a payment. The lesson is not \"test more\" — it is that\n> **a page whose behaviour lives in a script must be tested by executing the script, not by reading the\n> page**. `cli/_js_checkout_test.js` (throwaway, but the shape is the point) loads `advertise.js` in Node\n> against a stub DOM and a fake `PayhubPop`, and asserts what it actually does.\n>\n> **Two behaviour changes the user asked for, both in the same flow:**\n>\n> - **The payment window now opens by itself.** The advertiser has just chosen to pay by card; making them\n>   press a second button that only opens the thing they already asked for was a step that existed for no\n>   reason, and one they could walk away from believing the payment had already failed. The button remains,\n>   relabelled \"Reopen the payment window\", because a closed window needs a way back.\n> - **A completed payment lands on the advertiser's own dashboard**, not on a report: told the transaction\n>   status, the amount and the reference, and that the advert is now **pending review and approval**, with\n>   the advert itself listed underneath. A payment that *failed* still gets the report page, because that\n>   page is where the retry and the bank-transfer proof live — moving those to the dashboard would break\n>   what 7h-4 built.\n>\n> Also fixed while in there: the success path used to reveal the hosted-payment fallback **alongside** an\n> open payment window, putting two competing payment routes on screen at once — the opposite of what the\n> view's own comment says it wants.\n>\n> **Verified: 49 assertions, 0 failures — 29 driving the real flow over HTTP and 20 executing the checkout\n> script in Node — and five mutations, five caught.** Two of the misses were worth more than the passes:\n> the deferral assertion counted the word `defer` across the whole page (the layout loads other scripts, so\n> it passed while *our* script had lost its `defer` and would have run before the gateway defined\n> `PayhubPop`); and one mutation was simply ineffective — it edited the first line of a concatenated message\n> while the sentence it was supposed to delete was still being appended on the next. **A mutation that does\n> not change behaviour proves nothing about the assertion it was aimed at.**\n>\n> **Still not verified: no live PayHub transaction and no browser.** The gateway is unconfigured on this\n> machine, so no card has ever been charged, and the iframe has never been opened. What is now proven is\n> that the script that would open it runs, is handed the right key, kobo amount and reference, opens the\n> window without a click, and sends the advertiser back to the server — which is materially more than was\n> proven before, and still not the same as a payment.\n\n### Decisions taken, and two worth confirming
+> **7h-7 shipped — the checkout that could never take a payment.** *(Reported by the user from the live\n> site: the payment step sat on \"Loading the secure payment window…\" with the button disabled.)*\n>\n> **The cause was one missing line.** `views/advertise-checkout.php` rendered the settings, the button and\n> the gateway's own `inline.js` — but it **never loaded `public/assets/js/advertise.js`**, the only thing\n> that reads those settings and calls `PayhubPop.setup()` and `openIframe()`. So the button stayed\n> `disabled` and the status stayed on its initial \"Loading…\" text **for every advertiser, on every browser,\n> permanently**. The payment step was not degraded; it was inert, and nothing downstream of it had ever run\n> for anybody.\n>\n> **Nothing in the 7h-3 verification could have caught it**, and that is the part worth writing down: the\n> harness asserted the *markup* (the public key, the amount in kobo, the reference) and the *payload*\n> (`Payhub::inlineReady()`), and neither of those takes a payment. The lesson is not \"test more\" — it is that\n> **a page whose behaviour lives in a script must be tested by executing the script, not by reading the\n> page**. `cli/_js_checkout_test.js` (throwaway, but the shape is the point) loads `advertise.js` in Node\n> against a stub DOM and a fake `PayhubPop`, and asserts what it actually does.\n>\n> **Two behaviour changes the user asked for, both in the same flow:**\n>\n> - **The payment window now opens by itself.** The advertiser has just chosen to pay by card; making them\n>   press a second button that only opens the thing they already asked for was a step that existed for no\n>   reason, and one they could walk away from believing the payment had already failed. The button remains,\n>   relabelled \"Reopen the payment window\", because a closed window needs a way back.\n> - **A completed payment lands on the advertiser's own dashboard**, not on a report: told the transaction\n>   status, the amount and the reference, and that the advert is now **pending review and approval**, with\n>   the advert itself listed underneath. A payment that *failed* still gets the report page, because that\n>   page is where the retry and the bank-transfer proof live — moving those to the dashboard would break\n>   what 7h-4 built.\n>\n> Also fixed while in there: the success path used to reveal the hosted-payment fallback **alongside** an\n> open payment window, putting two competing payment routes on screen at once — the opposite of what the\n> view's own comment says it wants.\n>\n> **Verified: 49 assertions, 0 failures — 29 driving the real flow over HTTP and 20 executing the checkout\n> script in Node — and five mutations, five caught.** Two of the misses were worth more than the passes:\n> the deferral assertion counted the word `defer` across the whole page (the layout loads other scripts, so\n> it passed while *our* script had lost its `defer` and would have run before the gateway defined\n> `PayhubPop`); and one mutation was simply ineffective — it edited the first line of a concatenated message\n> while the sentence it was supposed to delete was still being appended on the next. **A mutation that does\n> not change behaviour proves nothing about the assertion it was aimed at.**\n>\n> **Still not verified: no live PayHub transaction and no browser.** The gateway is unconfigured on this\n> machine, so no card has ever been charged, and the iframe has never been opened. What is now proven is\n> that the script that would open it runs, is handed the right key, kobo amount and reference, opens the\n> window without a click, and sends the advertiser back to the server — which is materially more than was\n> proven before, and still not the same as a payment.\n\n> **7h-8 shipped — the advert is actually delivered the way the package promised.** *(Closes the two gaps
+> 7h-4b recorded instead of fixing: display frequency, and the quiet feed.)*
+>
+> **The frequency is now honoured, per visitor.** Every package on the pricing table says "Every 5 Minutes",
+> "Once Daily" and so on; until now nothing read it. `ad_display_frequency` was fetched on every feed request,
+> assigned to `$paidMinInterval`, and never used again — the advert was served on every page to every
+> visitor, so an advertiser who bought *once daily* was given hundreds of impressions a day and an advertiser
+> who bought *every 5 minutes* got no more than one who bought the cheapest package.
+>
+> `AdFeed::dueForVisitor()` skips an advert this visitor has seen inside its own window, keyed on the
+> `Fingerprint::hash()` the feed already uses for likes and saves. The record is one small JSON file per
+> visitor (`storage/cache/adserve/<hash>.json`) holding advert id → last-served time, pruned to the longest
+> window honoured so it cannot grow for ever. Three deliberate choices: **eligibility and frequency are
+> separate methods** (the admin preview must be able to ask "is this advert eligible?" without changing the
+> answer to "has this visitor seen it?"), **only what was actually placed on the page is recorded** (marking
+> every candidate would silently burn the window on adverts that lost the two slots and were never shown),
+> and **a failure to write is a failure to serve, not a failure of the page** — if the cache directory is
+> unwritable the advert is shown again rather than not shown at all, because only one of those is what the
+> advertiser paid for.
+>
+> **A page too short to place an advert now still shows one.** Placement is after every third post, so a
+> church with one or two published posts served no advert at all, however many advertisers had paid — the one
+> failure an advertiser cannot detect and cannot usefully complain about. If the page was too short to place
+> one naturally the advert goes at the end. A page with **no** posts still shows none: an advert alone in an
+> empty feed reads as the feed being broken rather than as advertising.
+>
+> **Verified: 27 assertions, 0 failures, and nine mutations, nine caught** — including "every window is
+> zero", "the visitor record is read and then never consulted", "one visitor's impression suppresses the
+> advert for every visitor", "the package the advertiser actually chose is ignored", "nothing is recorded as
+> served so no window ever starts", "a one-post feed serves no advert again", "the visitor record grows for
+> ever", and "recording nothing still writes a record". The frequency arithmetic is asserted against the
+> pure function, so two visitors are compared in one process rather than inferred from two requests.
+>
+> **Not verified:** the same standing caveat — no browser has run this. What is proven is the payload the
+> feed returns and the record it keeps; nothing here has driven a real scroll. And nothing yet covers the
+> case where **two** adverts compete for the two slots and only one is placed: the fixtures use one advert, so
+> "only what was placed is recorded" is asserted by reading the code and by the mutation that removes the
+> call, not by a fixture with two adverts and one slot to share between them. That is the next thing to add
+> if this area is touched again.
+
+### Decisions taken, and two worth confirming
 
 - **"Two failed attempts" is counted per advert**, not per publisher: the advert is what is being bought,
   and an advertiser who abandons one advert should not have the next one start already exhausted. Say if

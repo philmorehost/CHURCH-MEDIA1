@@ -38,6 +38,24 @@ final class AdFeed
     /** How many adverts one page of the feed may carry. */
     public const PER_PAGE = 2;
 
+    /**
+     * What each package's display frequency means, in minutes.
+     *
+     * This is the promise made to an advertiser on the pricing table — "Every 5 Minutes", "Once Daily" —
+     * and until now nothing honoured it: the setting was read on every feed request and its result used by
+     * nothing, so every advert was served on every page to every visitor.
+     */
+    public const FREQUENCY_MINUTES = [
+        '5_min' => 5,
+        '10_min' => 10,
+        '15_min' => 15,
+        '30_min' => 30,
+        'once_daily' => 1440,
+    ];
+
+    /** The longest window honoured, so a visitor's record can be pruned to something bounded. */
+    private const MAX_WINDOW_MINUTES = 1440;
+
     private static function db(): PDO
     {
         return Database::getInstance()->getConnection();
@@ -60,7 +78,7 @@ final class AdFeed
 
         // `start_at <= NOW()` is what makes an approved advert genuinely live: approval stamps start_at,
         // so a row approved without one is not shown, which is the same rule the old query applied.
-        $sql = 'SELECT id, title, media_type, file_path, thumbnail_path, destination_url, created_at'
+        $sql = 'SELECT id, title, media_type, file_path, thumbnail_path, destination_url, created_at, display_frequency'
             . ' FROM ads'
             . ' WHERE status = "approved"'
             . ' AND (target_platform = "both" OR target_platform = ?)'
@@ -87,6 +105,120 @@ final class AdFeed
         $stmt->execute(array_merge([$adId], $tenantParams));
 
         return $stmt->fetch() ?: null;
+    }
+
+    /** How many minutes must pass before this advert may appear to the same visitor again. */
+    public static function frequencyMinutes(array $ad): int
+    {
+        $frequency = trim((string) ($ad['display_frequency'] ?? ''));
+        if ($frequency === '') {
+            // The advert's own package value is authoritative; the global setting is the fallback for a row
+            // written before the column was populated.
+            $frequency = (string) setting('ad_display_frequency', '5_min');
+        }
+
+        return self::FREQUENCY_MINUTES[$frequency] ?? 5;
+    }
+
+    /**
+     * The adverts this visitor has not seen recently enough, in the order they were given.
+     *
+     * Deliberately not part of `activeFor()`: eligibility is a fact about the advert (is it approved, has
+     * it started, has it expired, is it for this platform) and frequency is a fact about *this visitor*, and
+     * the admin preview must be able to ask the first question without changing the answer to the second.
+     *
+     * @param  array<int, array<string, mixed>> $ads
+     * @return array<int, array<string, mixed>>
+     */
+    public static function dueForVisitor(array $ads, string $visitorKey): array
+    {
+        $seen = self::visitorRecord($visitorKey);
+        $now = time();
+        $due = [];
+
+        foreach ($ads as $ad) {
+            $id = (int) $ad['id'];
+            $last = (int) ($seen[$id] ?? 0);
+            if ($last === 0 || ($now - $last) >= self::frequencyMinutes($ad) * 60) {
+                $due[] = $ad;
+            }
+        }
+
+        return $due;
+    }
+
+    /**
+     * Records that these adverts were put in front of this visitor.
+     *
+     * Only the adverts actually placed on the page may be passed in. Recording every candidate would
+     * suppress adverts that were never shown — an advertiser paying for a frequency would silently lose
+     * impressions to adverts that beat them to the two slots.
+     *
+     * @param array<int, array<string, mixed>> $ads
+     */
+    public static function recordServed(array $ads, string $visitorKey): void
+    {
+        if (!$ads) {
+            return;
+        }
+
+        $seen = self::visitorRecord($visitorKey);
+        $now = time();
+
+        foreach ($ads as $ad) {
+            $seen[(int) $ad['id']] = $now;
+        }
+
+        // Bounded: nothing can matter for longer than the longest window, so an entry older than that is
+        // dead weight in a file that is read on every feed request.
+        $cutoff = $now - (self::MAX_WINDOW_MINUTES * 60) - 3600;
+        foreach ($seen as $id => $stamp) {
+            if ((int) $stamp < $cutoff) {
+                unset($seen[$id]);
+            }
+        }
+
+        self::writeVisitor($visitorKey, $seen);
+    }
+
+    private static function visitorPath(string $visitorKey): string
+    {
+        return STORAGE_PATH . '/cache/adserve/' . hash('sha256', $visitorKey) . '.json';
+    }
+
+    /** @return array<int|string, int> advert id => unix time it was last served to this visitor */
+    private static function visitorRecord(string $visitorKey): array
+    {
+        $path = self::visitorPath($visitorKey);
+        if (!is_file($path)) {
+            return [];
+        }
+
+        $raw = @file_get_contents($path);
+        if ($raw === false || $raw === '') {
+            return [];
+        }
+
+        $decoded = json_decode($raw, true);
+
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    /**
+     * A failure to write is not a failure to serve.
+     *
+     * If the cache directory is missing or unwritable the advert is shown again rather than not shown at
+     * all: the first is a broken promise to an advertiser, the second is a broken page for a visitor, and
+     * only one of those is what the advertiser paid for.
+     */
+    private static function writeVisitor(string $visitorKey, array $seen): void
+    {
+        $dir = STORAGE_PATH . '/cache/adserve';
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0775, true);
+        }
+
+        @file_put_contents(self::visitorPath($visitorKey), (string) json_encode($seen));
     }
 
     /**
