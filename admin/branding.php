@@ -320,7 +320,7 @@ require __DIR__ . '/partials/layout-open.php';
       </div>
     </div>
 
-    <button type="submit" class="btn primary">Save branding</button>
+    <button type="submit" class="btn">Save branding</button>
   </form>
 <?php endif; ?>
 

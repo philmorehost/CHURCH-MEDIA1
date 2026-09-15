@@ -155,6 +155,20 @@ if (!$ogImage && ($s['logo_path'] ?? null)) {
   <meta name="twitter:image" content="<?= e($ogImage) ?>">
 <?php endif; ?>
 <meta name="theme-color" content="#0a0912">
+<?php /*
+         The manifest is generated per church (views/manifest.php) rather than being a static file, so
+         the name under the icon on a home screen is this church's name. `apple-touch-icon` is the same
+         image for iOS, which ignores `manifest` icons entirely when a site is added to the home screen.
+       */ ?>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/assets/logo.png">
+<?php /*
+         iOS ignores the manifest for the name under a home-screen icon and uses this instead, so the
+         church's name has to be here too or the icon is captioned with whatever the page title happens
+         to be. Same helper as the manifest's `short_name`, so the two cannot drift apart. The manifest's
+         `display: standalone` covers the full-screen launch on iOS 16.4 and later.
+       */ ?>
+<meta name="apple-mobile-web-app-title" content="<?= e(appShortName()) ?>">
 <?php /* Lets a podcast app find the feed from any page, which is how a listener who lands on the
          website ends up subscribing instead of having to be sent the address. */ ?>
 <link rel="alternate" type="application/rss+xml" title="Podcast" href="<?= e(baseUrl('/podcast.xml')) ?>">

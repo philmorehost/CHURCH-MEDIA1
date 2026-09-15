@@ -156,3 +156,25 @@
     sync();
   });
 })();
+
+/*
+ * Service worker registration — what makes the site installable to a home screen and gives it an
+ * offline page. See public/sw.js for what it will and will not cache.
+ *
+ * Wrapped on its own and registered on `load`, so nothing here can delay the page or break anything
+ * above it. This is a progressive enhancement: a browser without service workers, or a page served over
+ * plain HTTP where registration is refused outright, must lose nothing else.
+ *
+ * No `scope` is passed. The worker's own path decides it, and /sw.js can only ever control / — which is
+ * why it is served from the root and not from /assets/js/. A worker in that folder could only ever see
+ * pages under /assets/js/, which is the mistake that makes a PWA "not work" with no error to show for it.
+ */
+(function () {
+  'use strict';
+  if (!('serviceWorker' in navigator)) { return; }
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('/sw.js').catch(function () {
+      // Silent on purpose: there is nothing useful to tell a visitor and nothing to fall back to.
+    });
+  });
+})();

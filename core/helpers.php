@@ -360,15 +360,47 @@ function setting(string $key, $default = null)
 }
 
 /**
+ * The short label for a church, for the line under a home-screen icon.
+ *
+ * Used by `views/manifest.php` for `short_name` and by the layout for the `apple-mobile-web-app-title`
+ * meta tag, and it lives here because those two have to agree. A launcher gives `short_name` a narrow
+ * strip and truncates whatever does not fit; iOS ignores the manifest for the home-screen name and uses
+ * the meta tag instead. Church-shaped names ("Grace and Life Assembly, Ikorodu") are long, so without
+ * the trim an icon ends up captioned "Grace and Life Ass…".
+ *
+ * The tagline is the natural source — it is written to be short — and the church's own name is the
+ * fallback. `mb_strimwidth` with an empty suffix trims rather than adding an ellipsis, because a
+ * launcher would then truncate the ellipsis too.
+ */
+function appShortName(): string
+{
+    $s = settings();
+
+    $name = trim((string) ($s['site_title'] ?? ''));
+    if ($name === '') {
+        $name = 'Church';
+    }
+
+    $short = trim((string) ($s['site_tagline'] ?? ''));
+    if ($short === '') {
+        $short = $name;
+    }
+
+    return trim(mb_strimwidth($short, 0, 12, ''));
+}
+
+/**
  * Writes settings for the current tenant.
  *
  * Creates the tenant's own `settings` row on first write and updates it after
  * that, so a tenant only ever stores the values that differ from the shared
  * defaults row. Column names come from our own code, never from request input.
  *
- * Note: the older settings screens still write to the shared row directly —
- * they move onto this helper during the Phase 7 tenant-aware settings pass, and
- * on a single-church install both paths are equivalent.
+ * Note: this writes **this church's** row, creating it on first save. Every screen that writes a
+ * setting now goes through it — branding, general settings, ads, analytics, comments, devotionals,
+ * roster, and the SMS and WhatsApp screens — so a church can no longer change a value that every other
+ * church inherits. The shared row (`tenant_id IS NULL`) is written only by the installer, before any
+ * church exists.
  */
 function settingSave(array $values): bool
 {

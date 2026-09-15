@@ -65,7 +65,7 @@
 | **4** | WhatsApp channel | Official Cloud API integration (templates, 24-h window, webhooks) | 5–7 sessions | Per-conversation | ✅ closed (4.1–4.3; 4.4 rejected) |
 | **5** | Members & daily engagement | Member accounts, daily devotional, Bible reading plans + streaks, offline sermon downloads | 10–12 sessions | None | ✅ shipped (S1–S6) |
 | **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ✅ **complete** — 6a–6g shipped |
-| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings), 7b shipped (an account belongs to one church), 7c shipped (a unit belongs to one church), 7d-i shipped (worker tenancy plumbing), 7d-ii parts 1–2 and 4 shipped (the SMS worker, the sender-ID poller and the daily publisher report act as one church at a time), 7d-iii shipped (the SMS screens only touch their own church), 7d-iv shipped (the ads tables carry a church), 7d-v shipped (the public advert flow was driven over HTTP, clearing 7d-iv's verification debt), 7d-ii part 3 shipped (the devotional push and the reading reminder act as one church at a time), 7d-ii part 5 shipped (the follow-up and rota emails act as one church at a time), 7d-ii part 6 shipped (the WhatsApp broadcast acts as one church at a time), 7d-ii part 7 shipped (the roll-up and the backup were read, and neither needs a church), 7d-ii leftovers shipped (the SMS counters write and the dashboard spend tiles), 7e shipped (a church admin edits its own branding, and nothing else) |
+| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings), 7b shipped (an account belongs to one church), 7c shipped (a unit belongs to one church), 7d-i shipped (worker tenancy plumbing), 7d-ii parts 1–2 and 4 shipped (the SMS worker, the sender-ID poller and the daily publisher report act as one church at a time), 7d-iii shipped (the SMS screens only touch their own church), 7d-iv shipped (the ads tables carry a church), 7d-v shipped (the public advert flow was driven over HTTP, clearing 7d-iv's verification debt), 7d-ii part 3 shipped (the devotional push and the reading reminder act as one church at a time), 7d-ii part 5 shipped (the follow-up and rota emails act as one church at a time), 7d-ii part 6 shipped (the WhatsApp broadcast acts as one church at a time), 7d-ii part 7 shipped (the roll-up and the backup were read, and neither needs a church), 7d-ii leftovers shipped (the SMS counters write and the dashboard spend tiles), 7e shipped (a church admin edits its own branding, and nothing else), 7f shipped (each church's site installs to a home screen under its own name, and opens without a connection) |
 
 **Confirmed 2026-09-12:** multi-tenant **SaaS is a real goal**. That is why **Phase 0
 (tenancy foundation) runs before everything else** — the SMS token, sender IDs, country
@@ -85,8 +85,9 @@ Do this **before** any Phase 1/2 work so nothing has to be retrofitted later.
 > (resolution, host matching, onboarding, authorised session switching), tenant-aware
 > `settings()`, bootstrap resolution, and a super-admin switcher in the admin sidebar.
 > Verified with 25 assertions plus an upgrade simulation against a legacy database.
-> Remaining for Phase 7: per-tenant upload/cache namespacing, branding UI, plan limits,
+> Remaining for Phase 7: per-tenant upload/cache namespacing, plan limits,
 > self-service provisioning, and moving the older content tables onto `tenant_id`.
+> (Branding UI shipped as 7e.)
 
 - **DB**: `tenants` (`id`, `name`, `slug` UNIQUE, `domain` NULL, `subdomain` NULL,
   `logo`, `primary_colour`, `is_active`, `plan`, `created_at`). `settings` gains `tenant_id`
@@ -2080,20 +2081,79 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > settings screen calls it, but no file was uploaded in this stage, so logo, favicon and hero image were
 > exercised by reading and not by running.
 
-> **Not built yet in Phase 7 (beyond 7d and 7e):** self-service tenant provisioning with plan limits,
+> **7f shipped — each church's site installs to a home screen under its own name, and opens without a
+> connection.** Three new files and a route pair: `views/manifest.php` (`/manifest.webmanifest`),
+> `views/offline.php` (`/offline`), and `public/sw.js` — a static file at `/sw.js` rather than a view, so
+> it sits at the origin root. A service worker can only ever control pages at or below its own path, so a
+> worker kept in `/assets/js/` would have controlled nothing and failed with no error to show for it.
+>
+> **The manifest is generated, not a file.** Everything in a manifest that a person actually sees is the
+> church's own: the name under the icon, the description, the icon itself. A static file would put the
+> same name on every church's home screen — the mistake the daily report made with `setting('site_title')`
+> before 7d-ii. Verified per host: a request for `harness-alpha.test` gets alpha's manifest and
+> `harness-beta.test` gets beta's, driven over real HTTP.
+>
+> - **The name.** `short_name` is the tagline trimmed to 12 characters, falling back to the church's name.
+>   That trim lives in one helper (`appShortName()`) because iOS ignores the manifest for the home-screen
+>   name and reads the `apple-mobile-web-app-title` meta tag instead — two sources, one value, or the icon
+>   is captioned one thing on Android and another on iOS.
+> - **The icon.** The church's own uploaded logo is used **only** if it is genuinely usable as an app icon
+>   — square, and at least 192px, measured with `getimagesize` rather than assumed — and when it is, it
+>   **replaces** the two icons shipped with the site. Listing both would have looked implemented and done
+>   nothing: a launcher picks the closest size match, so the shipped 512px icon outranked a church's 192px
+>   logo. `purpose` is `any` throughout and never `maskable`, because a maskable icon has to keep its
+>   content inside a safe zone and neither a church's logo nor the shipped icons can be assumed to have
+>   that padding.
+> - **The cache.** The worker never touches `/admin`, `/member`, `/ad-manager`, `/api` or `/installer`. A
+>   cached `/admin` page is one person's signed-in page, stored on the device, shown to whoever opens the
+>   app next; `/ad-manager` carries a publisher's token in the URL. Navigations are network-first —
+>   cache-first would show a service time that changed while the network was right there — and static
+>   assets are cache-first, because `asset()` already stamps their URLs with a version.
+> - **Registration** is guarded by `'serviceWorker' in navigator`, happens on `load` so it cannot delay the
+>   page, and lives in `site.js` — which the admin screens do not load, so no worker is ever registered on
+>   an admin page.
+>
+> **Two real defects were found on the way, and both were in already-committed code.**
+>
+> - **`class="btn primary"` on 7e's save button.** `admin.css` has `.btn`, `.btn.secondary`, `.btn.danger`
+>   and `.btn.sm` — and no `.primary`. The button rendered unstyled. Cosmetic, and fixed here.
+> - **The offline page would have rendered unstyled.** `asset()` stamps `?v=` from the file's mtime while
+>   the precache list stores the bare `/assets/css/site.css`, so the exact cache lookup missed: the one
+>   page that exists to be shown with no connection was the one page whose stylesheet could not be found.
+>   Fixed with an `ignoreSearch` fallback reached **only** after the network has already failed, so it can
+>   never serve a stale stylesheet while a fresh one is available.
+>
+> **Verified (7f): 86 assertions, 0 failures.** The worker's decisions are not read out of a string: it is
+> loaded into Node with a stub `self`, `isHandled()` is called for a table of paths, and the answers are
+> asserted. That change was made because the first version of those checks searched the response body for
+> `/member` — and passed with `/member` deleted from the never-cache list, because the comment above the
+> list names it too. **Six mutations, six caught:** a fixed name instead of the church's (7 failures), the
+> generic icons left alongside the logo (3), an untrimmed short name (5), `/member` dropped from the
+> never-cache list (2), the offline page not precached (1), and the `ignoreSearch` fallback removed (1).
+>
+> **Not verified: no browser has ever been used.** The worker has never been registered by one, so nothing
+> was installed to a home screen, no offline navigation was served from cache, and Lighthouse has not been
+> run. Node is not a browser — it can say what the worker decides, not that a launcher accepts the
+> manifest. This is the least-proven stage in the repository for that reason, and the evidence has to come
+> from a person with a phone.
+>
+> **Where this deviated from the plan.** The scope line below promised *stale-while-revalidate for API
+> reads* and an install prompt. Neither was built, and the first was deliberate: caching `/api` answers
+> means a POST answered from yesterday's body and a member's page stored on the device.
+
+> **Not built yet in Phase 7 (beyond 7d, 7e and 7f):** self-service tenant provisioning with plan limits,
 > per-tenant upload/cache namespacing, and tenant-scoped analytics and reporting. Localisation (`lang/` +
-> a `t()` helper + Flutter ARB), the PWA (manifest, service worker, offline page) and the app
-> widgets/shortcuts have not been started at all.
+> a `t()` helper + Flutter ARB) and the app widgets/shortcuts have not been started at all.
 >
 > *(The line that used to be here said church-admin branding was still to build. It shipped as 7e below —
 > and the field decision it was waiting on is the whitelist recorded there.)*
 >
 > **"7d-ii part 1 shipped" must not be read as Phase 7 being nearly done.** That commit is one worker of
 > eleven. Phase 7's own scope line is *multi-tenant onboarding, localisation, PWA, app widgets*, and of
-> those, localisation (`lang/` + a `t()` helper + Flutter ARB), the PWA (manifest, service worker, offline
-> page) and the app widgets/shortcuts have not been started at all. 7d-ii and 7e come first because they
-> are correctness rather than features: until every worker runs one pass per church, onboarding a second
-> church is not safe, whatever else is finished.
+> those, localisation (`lang/` + a `t()` helper + Flutter ARB) and the app widgets/shortcuts have not been
+> started at all — the PWA shipped later as 7f. 7d-ii and 7e came first because they are correctness
+> rather than features: until every worker runs one pass per church, onboarding a second church is not
+> safe, whatever else is finished.
 
 - **Multi-tenant SaaS** — *the foundation is already built in Phase 0*. Phase 7 finishes the
   job: tenant-aware settings UI, per-tenant branding (logo, colours, domain) applied across
@@ -2103,8 +2163,11 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
   church's app.
 - **Localisation**: `lang/` message catalogues + a `t()` helper for PHP, `intl`/ARB files
   for Flutter; ship English first, then Yoruba / Igbo / Hausa; Bible translation selector.
-- **PWA**: web app manifest, service worker with cache-first shell + stale-while-revalidate
-  for API reads, offline fallback page, install prompt.
+- **PWA** — *shipped as 7f*. A web app manifest generated per church, a service worker with
+  network-first navigations and cache-first static assets, and an offline fallback page. The
+  install prompt and the "stale-while-revalidate for API reads" named here were **not**
+  built; see the 7f block for why the second one is a deliberate omission rather than an
+  unfinished one.
 - **App widgets & shortcuts**: verse of the day and next-service widgets, plus deep links
   from shared sermon/reel URLs straight into the app.
 

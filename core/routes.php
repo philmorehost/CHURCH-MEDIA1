@@ -1292,6 +1292,22 @@ $router->get('/sitemap.xml', function () {
     require VIEWS_PATH . '/sitemap.php';
 });
 
+// The web app manifest and the offline page — what makes the site installable to a home screen and
+// openable without a connection. Both are public on purpose: the manifest is built from this church's
+// own settings, so it cannot be a static file, and the offline page is precached by public/sw.js.
+$router->get('/manifest.webmanifest', function () {
+    require VIEWS_PATH . '/manifest.php';
+});
+
+$router->get('/offline', function () {
+    render('offline', [
+        'metaTitle' => 'Offline',
+        // Never indexed: it is a state, not a page. A search result pointing here is a dead end that
+        // says the church's site is broken.
+        'metaRobots' => 'noindex, nofollow',
+    ]);
+});
+
 // ---------------------------------------------------------------------------
 // Member accounts — the first visitor-facing logins in this project.
 //
