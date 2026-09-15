@@ -743,11 +743,14 @@ $loadAdByReference = function (string $reference): ?array {
 /*
  * The webhook — how PayHub tells this site that money arrived when the browser never came back.
  *
- * Per the API reference: the event is `charge.success` and the reference is at `data.reference`. The
- * signature is `HMAC-SHA256(raw body, secret)` in `X-Payhub-Signature`, and it is checked when it is
- * present — but it is **not required**, because PayHub does not reliably send it, and a webhook refused over
- * a missing header is a real payment that is never recorded. The body is worth nothing either way: the
- * payment is re-verified with the gateway server-side and only the gateway's own answer is acted on.
+ * Per the API reference: the event is `charge.success`, the reference is at **`data.reference` — and that
+ * reference is PayHub's own (`PH_abc123` in the documentation's own example), never ours.** That single
+ * fact is why none of this route worked, and it is the one thing to hold on to when reading it. The
+ * signature is `HMAC-SHA256(raw body, secret)` in `X-Payhub-Signature`; a wrong signature is refused, and
+ * an absent one is not — see the note beside the check for why, and why it costs nothing.
+ *
+ * The body is never trusted on its own: the payment is re-verified with the gateway server-side and only
+ * the gateway's own answer credits anything.
  *
  * Three things it used to get wrong, all of which lost money:
  *
@@ -758,11 +761,11 @@ $loadAdByReference = function (string $reference): ?array {
  *    paid guard and the attempt-counter sync in a second place, which is the class of drift 7h-0 removed
  *    from the gateway client. Both money paths now go through the one decision.
  * 3. ⚠️ **It looked everything up by OUR reference, and a webhook never carries our reference.** PayHub
- *    names the transaction by the reference it minted. So this route matched nothing, ever — and it also
- *    refused every genuinely delivered webhook with 401 when the signature header was absent. A payment
- *    taken while the advertiser closed the tab had no way of reaching the books at all. It now resolves by
- *    the gateway's reference, falls back to ours when the metadata echoed it, and only ever credits what
- *    the gateway confirms.
+ *    names the transaction by the reference it minted, so this route matched nothing, ever — and it also
+ *    refused every delivered webhook with 401 when the signature header was absent. A payment taken while
+ *    the advertiser closed the tab had no way of reaching the books at all. It now resolves by the
+ *    gateway's reference, falls back to ours when the metadata echoed it, and only ever credits what the
+ *    gateway confirms.
  *
  * It is registered here, below the lookup, because a closure's `use` binds at creation — above this point
  * the variable does not exist yet.
@@ -794,35 +797,60 @@ $router->post('/payment/payhub/webhook', function () use ($loadAdByReference) {
         exit;
     }
 
-    /*
-     * ⚠️ **The payment is re-verified with the gateway, and only the gateway's answer is acted on.**
-     *
-     * This is the contract the working PayHub integration uses, and it is stricter than trusting the body:
-     * its note says it plainly — *"A webhook payload can be forged (anyone can POST {"status":"success"}),
-     * so we must confirm PayHub actually received the money."* The signature is checked as well when it is
-     * present, but it is not *required*, because PayHub does not reliably send `X-Payhub-Signature` — and a
-     * webhook refused for a missing header is a paid advert that stays unpaid for ever. Since the credit
-     * decision below comes from the gateway's own answer and every write is guarded to fire once, accepting
-     * an unsigned body and verifying it is safe; refusing it is not.
-     */
-    $signed = Payhub::verifyWebhook($body, $signature);
     $verifyRef = $gatewayRef !== '' ? $gatewayRef : $metadataRef;
 
-    // Reported back, never acted on: it is the one fact that tells a church whether its merchant dashboard
-    // is set up to sign, and no decision here depends on it — the verification below is the decision.
-    $signatureNote = $signed ? 'verified' : 'absent-or-invalid';
-
     /*
-     * An install with no secret key cannot verify anything, ever. Acknowledged, not retried: a 500 here
-     * would have the gateway redeliver this event for as long as it cares to, and nothing could ever come
-     * of it. This is the state a church is in before it pastes its keys in — and, importantly, it is also
-     * the state that used to refuse every webhook with 401 even when the keys were fine.
+     * An install with no secret key cannot verify a payment **or** a signature, so it is answered before
+     * either question is asked.
+     *
+     * Acknowledged, not retried: a 500 or a 401 here would have the gateway redeliver this event for as long
+     * as it cares to and nothing could ever come of it, because no amount of retrying installs a key. This
+     * is the state a church is in before it pastes its keys in — and it is the one state in which the
+     * gateway's own documentation cannot be followed, since there is nothing to compute the HMAC with.
      */
     if (!Payhub::configured()) {
         http_response_code(200);
         echo json_encode(['status' => 'ignored', 'reason' => 'the gateway is not configured']);
         exit;
     }
+
+    /*
+     * The signature is checked, and a signature that is **present but wrong is refused outright** — which is
+     * what the gateway's documentation asks for in as many words: *"Always verify this signature before
+     * crediting a wallet, and reject any request whose signature does not match."*
+     *
+     * An **absent** header is treated differently, and that is a deliberate trade rather than an oversight.
+     * The documentation says every webhook is signed, but this route also has to survive a gateway — or a
+     * proxy in front of it — that does not send the header, and refusing those is how a paid advert stayed
+     * unpaid with the money sitting at the gateway. Being lenient about an *absent* header costs nothing
+     * here, because the body is never trusted either way: the payment is re-verified with the gateway below,
+     * and only the gateway's own answer credits anything. A forged request naming a real paid reference
+     * credits exactly the advert that payment belongs to — which is the correct outcome — and it cannot
+     * invent a reference the gateway will confirm.
+     *
+     * A *wrong* signature is different: it is positive evidence that somebody computed an HMAC and got it
+     * wrong, so it is refused.
+     *
+     * (The working PayHub integration this was checked against does not require the header either, for the
+     * same reason — see the note above `Payhub::initialize()`. Its own comment calls the body unsigned and
+     * insists the payment be confirmed through the API instead.)
+     */
+    $signed = Payhub::verifyWebhook($body, $signature);
+
+    if ($signature !== '' && !$signed) {
+        Payhub::logEvent('webhook-rejected', ['reference' => $verifyRef, 'reason' => 'signature mismatch']);
+
+        http_response_code(401);
+        echo json_encode(['status' => 'rejected', 'reason' => 'signature mismatch']);
+        exit;
+    }
+
+    // Recorded, because "is my merchant dashboard actually signing?" is the next question after any webhook
+    // trouble, and it is answerable only from here.
+    $signatureNote = $signed ? 'verified' : 'absent';
+    Payhub::logEvent('webhook', ['reference' => $verifyRef, 'signature' => $signatureNote, 'event' => $event]);
+
+    $verified = Payhub::verify($verifyRef);
 
     $verified = Payhub::verify($verifyRef);
 

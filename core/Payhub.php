@@ -382,6 +382,21 @@ final class Payhub
     }
 
     /**
+     * A diagnostic line from somewhere other than this class — currently the webhook, which records whether
+     * the delivery it just received carried a valid signature.
+     *
+     * That question is worth one line in a log: the gateway's documentation says every webhook is signed,
+     * so a run of `"signature":"absent"` entries is the only way to find out that a particular account (or a
+     * proxy in front of it) is not doing so.
+     *
+     * @param array<string, mixed> $data
+     */
+    public static function logEvent(string $event, array $data = []): void
+    {
+        self::log($event, $data);
+    }
+
+    /**
      * One line per gateway conversation, in `storage/logs/payment.log`.
      *
      * This exists because the failure it was written for could not be reproduced: a live card payment was

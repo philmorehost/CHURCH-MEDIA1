@@ -2932,6 +2932,12 @@ PayHub documents all of it at `https://merchant.payhub.com.ng/api-reference.php`
 > its own PH_<hex> reference (it ignores our local one), so we must verify with THAT. Verify against a local
 > reference would return Transaction not found."*
 >
+> **PayHub's own API reference confirms it, and settles the point.** Its documented webhook payload is
+> `{"event":"charge.success","data":{"reference":"PH_abc123", …}}` — the reference in the event that tells a
+> site money arrived is **the gateway's**, not the merchant's. So before this stage the webhook was asked to
+> match `PH_abc123` against a row keyed by `PH_AD_…`: it matched nothing, every time, and a paid advert or
+> gift stayed unpaid with no error anywhere. That is "the payment did not get recorded", exactly.
+>
 > **What shipped:**
 >
 > - **`2026_46_payhub_gateway_reference`** — `ad_payments.gateway_reference` and `donations.gateway_reference`
@@ -2949,12 +2955,18 @@ PayHub documents all of it at `https://merchant.payhub.com.ng/api-reference.php`
 >   *second* transaction and the money was taken against a third. One initialize, on the page that shows the
 >   checkout, which stores the reference it got.
 > - ⚠️ **The webhook was refusing every real PayHub webhook.** It 401'd whenever `X-Payhub-Signature` was
->   absent — and the reference implementation's own note is that PayHub's bodies are *unsigned* and must be
->   re-verified through the API instead. That is now the contract here: the signature is checked when present,
->   but the **payment is always re-verified server-side and only the gateway's answer is acted on**. Its two
->   lookups were also both dead: it resolved adverts only by *our* reference (which a webhook never carries)
->   and it detected giving by `str_starts_with($reference, 'GIVE_')` — a test no `PH_<hex>` reference can ever
->   pass, so a completed gift could not be credited by this route at all.
+>   absent — and a webhook refused over a header is a paid advert that never reaches the books. The
+>   documented contract (`api-reference.php#webhooks`, supplied by the user) is now followed: a signature
+>   that is **present and wrong is refused with 401**, as the docs demand, while an **absent** header is
+>   tolerated because the body is never trusted on its own — the payment is re-verified with the gateway and
+>   only the gateway's answer credits anything, so a forged request can only ever credit the advert a real
+>   paid reference belongs to. Every delivery logs whether it was signed, because *"is my dashboard actually
+>   signing?"* is the next question after any webhook trouble. An install with **no secret key at all** is
+>   answered with 200 before either check, since it can compute neither an HMAC nor a verification and
+>   retrying could never change that.
+>   Its two lookups were also both dead: it resolved adverts only by *our* reference (which a webhook never
+>   carries) and it detected giving by `str_starts_with($reference, 'GIVE_')` — a test no `PH_<hex>`
+>   reference can ever pass, so a completed gift could not be credited by this route at all.
 > - **A quoted `trxref` is believed only when the gateway itself ties it to the attempt** (its metadata echoes
 >   our reference). A reference in a URL is worth nothing — an advertiser can type any reference there,
 >   including one from a stranger's paid transaction.
@@ -2967,6 +2979,13 @@ PayHub documents all of it at `https://merchant.payhub.com.ng/api-reference.php`
 > mutations, four caught:** not reading the reference out of the checkout URL (1 failure), the return URL
 > asking about our own reference again (1 — and it reproduces the live symptom exactly: *unpaid*, "reference
 > not found"), refusing an unsigned webhook (7), and dropping the gateway-reference lookup (2).
+>
+> **A second run, after the documented webhook contract arrived, added 12 more assertions, 0 failures** —
+> driving the exact payload shape from `api-reference.php#webhooks` (PayHub's own `PH_` reference, the
+> documented fields): a correctly signed delivery is accepted and pays the advert; a **wrong** signature is
+> refused with 401 and credits nothing; an **absent** signature is accepted and paid **on the gateway's own
+> answer**; a body asserting success for a reference the gateway will not confirm credits nothing; and an
+> install with no keys answers 200 instead of 401.
 >
 > **Not verified: no live PayHub transaction.** No account is configured here, so what is proven is which
 > reference is asked about, that a real gateway answer is read correctly, and that every branch writes what it
