@@ -65,7 +65,7 @@
 | **4** | WhatsApp channel | Official Cloud API integration (templates, 24-h window, webhooks) | 5–7 sessions | Per-conversation | ✅ closed (4.1–4.3; 4.4 rejected) |
 | **5** | Members & daily engagement | Member accounts, daily devotional, Bible reading plans + streaks, offline sermon downloads | 10–12 sessions | None | ✅ shipped (S1–S6) |
 | **6** | Operations | Home cell finder, duty roster / service planning, newcomer follow-up automation, giving campaigns | 8–10 sessions | None | ✅ **complete** — 6a–6g shipped |
-| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings), 7b shipped (an account belongs to one church), 7c shipped (a unit belongs to one church), 7d-i shipped (worker tenancy plumbing), 7d-ii parts 1–2 and 4 shipped (the SMS worker, the sender-ID poller and the daily publisher report act as one church at a time), 7d-iii shipped (the SMS screens only touch their own church), 7d-iv shipped (the ads tables carry a church), 7d-v shipped (the public advert flow was driven over HTTP, clearing 7d-iv's verification debt), 7d-ii part 3 shipped (the devotional push and the reading reminder act as one church at a time), 7d-ii part 5 shipped (the follow-up and rota emails act as one church at a time), 7d-ii part 6 shipped (the WhatsApp broadcast acts as one church at a time), 7d-ii part 7 shipped (the roll-up and the backup were read, and neither needs a church), 7d-ii leftovers shipped (the SMS counters write and the dashboard spend tiles), 7e shipped (a church admin edits its own branding, and nothing else), 7f shipped (each church's site installs to a home screen under its own name, and opens without a connection), 7g-i shipped (a church can serve its site in its own language, and a visitor can choose one) |
+| **7** | Reach & platform | Multi-tenant onboarding, localisation, PWA, app widgets | 10–14 sessions | None | ⬜ **in progress** — 7a shipped (tenant-aware settings), 7b shipped (an account belongs to one church), 7c shipped (a unit belongs to one church), 7d-i shipped (worker tenancy plumbing), 7d-ii parts 1–2 and 4 shipped (the SMS worker, the sender-ID poller and the daily publisher report act as one church at a time), 7d-iii shipped (the SMS screens only touch their own church), 7d-iv shipped (the ads tables carry a church), 7d-v shipped (the public advert flow was driven over HTTP, clearing 7d-iv's verification debt), 7d-ii part 3 shipped (the devotional push and the reading reminder act as one church at a time), 7d-ii part 5 shipped (the follow-up and rota emails act as one church at a time), 7d-ii part 6 shipped (the WhatsApp broadcast acts as one church at a time), 7d-ii part 7 shipped (the roll-up and the backup were read, and neither needs a church), 7d-ii leftovers shipped (the SMS counters write and the dashboard spend tiles), 7e shipped (a church admin edits its own branding, and nothing else), 7f shipped (each church's site installs to a home screen under its own name, and opens without a connection), 7g-i shipped (a church can serve its site in its own language, and a visitor can choose one), 7g-ii shipped (the pages shown when something has gone wrong, and a guard that catches a mistyped key) |
 
 **Confirmed 2026-09-12:** multi-tenant **SaaS is a real goal**. That is why **Phase 0
 (tenancy foundation) runs before everything else** — the SMS token, sender IDs, country
@@ -2193,20 +2193,61 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > idiomatic ones were left in English on purpose rather than rendered word-for-word. No browser has been
 > used either — the switcher, the redirect and the cookie were driven over HTTP only.
 >
-> **Still English, and deliberately so:** the admin screens, and the standalone public pages that do not
+> **Still English at this point:** the admin screens, and the standalone public pages that do not
 > use the layout (`views/forgot-password.php`, `views/unblock.php`, `RateLimiter`'s throttle page). Those
-> three hard-code `lang="en"`, and that is correct while their words are English — changing the attribute
-> without translating the page would be a lie about the content. They are 7g-ii.
+> three hard-coded `lang="en"`, and that was correct while their words were English — changing the attribute
+> without translating the page would be a lie about the content. They were 7g-ii, below.
 >
 > **One thing that will read as a bug and is not:** the service worker caches navigation responses
 > network-first, so a language switched while offline appears to do nothing until the device is back
 > online, when the next navigation re-fetches and the cached copy is replaced.
 
-> **Not built yet in Phase 7 (beyond 7d, 7e, 7f and 7g-i):** self-service tenant provisioning with plan
-> limits, per-tenant upload/cache namespacing, and tenant-scoped analytics and reporting. Localisation is
-> **started** — the PHP foundation and the site shell shipped as 7g-i; the admin screens, the three
-> standalone pages and the Flutter `intl`/ARB files are not done. The app widgets/shortcuts have not been
-> started at all.
+> **7g-ii shipped — the pages shown when something has gone wrong, and a guard that makes translating the
+> rest safe.** Five surfaces and 58 new keys: `404`, `429`, `offline`, `forgot-password`, `unblock`, and
+> `RateLimiter`'s dependency-free fallback. These are the pages where somebody decides whether the site is
+> broken or whether *they* are, which is the worst moment to find an English sentence on a Yorùbá site.
+>
+> **`cli/lang_check.php` now reads the code, not just the catalogues.** It scans every `t('…')` in `views/`,
+> `admin/`, `api/` and `core/` and fails on a key English does not have — because at runtime a typo and a
+> missing translation are indistinguishable: both render `nav.hom` in the middle of a header. That is the
+> check that makes a page-at-a-time migration honest, and it is what a catalogue tool has to do to be worth
+> running. Also new: a key written **twice in one file** is an error, because PHP silently keeps the last
+> one and the first value becomes dead text that no runtime check can ever see; a key nothing asks for is a
+> notice; and a key built at runtime (`t('nav.' . $x)`) is reported as **uncheckable** rather than assumed
+> good. Today: 102 keys declared, 102 asked for.
+>
+> **Two defects, one of them in code that has been live for months.**
+>
+> - **The forgot-password PIN form could not be reached.** The branches read
+>   `if ($step === 'request') … elseif ($step === 'pin_reset' || $_GET['mode'] === 'pin')`, and on a plain
+>   GET `$step` is *always* `'request'` — so the first branch always won and both "Reset Password using
+>   Security PIN" links reloaded the very form they were clicked from. The PIN form was reachable only by
+>   getting fields wrong on it, which is to say not reachable. The PIN branch is now tested first. Nothing
+>   found this by reading; it took driving the page as a person would.
+> - **The new scanner's first version cried wolf.** Its literal-key pattern matched `t('nav.' . $k)` and
+>   registered a key called `nav.`, which then failed the "English has no such key" check as though
+>   somebody had mistyped one. The harness assertion *"a key built at runtime is not treated as an error"*
+>   is what caught it — a check is not finished until its false positives have been tested too.
+>
+> **Verified (7g-ii): 58 assertions, 0 failures**, and **seven mutations, seven caught:** the 404 heading
+> back to a literal (2 failures), the offline page dropping the church name (1), the PIN form back behind
+> the request form (6), the scanner's false-positive fix reverted (1), the rate-limit fallback carrying its
+> own English again (3), a key a page asks for deleted from English (5), and the unblock page declaring
+> English again (1). The harness also writes a mistyped `t()` and a dynamic one into `views/`, asserts the
+> tool fails on the first and only warns about the second, and removes them.
+>
+> **One deliberate copy change:** the rate-limit fallback's link said "Back to the home page" and now says
+> "Back Home", because it shares the key with the 404 and 429 pages rather than owning a fourth wording.
+>
+> **Not verified, and worth being plain about:** none of these pages has a word of Yorùbá — the catalogue is
+> still the ten keys 7g-i shipped — so a Yorùbá visitor reads them in English, correctly and by fallback.
+> `cli/lang_check.php` lists that gap rather than hiding it. No browser has been used either.
+
+> **Not built yet in Phase 7 (beyond 7d, 7e, 7f, 7g-i and 7g-ii):** self-service tenant provisioning with
+> plan limits, per-tenant upload/cache namespacing, and tenant-scoped analytics and reporting.
+> Localisation is **under way** — the PHP foundation, the site shell and the five "something went wrong"
+> pages have shipped; the rest of the public views, the admin screens and the Flutter `intl`/ARB files are
+> not done. The app widgets/shortcuts have not been started at all.
 >
 > *(The line that used to be here said church-admin branding was still to build. It shipped as 7e below —
 > and the field decision it was waiting on is the whitelist recorded there.)*

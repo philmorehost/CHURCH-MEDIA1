@@ -90,17 +90,20 @@ class RateLimiter
 
         // In an API or CLI context there is no layout to render into, so keep a
         // dependency-free fallback rather than risking a second failure.
+        //
+        // `t()` is safe here even so: `Lang` reads files, `setting()` catches everything a dead database
+        // can throw and falls back to config defaults, and `t()` itself degrades to the key. Nothing on
+        // this path can fail because of the translation.
         if (function_exists('render') && defined('VIEWS_PATH') && is_file(VIEWS_PATH . '/429.php')) {
-            render('429', ['metaTitle' => 'Please slow down']);
+            render('429', ['metaTitle' => t('error.429.title')]);
         } else {
-            echo '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+            echo '<!doctype html><html lang="' . e(Lang::current()) . '"><head><meta charset="utf-8">'
                 . '<meta name="viewport" content="width=device-width,initial-scale=1">'
-                . '<title>Please slow down</title></head>'
+                . '<title>' . e(t('error.429.title')) . '</title></head>'
                 . '<body style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a0912;color:#fff;padding:64px 24px;text-align:center;">'
-                . '<h1 style="font-size:24px;margin:0 0 12px;">Please slow down</h1>'
-                . '<p style="color:#c9c4de;max-width:420px;margin:0 auto 24px;">You have made a lot of requests in a short time. '
-                . 'Please wait a minute and try again.</p>'
-                . '<p><a href="/" style="color:#e8b95f;text-decoration:none;">Back to the home page</a></p>'
+                . '<h1 style="font-size:24px;margin:0 0 12px;">' . e(t('error.429.title')) . '</h1>'
+                . '<p style="color:#c9c4de;max-width:420px;margin:0 auto 24px;">' . e(t('error.429.body_plain')) . '</p>'
+                . '<p><a href="/" style="color:#e8b95f;text-decoration:none;">' . e(t('common.back_home')) . '</a></p>'
                 . '</body></html>';
         }
         exit;

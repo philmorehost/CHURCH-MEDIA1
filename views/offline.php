@@ -21,21 +21,18 @@ $church = trim((string) ($s['site_title'] ?? ''));
 ?>
 <section class="section" style="padding-top:56px; text-align:center;">
   <div class="container">
-    <span class="eyebrow">Offline</span>
-    <h1 style="font-size:clamp(32px,6vw,56px); margin-top:10px;">You are offline</h1>
+    <span class="eyebrow"><?= e(t('error.offline.eyebrow')) ?></span>
+    <h1 style="font-size:clamp(32px,6vw,56px); margin-top:10px;"><?= e(t('error.offline.title')) ?></h1>
     <p style="color:var(--ink-dim); max-width:480px; margin:0 auto 30px;">
       <?php if ($church !== ''): ?>
-        This device cannot reach <?= e($church) ?> at the moment.
+        <?= e(t('error.offline.body', [':church' => $church])) ?>
       <?php else: ?>
-        This device cannot reach the site at the moment.
+        <?= e(t('error.offline.body_no_church')) ?>
       <?php endif; ?>
-      Pages you have already opened will still work — the app keeps a copy of them on the device.
-      The live stream, giving, and anything else that needs the server will work again once you are
-      back on a connection.
     </p>
     <div class="hero-actions">
-      <a href="/" class="btn btn-gold">Try the home page again</a>
-      <a href="/feed" class="btn btn-ghost">Browse the Feed</a>
+      <a href="/" class="btn btn-gold"><?= e(t('error.offline.retry')) ?></a>
+      <a href="/feed" class="btn btn-ghost"><?= e(t('common.browse_feed')) ?></a>
     </div>
   </div>
 </section>

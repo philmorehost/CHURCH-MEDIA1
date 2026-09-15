@@ -11,7 +11,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $pin = trim((string) ($_POST['unblock_pin'] ?? ''));
 
     if ($username === '' || $password === '' || $pin === '') {
-        $errors[] = 'Username, password, and Security Unblock PIN are all required.';
+        $errors[] = t('auth.err.unblock_fields_required');
     } else {
         $pdo = Database::getInstance()->getConnection();
         // Same church boundary as signing in: a church's admin restores access on that church's
@@ -21,9 +21,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $user = $stmt->fetch();
 
         if (!$user || !password_verify($password, $user['password'])) {
-            $errors[] = 'Invalid username or password.';
+            $errors[] = t('auth.err.credentials_invalid');
         } elseif (empty($user['unblock_pin_hash']) || !password_verify($pin, $user['unblock_pin_hash'])) {
-            $errors[] = 'Incorrect Security Unblock PIN.';
+            $errors[] = t('auth.err.pin_wrong');
         } else {
             // Unblock user IP from ip_rules if blacklisted
             $ip = clientIp();
@@ -33,18 +33,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->prepare('UPDATE users SET is_suspended = 0 WHERE id = ?')->execute([(int) $user['id']]);
 
             $success = true;
-            flash('success', 'Security unblock successful! Your IP and account have been restored. You may now log in.');
+            flash('success', t('auth.flash.unblock_done'));
         }
     }
 }
 ?>
 <!doctype html>
-<html lang="en">
+<html lang="<?= e(Lang::current()) ?>">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>Unblock Security Access · <?= e(setting('site_title')) ?></title>
+<title><?= e(t('auth.unblock.title')) ?> · <?= e(setting('site_title')) ?></title>
 <style>
   :root{--bg-0:#0b0a14;--bg-1:#141227;--card:#181632cc;--border:#2c2850;--gold:#e8b95f;--gold-soft:#f3d38f;--ink:#f1eefc;--ink-dim:#a9a4c9;--danger:#ff6b6b;--success:#34d399;}
   *{box-sizing:border-box;}
@@ -66,26 +66,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <body>
 <div class="card">
   <div class="mark">🔓</div>
-  <h1>Unblock Security Access</h1>
-  <p class="sub">Blocked by security or account suspended? Enter your credentials and your secret Unblock PIN to restore access immediately.</p>
+  <h1><?= e(t('auth.unblock.title')) ?></h1>
+  <p class="sub"><?= e(t('auth.unblock.sub')) ?></p>
 
   <?php if ($success): ?>
-    <div class="alert ok">✅ Account and IP successfully unblocked! You can now log in.</div>
-    <a href="/admin/login" class="btn" style="display:block; text-align:center; text-decoration:none; box-sizing:border-box;">Proceed to Admin Login →</a>
+    <div class="alert ok"><?= e(t('auth.unblock.done')) ?></div>
+    <a href="/admin/login" class="btn" style="display:block; text-align:center; text-decoration:none; box-sizing:border-box;"><?= e(t('auth.unblock.proceed')) ?></a>
   <?php else: ?>
     <?php foreach ($errors as $error): ?><div class="alert"><?= e($error) ?></div><?php endforeach; ?>
     <form method="post" action="/unblock">
       <?= Csrf::field() ?>
-      <label for="username">Username or Email</label>
+      <label for="username"><?= e(t('auth.field.account')) ?></label>
       <input type="text" id="username" name="username" value="<?= e($_POST['username'] ?? '') ?>" autofocus required>
-      <label for="password">Password</label>
+      <label for="password"><?= e(t('auth.field.password')) ?></label>
       <input type="password" id="password" name="password" required>
-      <label for="unblock_pin">Security Unblock PIN (4 to 6 digits)</label>
-      <input type="password" id="unblock_pin" name="unblock_pin" pattern="[0-9]{4,6}" maxlength="6" required placeholder="Your secret Unblock PIN">
-      <button class="btn" type="submit">Restore Access &amp; Unblock IP</button>
+      <label for="unblock_pin"><?= e(t('auth.field.pin')) ?></label>
+      <input type="password" id="unblock_pin" name="unblock_pin" pattern="[0-9]{4,6}" maxlength="6" required placeholder="<?= e(t('auth.field.pin_hint')) ?>">
+      <button class="btn" type="submit"><?= e(t('auth.unblock.submit')) ?></button>
     </form>
     <div style="text-align:center; margin-top:20px;">
-      <a href="/admin/login" style="color:var(--gold-soft); font-size:13px; text-decoration:none;">← Return to Login</a>
+      <a href="/admin/login" style="color:var(--gold-soft); font-size:13px; text-decoration:none;"><?= e(t('auth.return_to_login')) ?></a>
     </div>
   <?php endif; ?>
 </div>
