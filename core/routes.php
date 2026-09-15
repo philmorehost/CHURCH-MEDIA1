@@ -629,9 +629,25 @@ $router->post('/advertise', function () {
     // browser is never handed off. It is a redirect and not a render because a render would re-run this
     // whole handler on a refresh, creating a second advert and a second attempt for one payment.
     if (!$isFree && $paymentMethod === 'online') {
-        // Kept in the session because the checkout page is the page that takes money. The reference is
-        // ours and random, but a URL that can be handed to somebody else will be, so the page checks that
-        // the session asking for it is the session that created it.
+        if (Payhub::configured()) {
+            try {
+                $initRes = Payhub::initialize([
+                    'email' => $pubEmail,
+                    'amount' => Payhub::amountInNaira($price),
+                    'reference' => $reference,
+                    'callback_url' => baseUrl('advertise/return?ref=' . urlencode($reference)),
+                    'name' => $pubName,
+                    'phone' => $pubPhone ?: null,
+                    'metadata' => ['ad_id' => $adId, 'publisher_id' => $publisherId],
+                ]);
+                if (!empty($initRes['reference']) && $initRes['reference'] !== $reference) {
+                    $origRef = $reference;
+                    $reference = (string) $initRes['reference'];
+                    $pdo->prepare('UPDATE ads SET payment_reference = ? WHERE id = ?')->execute([$reference, $adId]);
+                    $pdo->prepare('UPDATE ad_payments SET reference = ? WHERE ad_id = ? AND reference = ?')->execute([$reference, $adId, $origRef]);
+                }
+            } catch (Throwable $e) {}
+        }
         $_SESSION['ad_checkout_ref'] = $reference;
         clearFormOld();
         redirect('/advertise/checkout?ref=' . urlencode($reference));
@@ -905,7 +921,15 @@ $router->get('/advertise/return', function () use ($loadAdByReference) {
     if ((string) $ad['payment_status'] === 'paid') {
         $result = ['outcome' => 'paid', 'reason' => ''];
     } else {
-        $result = AdPayments::recordOutcome($ad, Payhub::verify($ref), $ref);
+        $verifyRes = Payhub::verify($ref);
+        $trxref = trim((string) ($_GET['trxref'] ?? ($_GET['reference'] ?? '')));
+        if (!$verifyRes['paid'] && $trxref !== '' && $trxref !== $ref) {
+            $secondVerify = Payhub::verify($trxref);
+            if ($secondVerify['paid'] || $secondVerify['status'] === 'success') {
+                $verifyRes = $secondVerify;
+            }
+        }
+        $result = AdPayments::recordOutcome($ad, $verifyRes, $ref);
     }
 
     $fresh = $loadAdByReference($ref) ?? $ad;

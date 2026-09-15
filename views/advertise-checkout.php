@@ -49,15 +49,24 @@ $metaDescription = 'Pay for your advert on ' . setting('site_title') . '.';
 $metaRobots = 'noindex, nofollow';
 
 $inlineReady = Payhub::inlineReady();
+$authorizationUrl = '';
 
-/*
- * What the checkout script is given. `amount` is in KOBO — the inline window's unit, per the gateway's own
- * example (`value * 100`) — while the HOSTED route sends the naira figure, because the hosted checkout page
- * renders what it is given as naira and sending it kobo displayed ₦900,000 for a ₦9,000 advert. Two units,
- * two functions: Payhub::amountInKobo() and Payhub::amountInNaira(). It is passed as
- * JSON in a data attribute rather than interpolated into a JavaScript literal, so no value can end the
- * attribute or the string it lands in.
- */
+if ($inlineReady && !empty($ad['id'])) {
+    try {
+        $initRes = Payhub::initialize([
+            'email' => (string) ($ad['publisher_email'] ?? ''),
+            'amount' => Payhub::amountInNaira($amount),
+            'reference' => $reference,
+            'callback_url' => baseUrl('advertise/return?ref=' . urlencode($reference)),
+            'name' => (string) ($ad['publisher_name'] ?? ''),
+            'metadata' => ['ad_id' => (int) $ad['id']],
+        ]);
+        if (!empty($initRes['authorization_url'])) {
+            $authorizationUrl = (string) $initRes['authorization_url'];
+        }
+    } catch (Throwable $e) {}
+}
+
 $inlineSettings = [
     'key' => Payhub::publicKey(),
     'email' => (string) ($ad['publisher_email'] ?? ''),
@@ -65,6 +74,7 @@ $inlineSettings = [
     'ref' => $reference,
     'returnUrl' => $returnTo,
     'gatewayBaseUrl' => Payhub::scriptOrigin() . '/',
+    'checkoutUrl' => $authorizationUrl,
     'isTest' => Payhub::isTestMode(),
 ];
 ?>

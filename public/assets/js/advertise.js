@@ -110,14 +110,24 @@
     }
 
     var cleanBase = (settings.gatewayBaseUrl || 'https://merchant.payhub.com.ng/').replace(/\/+$/, '') + '/';
-    var checkoutUrl = cleanBase + 'checkout.php'
-      + '?amount=' + encodeURIComponent(settings.amount / 100)
-      + '&email=' + encodeURIComponent(settings.email || '')
-      + '&ref=' + encodeURIComponent(settings.ref)
-      + (settings.key ? '&key=' + encodeURIComponent(settings.key) + '&public_key=' + encodeURIComponent(settings.key) : '')
-      + (settings.isTest ? '&test=1&mode=test' : '')
-      + '&origin=' + encodeURIComponent(window.location.origin)
-      + '&embed=1';
+    var checkoutUrl = settings.checkoutUrl || '';
+    if (!checkoutUrl) {
+      checkoutUrl = cleanBase + 'checkout.php'
+        + '?amount=' + encodeURIComponent(settings.amount / 100)
+        + '&email=' + encodeURIComponent(settings.email || '')
+        + '&ref=' + encodeURIComponent(settings.ref)
+        + (settings.key ? '&key=' + encodeURIComponent(settings.key) + '&public_key=' + encodeURIComponent(settings.key) : '')
+        + (settings.isTest ? '&test=1&mode=test' : '')
+        + '&origin=' + encodeURIComponent(window.location.origin)
+        + '&embed=1';
+    } else {
+      if (checkoutUrl.indexOf('embed=1') === -1) {
+        checkoutUrl += (checkoutUrl.indexOf('?') === -1 ? '?' : '&') + 'embed=1';
+      }
+      if (checkoutUrl.indexOf('origin=') === -1) {
+        checkoutUrl += '&origin=' + encodeURIComponent(window.location.origin);
+      }
+    }
 
     var expectedOrigin;
     try {
@@ -293,8 +303,13 @@
     }
 
     var handleSuccess = function (data) {
-      var reference = (data && data.reference) ? data.reference : settings.ref;
-      window.location.href = settings.returnUrl + '?ref=' + encodeURIComponent(reference);
+      var reference = settings.ref;
+      var gatewayRef = (data && (data.reference || data.trxref)) ? (data.reference || data.trxref) : '';
+      var targetUrl = settings.returnUrl + '?ref=' + encodeURIComponent(reference);
+      if (gatewayRef && gatewayRef !== reference) {
+        targetUrl += '&trxref=' + encodeURIComponent(gatewayRef);
+      }
+      window.location.href = targetUrl;
     };
 
     var handleDismiss = function () {
