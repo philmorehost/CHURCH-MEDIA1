@@ -37,7 +37,7 @@ $metaDescription = 'Advertise on our website and Mobile App. Place video or imag
     </div>
   <?php else: ?>
     <div class="card glass-card" style="padding:32px; border-radius:12px;">
-      <form method="post" action="/advertise" enctype="multipart/form-data">
+      <form id="ad_form" method="post" action="/advertise" enctype="multipart/form-data">
         <?= Csrf::field() ?>
 
         <!-- Honeypot -->
@@ -164,7 +164,7 @@ $metaDescription = 'Advertise on our website and Mobile App. Place video or imag
         </div>
 
         <div style="margin-top:32px; text-align:right;">
-          <button type="submit" class="btn btn-gold" style="padding:12px 28px; font-size:16px; font-weight:700;">🚀 Submit Advert for Approval</button>
+          <button type="submit" id="ad_submit_btn" class="btn btn-gold" style="padding:12px 28px; font-size:16px; font-weight:700;">🚀 Submit Advert for Approval</button>
         </div>
       </form>
     </div>

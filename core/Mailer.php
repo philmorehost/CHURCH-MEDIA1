@@ -69,10 +69,11 @@ class Mailer
         $secure = $config['smtp_secure'] ?? 'tls'; // 'ssl' | 'tls' | ''
         $transport = $secure === 'ssl' ? 'ssl://' . $host : $host;
 
-        $socket = @fsockopen($transport, $port, $errno, $errstr, 10);
+        $socket = @fsockopen($transport, $port, $errno, $errstr, 3);
         if (!$socket) {
             throw new RuntimeException("Could not connect to SMTP host: $errstr");
         }
+        @stream_set_timeout($socket, 3);
 
         $expect = function (string $prefix) use ($socket) {
             $line = fgets($socket, 512);

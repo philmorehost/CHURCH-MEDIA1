@@ -96,6 +96,19 @@ final class Payhub
     }
 
     /**
+     * True when configured API keys are Test Mode keys (e.g. pk_test_*, sk_test_*).
+     */
+    public static function isTestMode(): bool
+    {
+        $secret = self::secretKey();
+        $public = self::publicKey();
+        return str_starts_with($secret, 'sk_test_')
+            || str_starts_with($public, 'pk_test_')
+            || str_contains(strtolower($secret), 'test')
+            || str_contains(strtolower($public), 'test');
+    }
+
+    /**
      * Naira to kobo — for the INLINE window only.
      *
      * The gateway's own inline example is `amount: document.getElementById("amount").value * 100`, and

@@ -331,13 +331,24 @@ require __DIR__ . '/partials/layout-open.php';
         <div class="row two">
           <div>
             <label for="payhub_public_key">Payhub Public Key</label>
-            <input type="text" id="payhub_public_key" name="payhub_public_key" value="<?= e((string) setting('payhub_public_key')) ?>" placeholder="YOUR_PUBLIC_KEY">
+            <input type="text" id="payhub_public_key" name="payhub_public_key" value="<?= e((string) setting('payhub_public_key')) ?>" placeholder="pk_test_xxxx or pk_live_xxxx">
           </div>
           <div>
             <label for="payhub_secret_key">Payhub Secret Key</label>
-            <input type="password" id="payhub_secret_key" name="payhub_secret_key" value="<?= e((string) setting('payhub_secret_key')) ?>" placeholder="sk_live_xxxx">
+            <input type="password" id="payhub_secret_key" name="payhub_secret_key" value="<?= e((string) setting('payhub_secret_key')) ?>" placeholder="sk_test_xxxx or sk_live_xxxx">
           </div>
         </div>
+        <?php if (Payhub::configured()): ?>
+          <div style="margin-top:10px; font-size:13px;">
+            <?php if (Payhub::isTestMode()): ?>
+              <span class="badge" style="background:#f59e0b; color:#fff; padding:3px 8px; border-radius:4px; font-weight:700;">⚡ Test Mode Active</span>
+              <span style="color:var(--ink-dim); margin-left:6px;">Your API keys are in test mode. Payments will be simulated.</span>
+            <?php else: ?>
+              <span class="badge" style="background:#10b981; color:#fff; padding:3px 8px; border-radius:4px; font-weight:700;">🟢 Live Mode Active</span>
+              <span style="color:var(--ink-dim); margin-left:6px;">Real transactions will be processed.</span>
+            <?php endif; ?>
+          </div>
+        <?php endif; ?>
 
         <h3 style="margin-top:20px;">🏦 Manual Bank Transfer</h3>
         <p class="sub">Allow advertisers to pay via bank transfer and upload proof of payment for review.</p>

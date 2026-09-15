@@ -64,6 +64,8 @@ $inlineSettings = [
     'amount' => Payhub::amountInKobo($amount),
     'ref' => $reference,
     'returnUrl' => $returnTo,
+    'gatewayBaseUrl' => Payhub::scriptOrigin() . '/',
+    'isTest' => Payhub::isTestMode(),
 ];
 ?>
 <div class="container section" style="max-width:640px; padding-top:40px; padding-bottom:60px;">
@@ -73,6 +75,13 @@ $inlineSettings = [
   <?php endif; ?>
 
   <div style="text-align:center; margin-bottom:28px;">
+    <?php if (Payhub::isTestMode()): ?>
+      <div style="margin-bottom:12px;">
+        <span class="badge" style="display:inline-block; padding:4px 14px; background:rgba(245,158,11,0.18); border:1px solid rgba(245,158,11,0.4); color:#f59e0b; border-radius:20px; font-size:12px; font-weight:700; letter-spacing:0.5px;">
+          ⚡ PAYHUB TEST MODE
+        </span>
+      </div>
+    <?php endif; ?>
     <span class="eyebrow" style="color:var(--gold-soft); font-weight:700; text-transform:uppercase; letter-spacing:1px; font-size:13px;">Step 2 of 2</span>
     <h1 style="margin:8px 0 10px; font-size:28px;">Complete your payment</h1>
     <p style="color:var(--ink-dim); font-size:14.5px; margin:0;">

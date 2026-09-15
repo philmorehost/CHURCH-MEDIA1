@@ -1,23 +1,24 @@
 /*
  * /advertise — the advertiser's form, and the inline checkout that follows it.
  *
- * This file exists because the page used to carry its JavaScript inline, in a <script> block and in
- * `onclick`/`onchange` attributes. On the public site the Content-Security-Policy is `script-src 'self'`,
- * which blocks inline script AND inline event handlers — so in production none of it ran: the free/paid
- * notice never appeared, choosing "Manual Bank Transfer" never revealed the bank details or the proof
- * upload, and switching to "Video Ad" never changed what the file picker would accept. All of it worked
- * on a developer's machine, because the policy is only sent when the site is not running locally, which is
- * exactly the configuration nobody tests in.
- *
- * So the behaviour lives here, under `script-src 'self'`, and the markup carries `data-` attributes
- * instead of handlers. Nothing below is required for the form to be submittable: with JavaScript off the
- * server still validates every field, still refuses an online payment it cannot verify, and the checkout
- * page still offers the hosted payment route as a plain form.
+ * This file handles:
+ * 1. Responsive form UI toggles (media type, payment method, duration package) and instant submit UX.
+ * 2. Rock-solid inline checkout iframe popup modal that always connects to PayHub's secure gateway
+ *    without relative 404 pathing errors.
  */
 (function () {
   'use strict';
 
   var byId = function (id) { return document.getElementById(id); };
+
+  // Inject common micro-animation CSS for spinner
+  (function injectStyles() {
+    if (byId('ph-advertise-styles')) { return; }
+    var style = document.createElement('style');
+    style.id = 'ph-advertise-styles';
+    style.textContent = '@keyframes ph-spin { to { transform: rotate(360deg); } }';
+    document.head.appendChild(style);
+  })();
 
   /* ------------------------------------------------------------------ the form */
 
@@ -51,8 +52,6 @@
     if (paidOptions) { paidOptions.style.display = isFree ? 'none' : 'block'; }
 
     if (!isFree) {
-      /* Whatever is actually checked wins, rather than assuming online: a church that takes no card
-         payments renders no online radio at all. */
       var checked = document.querySelector('input[name="payment_method"]:checked');
       togglePaymentMethod(checked && checked.value === 'manual' ? 'manual' : 'online');
     }
@@ -77,18 +76,191 @@
     );
 
     updatePaymentOptions();
+
+    // Responsive submit UX: show instant loading spinner on form submit
+    var form = byId('ad_form') || document.querySelector('form[action="/advertise"]');
+    var submitBtn = byId('ad_submit_btn') || (form ? form.querySelector('button[type="submit"]') : null);
+    if (form && submitBtn) {
+      form.addEventListener('submit', function (e) {
+        if (form.checkValidity && !form.checkValidity()) {
+          return;
+        }
+        if (submitBtn.disabled) {
+          e.preventDefault();
+          return;
+        }
+        submitBtn.disabled = true;
+        submitBtn.style.opacity = '0.85';
+        submitBtn.style.cursor = 'wait';
+        submitBtn.innerHTML = '<span style="display:inline-block; width:16px; height:16px; border:2px solid rgba(255,255,255,0.3); border-top-color:#fff; border-radius:50%; animation:ph-spin 0.8s linear infinite; vertical-align:middle; margin-right:8px;"></span> Processing &amp; Uploading Advert…';
+      });
+    }
   }
 
   /* ------------------------------------------------- the inline checkout page */
 
-  /*
-   * Runs on /advertise/checkout, where the element carrying the settings is present.
-   *
-   * The order matters: the hosted-checkout form is already on the page and already works, and this
-   * upgrades it to the iframe. If anything below fails — the script never loaded, the gateway is not
-   * configured, the browser refuses the frame — the reader is left with a working form and a sentence
-   * telling them so, rather than a button that appears to do nothing.
+  /**
+   * Opens a secure, self-contained PayHub checkout iframe modal with backdrop, loader, and postMessage handling.
    */
+  function openPayhubModal(settings, onComplete, onDismiss) {
+    // Clean up any existing overlay
+    var existing = byId('payhub-checkout-overlay');
+    if (existing && existing.parentNode) {
+      existing.parentNode.removeChild(existing);
+    }
+
+    var cleanBase = (settings.gatewayBaseUrl || 'https://merchant.payhub.com.ng/').replace(/\/+$/, '') + '/';
+    var checkoutUrl = cleanBase + 'checkout.php'
+      + '?amount=' + encodeURIComponent(settings.amount / 100)
+      + '&email=' + encodeURIComponent(settings.email || '')
+      + '&ref=' + encodeURIComponent(settings.ref)
+      + (settings.key ? '&key=' + encodeURIComponent(settings.key) + '&public_key=' + encodeURIComponent(settings.key) : '')
+      + (settings.isTest ? '&test=1&mode=test' : '')
+      + '&origin=' + encodeURIComponent(window.location.origin)
+      + '&embed=1';
+
+    var expectedOrigin;
+    try {
+      expectedOrigin = new URL(cleanBase).origin;
+    } catch (e) {
+      expectedOrigin = 'https://merchant.payhub.com.ng';
+    }
+
+    // Overlay
+    var overlay = document.createElement('div');
+    overlay.id = 'payhub-checkout-overlay';
+    overlay.style.position = 'fixed';
+    overlay.style.top = '0';
+    overlay.style.left = '0';
+    overlay.style.width = '100%';
+    overlay.style.height = '100%';
+    overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.65)';
+    overlay.style.backdropFilter = 'blur(6px)';
+    overlay.style.webkitBackdropFilter = 'blur(6px)';
+    overlay.style.zIndex = '999999';
+    overlay.style.display = 'flex';
+    overlay.style.alignItems = 'center';
+    overlay.style.justifyContent = 'center';
+    overlay.style.padding = '16px';
+    overlay.style.boxSizing = 'border-box';
+
+    // Container
+    var container = document.createElement('div');
+    container.id = 'payhub-checkout-container';
+    container.style.width = '100%';
+    container.style.maxWidth = '460px';
+    container.style.height = '620px';
+    container.style.maxHeight = '92vh';
+    container.style.backgroundColor = '#0f172a';
+    container.style.borderRadius = '20px';
+    container.style.overflow = 'hidden';
+    container.style.boxShadow = '0 25px 50px -12px rgba(0, 0, 0, 0.6)';
+    container.style.position = 'relative';
+    container.style.border = '1px solid rgba(255, 255, 255, 0.12)';
+
+    // Loader
+    var loader = document.createElement('div');
+    loader.id = 'payhub-iframe-loader';
+    loader.style.position = 'absolute';
+    loader.style.top = '0';
+    loader.style.left = '0';
+    loader.style.width = '100%';
+    loader.style.height = '100%';
+    loader.style.display = 'flex';
+    loader.style.flexDirection = 'column';
+    loader.style.alignItems = 'center';
+    loader.style.justifyContent = 'center';
+    loader.style.background = '#0f172a';
+    loader.style.color = '#f8fafc';
+    loader.style.fontSize = '14px';
+    loader.style.zIndex = '1';
+    loader.style.gap = '14px';
+    loader.innerHTML = '<div style="width:36px; height:36px; border:3px solid rgba(255,255,255,0.15); border-top-color:#f59e0b; border-radius:50%; animation:ph-spin 0.8s linear infinite;"></div><span>Connecting to PayHub secure gateway…</span>';
+
+    // Close button
+    var closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.setAttribute('aria-label', 'Close checkout window');
+    closeBtn.innerHTML = '&times;';
+    closeBtn.style.position = 'absolute';
+    closeBtn.style.top = '16px';
+    closeBtn.style.right = '16px';
+    closeBtn.style.width = '34px';
+    closeBtn.style.height = '34px';
+    closeBtn.style.borderRadius = '50%';
+    closeBtn.style.border = 'none';
+    closeBtn.style.backgroundColor = 'rgba(255, 255, 255, 0.15)';
+    closeBtn.style.color = '#f8fafc';
+    closeBtn.style.fontSize = '22px';
+    closeBtn.style.lineHeight = '1';
+    closeBtn.style.cursor = 'pointer';
+    closeBtn.style.zIndex = '10';
+    closeBtn.style.display = 'flex';
+    closeBtn.style.alignItems = 'center';
+    closeBtn.style.justifyContent = 'center';
+
+    function closeOverlay() {
+      window.removeEventListener('message', onCheckoutMessage, false);
+      document.removeEventListener('keydown', onKeyDown, false);
+      if (overlay.parentNode) {
+        overlay.parentNode.removeChild(overlay);
+      }
+      if (typeof onDismiss === 'function') {
+        onDismiss();
+      }
+    }
+
+    closeBtn.onclick = closeOverlay;
+
+    function onKeyDown(e) {
+      if (e.key === 'Escape' || e.keyCode === 27) {
+        closeOverlay();
+      }
+    }
+    document.addEventListener('keydown', onKeyDown, false);
+
+    // Iframe
+    var iframe = document.createElement('iframe');
+    iframe.src = checkoutUrl;
+    iframe.style.width = '100%';
+    iframe.style.height = '100%';
+    iframe.style.border = 'none';
+    iframe.setAttribute('allow', 'clipboard-read; clipboard-write; payment');
+    iframe.onload = function () {
+      if (loader && loader.parentNode) {
+        loader.style.opacity = '0';
+        loader.style.transition = 'opacity 0.3s ease';
+        setTimeout(function () {
+          if (loader.parentNode) { loader.parentNode.removeChild(loader); }
+        }, 300);
+      }
+    };
+
+    function onCheckoutMessage(event) {
+      if (expectedOrigin && event.origin !== expectedOrigin) { return; }
+      if (event.source !== iframe.contentWindow) { return; }
+      if (!event.data || event.data.type !== 'payhub_success') { return; }
+
+      window.removeEventListener('message', onCheckoutMessage, false);
+      document.removeEventListener('keydown', onKeyDown, false);
+      if (overlay.parentNode) { overlay.parentNode.removeChild(overlay); }
+
+      if (typeof onComplete === 'function') {
+        onComplete(event.data.data);
+      }
+    }
+
+    window.addEventListener('message', onCheckoutMessage, false);
+
+    container.appendChild(loader);
+    container.appendChild(closeBtn);
+    container.appendChild(iframe);
+    overlay.appendChild(container);
+    document.body.appendChild(overlay);
+
+    return true;
+  }
+
   function initCheckout() {
     var node = byId('payhub-inline');
     if (!node) { return; }
@@ -107,34 +279,6 @@
       say(message);
     };
 
-    /*
-     * PayHub's inline script declares `const PayhubPop = { … }` at the top level of the file.
-     *
-     * A top-level `const` creates a global LEXICAL binding — it is NOT a property of `window`. So
-     * `window.PayhubPop` is undefined even when the script has loaded perfectly. The check here used to
-     * require `window.PayhubPop`, so it announced "the secure payment window could not be loaded" on every
-     * browser, while the gateway's own object sat there fully usable one scope away. The payment window
-     * never opened, and the advertiser was sent to the fallback for a reason that was simply untrue.
-     *
-     * `typeof` is used because a bare reference to an undeclared name throws a ReferenceError; a loaded
-     * `const` resolves normally. The try/catch covers the one remaining case — the binding exists but has
-     * not been initialised yet (its "temporal dead zone") — which in practice means our script ran first,
-     * and the ordering in the markup is what prevents that.
-     */
-    var pop = null;
-    try {
-      if (typeof PayhubPop !== 'undefined' && PayhubPop !== null) { pop = PayhubPop; }
-    } catch (error) {
-      pop = null;
-    }
-    // A future version might assign it to `window` instead; accept that too rather than guess.
-    if (!pop && window.PayhubPop) { pop = window.PayhubPop; }
-
-    if (!pop || typeof pop.setup !== 'function') {
-      useFallback('The secure payment window could not be loaded, so the button above will not work. Use the payment option below instead.');
-      return;
-    }
-
     var settings;
     try {
       settings = JSON.parse(node.getAttribute('data-payhub') || '{}');
@@ -148,61 +292,42 @@
       return;
     }
 
-    var handler = pop.setup({
-      key: settings.key,
-      email: settings.email,
-      amount: settings.amount,
-      ref: settings.ref,
-      /* The reference the gateway hands back is used when it gives one, and ours when it does not —
-         both are ours, and the server verifies whichever arrives rather than trusting either. */
-      callback: function (response) {
-        var reference = (response && response.reference) ? response.reference : settings.ref;
-        window.location.href = settings.returnUrl + '?ref=' + encodeURIComponent(reference);
-      },
-      onClose: function () {
-        /* Closing the window is not the same as failing: the reader may have paid and then shut the
-           tab. The return page asks the gateway, so this goes there rather than assuming. */
-        window.location.href = settings.returnUrl + '?ref=' + encodeURIComponent(settings.ref) + '&closed=1';
-      }
-    });
-
-    /*
-     * The window opens immediately rather than waiting for a click.
-     *
-     * The advertiser has just submitted the form and chosen to pay by card. Making them press a second
-     * button that only opens the thing they already asked for is a step that exists for no reason, and it
-     * is a step they can walk away from believing the payment has already failed. The button below is kept
-     * as the way to reopen the window after it is closed.
-     */
-    var openOnce = function () {
-      try {
-        handler.openIframe();
-        return true;
-      } catch (error) {
-        useFallback('The secure payment window could not be opened, so the button above will not work. Use the payment option below instead.');
-        return false;
-      }
+    var handleSuccess = function (data) {
+      var reference = (data && data.reference) ? data.reference : settings.ref;
+      window.location.href = settings.returnUrl + '?ref=' + encodeURIComponent(reference);
     };
 
-    if (openOnce()) {
-      /*
-       * The hosted form stays hidden while the frame is open.
-       *
-       * Revealing it here too would put two payment routes on screen at once, and the second one asks the
-       * advertiser to leave for the gateway's own page having already been shown a working payment window.
-       * It is a fallback, so it appears when something has fallen back.
-       */
-      say('Finish your payment in the secure window. Nothing is charged until you confirm.');
+    var handleDismiss = function () {
+      say('Payment window closed. Click the button above to reopen, or use the alternative option below.');
+    };
 
-      if (button) {
-        button.disabled = false;
-        button.textContent = 'Reopen the payment window';
-        button.addEventListener('click', function (event) {
-          event.preventDefault();
-          openOnce();
-        });
+    var openWindow = function () {
+      try {
+        var opened = openPayhubModal(settings, handleSuccess, handleDismiss);
+        if (opened) {
+          say('Finish your payment in the secure window. Nothing is charged until you confirm.');
+          if (button) {
+            button.disabled = false;
+            button.textContent = 'Reopen the payment window';
+          }
+          return true;
+        }
+      } catch (e) {
+        useFallback('The secure payment window could not be opened. Use the payment option below instead.');
       }
+      return false;
+    };
+
+    if (button) {
+      button.disabled = false;
+      button.addEventListener('click', function (event) {
+        event.preventDefault();
+        openWindow();
+      });
     }
+
+    // Auto-open modal on page load for immediate seamless checkout experience
+    openWindow();
   }
 
   function start() {
