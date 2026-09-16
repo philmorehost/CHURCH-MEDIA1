@@ -17,11 +17,16 @@ class Mailer
         // config/mail.php. Settings take priority.
         $smtpHost = setting('smtp_host') ?: ($config['smtp_host'] ?? '');
         if ($smtpHost !== '') {
+            // An explicit "" is the Settings page's "None" and has to be honoured. Treating it as
+            // "unset" and substituting 'tls' made the client send STARTTLS to a server the admin had
+            // told us not to encrypt to; the greeting that comes back is not the one STARTTLS expects,
+            // so the send dies with an SMTP protocol error that reads like a bad password. The column
+            // is created with DEFAULT 'tls', so only a NULL really means "never chosen".
             $secure = setting('smtp_secure');
             $smtpConfig = [
                 'smtp_host' => $smtpHost,
                 'smtp_port' => (int) (setting('smtp_port') ?: ($config['smtp_port'] ?? 587)),
-                'smtp_secure' => ($secure !== null && $secure !== '') ? $secure : ($config['smtp_secure'] ?? 'tls'),
+                'smtp_secure' => $secure !== null ? (string) $secure : (string) ($config['smtp_secure'] ?? 'tls'),
                 'smtp_username' => setting('smtp_username') ?: ($config['smtp_username'] ?? ''),
                 'smtp_password' => setting('smtp_password') ?: ($config['smtp_password'] ?? ''),
                 'from_address' => setting('smtp_from') ?: ($config['from_address'] ?? ''),
@@ -75,11 +80,25 @@ class Mailer
         }
         @stream_set_timeout($socket, 3);
 
-        $expect = function (string $prefix) use ($socket) {
-            $line = fgets($socket, 512);
-            if ($line === false || !str_starts_with($line, $prefix)) {
-                throw new RuntimeException('Unexpected SMTP response: ' . $line);
-            }
+        // Reads ONE complete SMTP reply and insists it carries the code we are waiting for.
+        //
+        // A reply is one or more lines: every line but the last carries '-' as its fourth character
+        // ("250-smtp.example.com at your service", "250-SIZE 35882577", "250 STARTTLS"). Reading only
+        // the first line left the rest of the greeting in the buffer, so every later response was read
+        // one line early and the whole session drifted out of step - harmless-looking here, fatal
+        // against every real server, which all answer EHLO with several lines. The send then died with
+        // "Unexpected SMTP response: 250 HELP", which reads like a rejected password and sends the
+        // search to the credentials instead of to the client.
+        $expect = function (string $code) use ($socket) {
+            do {
+                $line = fgets($socket, 512);
+                if ($line === false) {
+                    throw new RuntimeException('SMTP server closed the connection');
+                }
+                if (strpos($line, $code) !== 0) {
+                    throw new RuntimeException('Unexpected SMTP response: ' . rtrim($line));
+                }
+            } while (isset($line[3]) && $line[3] === '-');
         };
         $send = function (string $line) use ($socket) {
             fwrite($socket, $line . "\r\n");

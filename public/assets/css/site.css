@@ -492,6 +492,11 @@ select option:disabled{color:var(--ink-faint);}
 .form-message.show{display:block;}
 .form-message.ok{background:#5fe0a418; border:1px solid #5fe0a444; color:#b6f5d8;}
 .form-message.err{background:#ff6b6b18; border:1px solid #ff6b6b44; color:#ffb3b3;}
+/* WhatsApp keeps its own green: it is a third-party action and should read as one, not as one of
+   this site's gold buttons. */
+.btn-whatsapp{background:#25d366; border-color:#25d366; color:#052e16; display:inline-flex; align-items:center; justify-content:center; gap:9px; font-weight:700;}
+.btn-whatsapp:hover{background:#1fbe5b; border-color:#1fbe5b; color:#052e16;}
+.btn-whatsapp svg{flex-shrink:0;}
 .honeypot{position:absolute; left:-9999px; opacity:0;}
 
 /* Footer */

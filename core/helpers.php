@@ -760,6 +760,68 @@ function formSubmissionValues(array $fields, array $data): array
     return $values;
 }
 
+/**
+ * Issues a "spam check" challenge for the public contact form: an easy question plus a nonce that
+ * ties the answer to this visitor's session.
+ *
+ * Session-backed and single-use on purpose - the nonce proves the challenge was issued by this
+ * server, so a script cannot invent one; the answer never appears in the page; and a solved
+ * challenge cannot be replayed. The question itself is deliberately simple, because it is aimed at
+ * scripted form spam and anyone filling the form by hand answers it without thinking.
+ *
+ * @return array{question: string, nonce: string}
+ */
+function contactCaptchaIssue(): array
+{
+    $a = random_int(2, 9);
+    $b = random_int(2, 9);
+    $nonce = bin2hex(random_bytes(8));
+    $window = 1800;
+
+    $challenges = is_array($_SESSION['contact_captcha'] ?? null) ? $_SESSION['contact_captcha'] : [];
+    foreach ($challenges as $key => $row) { // keep the session small
+        if ((int) ($row['iat'] ?? 0) < time() - $window) {
+            unset($challenges[$key]);
+        }
+    }
+    $challenges[$nonce] = ['answer' => $a + $b, 'iat' => time()];
+    $_SESSION['contact_captcha'] = $challenges;
+
+    return ['question' => $a . ' + ' . $b, 'nonce' => $nonce];
+}
+
+/**
+ * Checks an answer from the contact form. Returns '' when it is acceptable, or the message to show
+ * the visitor. The challenge is spent only on success, so a mistyped sum can simply be retyped.
+ */
+function contactCaptchaCheck(string $nonce, string $answer): string
+{
+    $challenges = is_array($_SESSION['contact_captcha'] ?? null) ? $_SESSION['contact_captcha'] : [];
+    $row = $challenges[$nonce] ?? null;
+    if (!is_array($row)) {
+        return 'Your spam check expired - please answer the new question and send again.';
+    }
+
+    $age = time() - (int) ($row['iat'] ?? 0);
+    if ($age < 2) {
+        // Faster than a person can read the question, let alone type a name and a message.
+        return 'That was submitted too quickly - please try again.';
+    }
+    if ($age > 1800) {
+        unset($challenges[$nonce]);
+        $_SESSION['contact_captcha'] = $challenges;
+        return 'Your spam check expired - please answer the new question and send again.';
+    }
+
+    if (!preg_match('/^[0-9]{1,4}$/', $answer) || (int) $answer !== (int) $row['answer']) {
+        return 'That answer to the spam check was not right - please try again.';
+    }
+
+    unset($challenges[$nonce]); // single use
+    $_SESSION['contact_captcha'] = $challenges;
+    return '';
+}
+
 /** Stashes the raw POST payload so the public form can repopulate inputs after a validation error. */
 function keepFormOld(array $input): void
 {

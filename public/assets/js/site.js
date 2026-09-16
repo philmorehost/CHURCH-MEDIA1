@@ -90,6 +90,21 @@
           if (result.ok && result.data.status === 'success') {
             form.reset();
           }
+          // The contact form's spam check is answered again from here: the server hands back a fresh
+          // question with every reply, so a wrong answer - or one already spent by a send that
+          // worked - never makes the visitor reload the page. The `value` ATTRIBUTE is updated as
+          // well as the property because form.reset() restores hidden inputs from the attribute.
+          if (result.data.captcha) {
+            var question = form.querySelector('[data-captcha-question]');
+            var token = form.querySelector('[name="captcha_token"]');
+            var answer = form.querySelector('[name="captcha"]');
+            if (question) { question.textContent = result.data.captcha.question; }
+            if (token) {
+              token.value = result.data.captcha.nonce;
+              token.setAttribute('value', result.data.captcha.nonce);
+            }
+            if (answer) { answer.value = ''; }
+          }
         })
         .catch(function () {
           if (messageBox) {
