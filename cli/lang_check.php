@@ -17,7 +17,12 @@ declare(strict_types=1);
  *    as `YO` or does not offer it at all;
  *  - a `t('…')` call anywhere in the code whose key English does not have, which renders as the key itself
  *    — `nav.hom` in the middle of a header — because a typo is indistinguishable from a missing
- *    translation at runtime. This is the check that makes translating a page at a time safe.
+ *    translation at runtime. This is the check that makes translating a page at a time safe;
+ *  - a screen that never calls `t()` at all, so every word in it is fixed English and *none* of the checks
+ *    above can see it: it has no keys to be missing, no keys to typo and none unused. That is the shape of
+ *    the remaining work, and this tool could not count it — it had to be measured by hand. It is reported
+ *    below as **coverage**, deliberately as a notice rather than a problem, because a partial migration is
+ *    the design and a screen added in English tomorrow is not a defect today.
  *
  * A **missing** translation is deliberately not an error. A partial catalogue is the design: a volunteer
  * can translate thirty strings and stop, and every unlisted key stays English. This tool lists what is
@@ -28,8 +33,8 @@ declare(strict_types=1);
  * Run it after adding or editing anything in `lang/`, after adding a `t()` call, and before installing for
  * a church in a language other than English.
  *
- *   php cli/lang_check.php            summary per catalogue, plus any bad or unused key
- *   php cli/lang_check.php --missing  also list every untranslated key
+ *   php cli/lang_check.php            summary per catalogue, interface coverage, plus any bad or unused key
+ *   php cli/lang_check.php --missing  also list every untranslated key, and every screen not yet wired
  *
  * Exit codes: 0 the catalogues are sound, 1 a catalogue or a `t()` call has a problem.
  */
@@ -176,6 +181,10 @@ $scanRoots = ['views', 'admin', 'api', 'core'];
 $usage = [];
 /** @var array<int, string> $dynamic places a key could not be read, so nothing can be checked */
 $dynamic = [];
+/** @var array<string, array<int, string>> $scanned php files per root, for the coverage report */
+$scanned = [];
+/** @var array<string, bool> $wired files that ask for at least one translation */
+$wired = [];
 
 foreach ($scanRoots as $dir) {
     $root = ROOT_PATH . '/' . $dir;
@@ -193,6 +202,7 @@ foreach ($scanRoots as $dir) {
         }
 
         $path = str_replace('\\', '/', substr($file->getPathname(), strlen(ROOT_PATH) + 1));
+        $scanned[$dir][] = $path;
         $lines = explode("\n", (string) file_get_contents($file->getPathname()));
 
         foreach ($lines as $number => $line) {
@@ -203,6 +213,7 @@ foreach ($scanRoots as $dir) {
              * such key" check as though somebody had mistyped a key.
              */
             if (preg_match_all("/\\bt\\(\\s*'([^']+)'\\s*[,\\)]/u", $line, $hits) > 0) {
+                $wired[$path] = true;
                 foreach ($hits[1] as $key) {
                     $usage[$key][] = $path . ':' . ($number + 1);
                 }
@@ -283,6 +294,54 @@ fwrite(STDOUT, sprintf(
 if ($unused !== [] && $showMissing) {
     foreach ($unused as $key) {
         fwrite(STDOUT, '    unused: ' . $key . PHP_EOL);
+    }
+}
+
+/*
+ * Interface coverage — how much of the interface asks for a translation at all.
+ *
+ * Reported for `views/` and `admin/` only: they are where a reader's text lives. `api/` and `core/` are
+ * scanned for keys above, but counting them as screens would report a backlog that is not one.
+ *
+ * Never a problem and never a non-zero exit. A file that does not call `t()` yet is the remaining work
+ * stated plainly, not a fault — see the note in this file's header.
+ */
+$uiRoots = ['views', 'admin'];
+$coverage = [];
+
+foreach ($uiRoots as $dir) {
+    $all = $scanned[$dir] ?? [];
+    if ($all === []) {
+        continue;
+    }
+    $done = array_filter($all, static fn (string $p): bool => isset($wired[$p]));
+    $coverage[$dir] = [
+        'total' => count($all),
+        'done' => count($done),
+        'todo' => array_values(array_diff($all, array_keys($done))),
+    ];
+}
+
+if ($coverage !== []) {
+    fwrite(STDOUT, PHP_EOL);
+    fwrite(STDOUT, 'Interface coverage — screens that ask for a translation at all' . PHP_EOL);
+
+    foreach ($coverage as $dir => $report) {
+        fwrite(STDOUT, sprintf(
+            '  %-6s %3d of %3d file(s)%s' . PHP_EOL,
+            $dir,
+            $report['done'],
+            $report['total'],
+            $report['todo'] === [] ? '   all wired' : '   ' . count($report['todo']) . ' still fixed English'
+        ));
+    }
+
+    if ($showMissing) {
+        foreach ($coverage as $dir => $report) {
+            foreach ($report['todo'] as $path) {
+                fwrite(STDOUT, '           - ' . $path . PHP_EOL);
+            }
+        }
     }
 }
 
