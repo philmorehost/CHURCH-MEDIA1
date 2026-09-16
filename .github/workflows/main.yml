@@ -91,6 +91,37 @@ jobs:
             --build-name "1.0.${{ github.run_number }}" \
             --build-number "${{ github.run_number }}"
 
+      # An AAB exists only to be uploaded to Google Play, and Play accepts it only
+      # when it is signed with the upload key already registered for this app.
+      # When the keystore secret above is unset or holds a different file, Gradle
+      # silently falls back to the debug key and the bundle is rejected at upload
+      # time with "Your App Bundle is signed with the wrong key". Comparing the
+      # signer here turns that into a failed run that prints both fingerprints.
+      # The fingerprint below is public information (it is shown in Play Console);
+      # update it only if the app's upload key is ever reset.
+      - name: Verify AAB is signed with the Play upload key
+        working-directory: RCCGLP63
+        env:
+          EXPECTED_UPLOAD_SHA1: "11:4A:B8:41:2E:9C:60:58:4E:1A:53:64:24:00:FE:C4:DE:4D:C8:6B"
+        run: |
+          if ! command -v keytool >/dev/null 2>&1; then
+            echo "::warning::keytool not found; skipping AAB signer check"
+            exit 0
+          fi
+          AAB=build/app/outputs/bundle/release/app-release.aab
+          # keytool wraps long fingerprints across lines, so join them first.
+          ACTUAL=$(keytool -printcert -jarfile "$AAB" \
+            | tr -d '\r\n' \
+            | grep -o 'SHA1: [0-9A-F:]*' \
+            | head -1 \
+            | sed 's/^SHA1: //')
+          echo "AAB signer SHA1: ${ACTUAL:-<none>}"
+          if [ "$ACTUAL" != "$EXPECTED_UPLOAD_SHA1" ]; then
+            echo "::error::app-release.aab is not signed with the RCCGLP63YAYA Play upload key. Expected $EXPECTED_UPLOAD_SHA1 but got ${ACTUAL:-<none>}. Play will reject this bundle. Set the ANDROID_KEYSTORE_BASE64 secret to the base64 of rccglp63yaya-release.keystore, with KEY_ALIAS=philmore-rccglp63yaya and matching passwords."
+            exit 1
+          fi
+          echo "Signer matches the Play upload key."
+
       - name: Verify APK signature
         working-directory: RCCGLP63
         run: |
