@@ -12,9 +12,8 @@ $perPage = min(100, max(1, (int) ($_GET['per_page'] ?? 60)));
 $where = 'p.is_published = 1';
 $bind = [];
 if ($unitSlug !== '') {
-    $u = $pdo->prepare('SELECT id FROM org_units WHERE slug = ? LIMIT 1');
-    $u->execute([$unitSlug]);
-    $uid = (int) $u->fetchColumn();
+    $found = Unit::findBySlug($unitSlug);
+    $uid = $found !== null ? (int) $found['id'] : 0;
     if ($uid > 0) {
         $ids = Unit::subtreeIds($uid);
         $in = implode(',', array_fill(0, count($ids), '?'));

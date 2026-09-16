@@ -9,6 +9,16 @@ declare(strict_types=1);
  * cPanel command). Safe to run repeatedly: only originals are picked up, and
  * items whose source file is missing are marked 'failed' and left for the
  * admin to inspect.
+ *
+ * It also sends the daily advert-performance report to publishers, and that half runs **one pass per
+ * church**: the report carries a church's name and links to that church's site, and it used to be sent
+ * under whichever church happened to resolve — the default one, from a cron. Its once-a-day marker was a
+ * single install-wide file too, so the first church to run after 8am suppressed every other church's
+ * report for the rest of the day.
+ *
+ * The video conversion is deliberately *not* per church. It is file work with no church of its own: the
+ * only setting it reads is `ffmpeg_path`, which is a platform binary path, and `media_post_items` has no
+ * church column. Running it once per church would re-query and re-skip the same rows N times.
  */
 
 if (!defined('STDERR')) {
@@ -54,49 +64,46 @@ foreach ($ids as $id) {
 
 $stillQueued = count($ids) - $converted - $failed - $skipped;
 
-// Send Daily Ad Performance Email to Publishers (Runs once per day at 8 AM)
-$todayStampFile = STORAGE_PATH . '/cache/daily_ad_stats_' . date('Y-m-d') . '.flag';
-if (!is_file($todayStampFile) && (int) date('H') >= 8) {
-    @file_put_contents($todayStampFile, date('c'));
-    $publishersStmt = $pdo->query('SELECT p.id, p.name, p.email, p.token FROM ad_publishers p JOIN ads a ON a.publisher_id = p.id WHERE a.status = "approved" GROUP BY p.id');
-    $publishers = $publishersStmt->fetchAll();
+// Send the Daily Ad Performance Email to publishers — one pass per church, once per church per day.
+$reportRuns = Tenant::each(static function (int $tenantId): array {
+    if (!PublisherReport::due($tenantId)) {
+        return ['due' => 0, 'publishers' => 0, 'sent' => 0];
+    }
 
-    foreach ($publishers as $pub) {
-        $adsStmt = $pdo->prepare('SELECT id, title, views_count, clicks_count, status, start_at, expires_at FROM ads WHERE publisher_id = ? AND status = "approved"');
-        $adsStmt->execute([(int) $pub['id']]);
-        $pubAds = $adsStmt->fetchAll();
+    // Marked before anything is sent, the same order the install-wide stamp used: a failure part-way
+    // through must not queue the whole church's report up again every time cron fires.
+    PublisherReport::markSent($tenantId);
 
-        if ($pubAds) {
-            $adListHtml = "";
-            $totalV = 0;
-            $totalC = 0;
-            foreach ($pubAds as $pa) {
-                $v = (int) $pa['views_count'];
-                $c = (int) $pa['clicks_count'];
-                $totalV += $v;
-                $totalC += $c;
-                $ctr = $v > 0 ? round(($c / $v) * 100, 2) : 0.0;
-                $adListHtml .= "- \"{$pa['title']}\": {$v} Views, {$c} Clicks (CTR: {$ctr}%)\n";
+    $sent = 0;
+    $reports = PublisherReport::build($tenantId);
+    foreach ($reports as $report) {
+        try {
+            // Counted on what the mailer reports rather than on the attempt: "N sent" in the log has to
+            // mean the mail went somewhere, or a dead SMTP configuration reads as a healthy run.
+            if (Mailer::send($report['email'], $report['subject'], $report['body'])) {
+                $sent++;
             }
-            $overallCtr = $totalV > 0 ? round(($totalC / $totalV) * 100, 2) : 0.0;
-            $managerUrl = baseUrl('ad-manager?token=' . rawurlencode($pub['token']));
-
-            $body = "Hi {$pub['name']},\n\n" .
-                "Here is your daily advertisement performance summary for " . date('F j, Y') . ":\n\n" .
-                "Total Views: {$totalV}\n" .
-                "Total Clicks: {$totalC}\n" .
-                "Average CTR: {$overallCtr}%\n\n" .
-                "Campaign Breakdown:\n" .
-                $adListHtml . "\n" .
-                "View detailed analytics or create new ads in your Publisher Portal:\n" .
-                "{$managerUrl}\n\n" .
-                "Best regards,\n" . setting('site_title');
-
-            try {
-                Mailer::send($pub['email'], 'Your Daily Advert Performance Report · ' . setting('site_title'), $body);
-            } catch (Throwable $e) {}
+        } catch (Throwable $e) {
+            // One publisher's mail failing must not stop the rest of the church's.
         }
     }
+
+    return ['due' => 1, 'publishers' => count($reports), 'sent' => $sent];
+});
+
+$reportDue = 0;
+$reportSent = 0;
+foreach ($reportRuns as $tenantId => $entry) {
+    if ($entry['ok'] === true && is_array($entry['result'])) {
+        $reportDue += (int) $entry['result']['due'];
+        $reportSent += (int) $entry['result']['sent'];
+        continue;
+    }
+
+    // A pass that threw is worth saying out loud: silently skipping a church is how a daily report stops
+    // arriving without anybody noticing.
+    fwrite(STDERR, 'media_worker: the report pass for church ' . $tenantId . ' failed — '
+        . (string) ($entry['error'] ?? 'unknown error') . "\n");
 }
 
 $line = sprintf(
@@ -114,5 +121,17 @@ if (!is_dir($logDir)) {
     @mkdir($logDir, 0775, true);
 }
 @file_put_contents($logDir . '/media_worker.log', $line, FILE_APPEND);
+
+// Only mentioned when it happened, so the usual minute-by-minute line is unchanged.
+if ($reportDue > 0) {
+    $reportLine = sprintf(
+        "[%s] media_worker: %d church(es) had a report due, %d sent\n",
+        date('Y-m-d H:i:s'),
+        $reportDue,
+        $reportSent
+    );
+    fwrite(STDOUT, $reportLine);
+    @file_put_contents($logDir . '/media_worker.log', $reportLine, FILE_APPEND);
+}
 
 exit($failed > 0 ? 2 : 0);

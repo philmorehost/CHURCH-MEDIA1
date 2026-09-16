@@ -1,9 +1,0 @@
-# Release Signing Properties for Android
-# Copy this file to mobile/android/key.properties and update the path and credentials below.
-# The keystore (.jks or .keystore) must contain the certificate with SHA1 fingerprint expected by Google Play:
-# Expected SHA1: 11:4A:B8:41:2E:9C:60:58:4E:1A:53:64:24:00:FE:C4:DE:4D:C8:6B
-
-storePassword=YOUR_KEYSTORE_PASSWORD
-keyPassword=YOUR_KEY_PASSWORD
-keyAlias=YOUR_KEY_ALIAS
-storeFile=upload-key.jks

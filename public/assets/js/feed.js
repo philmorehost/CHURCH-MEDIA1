@@ -25,7 +25,16 @@
       if (entry.isIntersecting && entry.intersectionRatio >= 0.6) {
         activeSlideEl = slide;
         activateMedia(slide, true);
-        pingView(slide.getAttribute('data-post-id'));
+        /*
+         * An advert's id is not a media post id. `pingView` would ask /api/post for a post that does not
+         * exist, and the impression — the thing the advertiser is paying for — would never be counted.
+         * This is the one place that can tell the difference, so it is the one place that decides.
+         */
+        if (slide.dataset.adId) {
+          registerAdEvent(slide.dataset.adId, 'view');
+        } else {
+          pingView(slide.getAttribute('data-post-id'));
+        }
       } else {
         activateMedia(slide, false);
         if (activeSlideEl === slide) { activeSlideEl = null; }
@@ -121,6 +130,27 @@
     fetch('/api/post?id=' + encodeURIComponent(postId)).catch(function () {});
   }
 
+  /*
+   * An impression or a click, against the real advert id.
+   *
+   * The endpoint is `/api/ads`, not `/api/ads/event`: the router maps one path segment under /api and
+   * rejects anything with a slash in it, so a two-segment URL 404s and the advertiser's counters stay at
+   * zero while the page looks like it is working. The POST branch of api/ads.php keys off the request
+   * method, which is why this is correct.
+   *
+   * Impressions are counted once per advert per page load — the observer fires every time the slide
+   * crosses the threshold in either direction. A click is counted every time, because it is.
+   */
+  function registerAdEvent(adId, type) {
+    var id = parseInt(adId, 10);
+    if (!(id > 0)) { return; }
+    if (type === 'view') {
+      if (state.seenIds.has('ad' + id + ':viewed')) { return; }
+      state.seenIds.add('ad' + id + ':viewed');
+    }
+    postJson('/api/ads', { ad_id: id, event_type: type, platform: 'web' }).catch(function () {});
+  }
+
   function postJson(url, body) {
     return fetch(url, {
       method: 'POST',
@@ -194,9 +224,10 @@
       });
     }
 
-    attachTap(mediaEl, function () { triggerLike(post, slide); });
+    if (onLikeDouble) {
+      attachTap(mediaEl, onLikeDouble);
+    }
   }
-
   /* double-tap = like. Single tap is intentionally a no-op: sound is controlled
      by the always-visible speaker button so videos can autoplay unmuted. */
   function attachTap(el, onDouble) {
@@ -638,7 +669,100 @@
   }
 
   /* ---------- slide build ---------- */
+  /*
+   * ---------- sponsored ----------
+   *
+   * An advert is not a post, and drawing it as one is exactly how this feature failed: the card had no
+   * click-through to the advertiser's site — `destination_url` was never read by anything — and its
+   * like, save and comment buttons posted a post id that does not exist. Every advertiser paid for a card
+   * that could not be clicked.
+   *
+   * So an advert gets its own branch, its own label, and only the actions that mean something for an
+   * advert: open it, or share it. Nothing in this function may reach doLike, doSave or openComments.
+   */
+  function adDestination(post) {
+    var url = String(post.destination_url || '').trim();
+    // Only http(s). A `javascript:` or `data:` destination would execute in this site's origin, and it
+    // arrives from a third party's advert submission.
+    return /^https?:\/\//i.test(url) ? url : '';
+  }
+
+  function buildAdSlide(post) {
+    var node = template.content.cloneNode(true);
+    var slide = node.querySelector('.reel-slide');
+    slide.classList.add('reel-sponsored');
+    slide.setAttribute('data-post-id', 'ad_' + (post.real_ad_id || ''));
+    // The observer reads this to know it must not call pingView, which takes a media post id.
+    slide.dataset.adId = String(post.real_ad_id || '');
+
+    var mediaEl = node.querySelector('.reel-media');
+    var dotsEl = node.querySelector('.reel-dots');
+    // No tap handler: for a post a double tap means like, for an advert there is nothing to like.
+    buildMedia(post, slide, mediaEl, dotsEl);
+
+    var url = adDestination(post);
+
+    var avatar = slide.querySelector('.reel-avatar');
+    avatar.textContent = '📢';
+    slide.querySelector('.reel-username').textContent = '@sponsored';
+    slide.querySelector('.reel-author-name').textContent = 'Sponsored';
+    slide.querySelector('.reel-text').textContent = post.caption || '';
+
+    // Everything that describes a church post is meaningless on an advert.
+    ['.reel-church', '.reel-pinned', '.reel-cats', '.reel-date', '.reel-music', '.reel-verified', '.reel-more']
+      .forEach(function (sel) {
+        var el = node.querySelector(sel);
+        if (el) { el.style.display = 'none'; }
+      });
+
+    // The follow button becomes the call to action — the thing somebody looking at an advert wants.
+    var cta = slide.querySelector('.reel-follow');
+    if (cta) {
+      if (url) {
+        cta.textContent = 'Visit site →';
+        cta.classList.add('reel-ad-cta');
+      } else {
+        // An advert with no usable destination is still shown — the advertiser paid for the space — but
+        // it must not offer a button that goes nowhere.
+        cta.style.display = 'none';
+      }
+    }
+
+    // Post-only actions. Sharing stays; like, save, comment and the ⋯ menu are about a media post.
+    ['.reel-like', '.reel-comment', '.reel-save', '.reel-more-actions'].forEach(function (sel) {
+      var el = node.querySelector(sel);
+      if (el) { el.style.display = 'none'; }
+    });
+
+    function go() {
+      if (!url) { return; }
+      registerAdEvent(post.real_ad_id, 'click');
+      window.open(url, '_blank', 'noopener');
+    }
+    if (url) {
+      mediaEl.style.cursor = 'pointer';
+      mediaEl.addEventListener('click', function (e) { e.stopPropagation(); go(); });
+      if (cta) { cta.addEventListener('click', function (e) { e.stopPropagation(); go(); }); }
+    }
+
+    var shareBtn = node.querySelector('.reel-share');
+    if (shareBtn) {
+      shareBtn.addEventListener('click', function () {
+        var shareUrl = url || window.location.href;
+        if (navigator.share) {
+          navigator.share({ title: post.caption || 'Sponsored', url: shareUrl }).catch(function () {});
+        } else {
+          try { navigator.clipboard.writeText(shareUrl); } catch (e) {}
+        }
+      });
+    }
+
+    slideObserver.observe(slide);
+    return node;
+  }
+
   function buildSlide(post) {
+    if (post.is_ad) { return buildAdSlide(post); }
     var node = template.content.cloneNode(true);
     var slide = node.querySelector('.reel-slide');
     slide.setAttribute('data-post-id', post.id);
@@ -646,7 +770,7 @@
     var mediaEl = node.querySelector('.reel-media');
     var dotsEl = node.querySelector('.reel-dots');
 
-    buildMedia(post, slide, mediaEl, dotsEl);
+    buildMedia(post, slide, mediaEl, dotsEl, function () { triggerLike(post, slide); });
 
     // author row
     var avatar = slide.querySelector('.reel-avatar');
@@ -767,7 +891,10 @@
     state.loading = true;
     if (loadingEl) { loadingEl.style.display = 'flex'; }
 
-    var url = endpoint + '?page=' + state.page + '&per_page=6';
+    // The preview points the scroller at `/api/feed?preview_ad=N`, so the separator cannot be assumed to
+    // be '?'. Hard-coding it produced `/api/feed?preview_ad=5?page=1`, which the API reads as a request
+    // for advert "5?page=1" — numeric zero — so the preview silently fell through to the ordinary feed.
+    var url = endpoint + (endpoint.indexOf('?') === -1 ? '?' : '&') + 'page=' + state.page + '&per_page=6';
     if (state.category) { url += '&category=' + encodeURIComponent(state.category); }
     if (state.view === 'saved') { url += '&saved=1'; }
 

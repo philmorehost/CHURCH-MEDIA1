@@ -6,7 +6,7 @@ declare(strict_types=1);
 $pdo = Database::getInstance()->getConnection();
 
 if ($slug = trim((string) ($_GET['slug'] ?? ''))) {
-    $stmt = $pdo->prepare('SELECT id, title, slug, description, cover_image, start_at, end_at, location, rsvp_enabled, rsvp_url FROM events WHERE slug = ? AND is_published = 1');
+    $stmt = $pdo->prepare('SELECT id, title, slug, description, cover_image, start_at, end_at, location, rsvp_enabled, rsvp_url, rsvp_mode, max_capacity, allow_guests, waitlist_enabled, rsvp_closes_at, org_unit_id FROM events WHERE slug = ? AND is_published = 1');
     $stmt->execute([$slug]);
     $event = $stmt->fetch();
     if (!$event) {
@@ -14,6 +14,11 @@ if ($slug = trim((string) ($_GET['slug'] ?? ''))) {
     }
     $event['id'] = (int) $event['id'];
     $event['rsvp_enabled'] = (bool) $event['rsvp_enabled'];
+    $event['rsvp_mode'] = Rsvp::modeFor($event);
+    $event['accepting_rsvps'] = Rsvp::takesRsvps($event) && !Rsvp::closed($event);
+    $event['seats_left'] = Rsvp::seatsLeft($event);
+    $event['ics_url'] = Rsvp::icsUrl($event);
+    $event['google_url'] = Rsvp::googleUrl($event);
     $event['cover_image_url'] = uploadUrl($event['cover_image']);
     unset($event['cover_image']);
     jsonResponse(['status' => 'success', 'data' => $event]);

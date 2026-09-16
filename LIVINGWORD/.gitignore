@@ -1,0 +1,66 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+/coverage/
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# NOTE: android/app/google-services.json is deliberately NOT ignored here.
+#
+# It is client configuration, not a credential: the API key inside it ships in
+# every APK and is protected by the package name, not by secrecy. CI needs the
+# file to build, and the first church's copy is committed for the same reason.
+#
+# The Firebase file that IS a secret is the *service-account* key, which lives on
+# the server as storage/service-account.json and can send pushes. That one must
+# never be committed — and, for the same reason, adding a second Android app to
+# an EXISTING Firebase project does not isolate it: FCM topics are scoped to the
+# project, not the app, so both churches' phones would share topic "all". Each
+# church needs its own Firebase project.
+
+# Release signing. key.properties carries the keystore PASSWORD.
+android/key.properties
+*.jks
+*.keystore
+
+# Editor / OS noise
+.vscode/
+
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release

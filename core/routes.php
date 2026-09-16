@@ -35,12 +35,58 @@ $router->get('/media', function () {
     render('media');
 });
 
+// A permalink for one reel or post, which exists because of the share sheet.
+//
+// WhatsApp fetches whatever URL it is given and reads the og: tags off that page. The app used to
+// share /feed, which has no idea which post was meant, so every reel previewed with the church
+// logo. A post needs an address of its own before it can have a preview of its own.
+$router->get('/post/{id}', function (array $params) {
+    $id = (int) ($params['id'] ?? 0);
+    $pdo = Database::getInstance()->getConnection();
+
+    $post = null;
+    if ($id > 0) {
+        $stmt = $pdo->prepare('SELECT p.*, u.name AS author_name FROM media_posts p JOIN users u ON u.id = p.user_id WHERE p.id = ? AND p.is_published = 1 LIMIT 1');
+        $stmt->execute([$id]);
+        $post = $stmt->fetch() ?: null;
+    }
+
+    // A deleted or unpublished post is a 404 rather than a redirect to the feed: a link somebody
+    // shared should say plainly that it is gone instead of quietly showing something else.
+    if ($post === null) {
+        http_response_code(404);
+        render('404');
+        return;
+    }
+
+    $items = $pdo->prepare('SELECT type, file_path, thumbnail_path, alt_text FROM media_post_items WHERE media_post_id = ? ORDER BY sort_order ASC');
+    $items->execute([$post['id']]);
+
+    $caption = trim((string) ($post['caption'] ?? ''));
+    $isReel = (string) ($post['post_type'] ?? '') === 'vertical_reel';
+
+    render('post', [
+        'metaTitle' => $caption !== '' ? mb_strimwidth($caption, 0, 70, '…') : ($isReel ? 'Reel' : 'Post') . ' — ' . setting('site_title'),
+        'metaDescription' => $caption !== '' ? mb_strimwidth($caption, 0, 155, '…') : 'Watch it on ' . setting('site_title') . '.',
+        // Absolute, because the crawler fetching this has to be able to reach it from outside.
+        'metaImage' => baseUrl(ShareCard::urlFor('post', (int) $post['id'], (string) ($post['slug'] ?? ''))),
+        'post' => $post,
+        'media' => $items->fetchAll(),
+    ]);
+});
+
 $router->get('/unit/{slug}', function (array $params) {
     render('unit', ['slug' => $params['slug']]);
 });
 
 $router->get('/units', function () {
     render('units');
+});
+
+// Home cell finder — the midweek gatherings, with the filter in the query string so a
+// filtered list can be shared or bookmarked ("here is the cell near me").
+$router->get('/find-a-cell', function () {
+    render('find-a-cell');
 });
 
 // Forgot Password / OTP Reset route
@@ -75,8 +121,12 @@ $router->post('/ad-manager', function () {
         }
 
         $pdo = Database::getInstance()->getConnection();
-        $stmt = $pdo->prepare('SELECT * FROM ad_publishers WHERE email = ? LIMIT 1');
-        $stmt->execute([$email]);
+        // Scoped to the church being served. Without this, typing an address into one church's site
+        // emailed another church's publisher a portal link — and that link carries the token that opens
+        // their Ad Manager.
+        [$tenantClause, $tenantParams] = tenantScope();
+        $stmt = $pdo->prepare('SELECT * FROM ad_publishers WHERE email = ? AND ' . $tenantClause . ' LIMIT 1');
+        $stmt->execute(array_merge([$email], $tenantParams));
         $pub = $stmt->fetch();
 
         if ($pub && !empty($pub['token'])) {
@@ -100,6 +150,10 @@ $router->post('/ad-manager', function () {
         redirect('/ad-manager');
     }
 
+    // The create form has always emitted a CSRF token and nothing ever checked it — `Csrf::field()` was
+    // there, so the protection looked present. It is checked now.
+    Csrf::requireValid();
+
     $token = trim((string) ($_GET['token'] ?? ''));
     if ($token === '') {
         http_response_code(403);
@@ -108,7 +162,10 @@ $router->post('/ad-manager', function () {
     }
 
     $pdo = Database::getInstance()->getConnection();
-    $stmt = $pdo->prepare('SELECT id FROM ad_publishers WHERE token = ? LIMIT 1');
+    // The token is the credential, so this is deliberately not church-scoped: an advert created here
+    // belongs to the publisher's own church, whichever host the portal was opened on, so a publisher's
+    // adverts can never end up attributed to a church they do not advertise for.
+    $stmt = $pdo->prepare('SELECT id, tenant_id FROM ad_publishers WHERE token = ? LIMIT 1');
     $stmt->execute([$token]);
     $pub = $stmt->fetch();
 
@@ -164,11 +221,148 @@ $router->post('/ad-manager', function () {
     $displayFreq = $dur ? (string) ($dur['display_frequency'] ?? '5_min') : '5_min';
     if ($isFree) { $displayFreq = 'once_daily'; }
 
-    $stmt = $pdo->prepare('INSERT INTO ads (publisher_id, title, media_type, file_path, thumbnail_path, destination_url, target_platform, duration_days, price, is_free, display_frequency, payment_status, payment_method, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "pending")');
-    $stmt->execute([(int) $pub['id'], $title, $mediaType, $filePath, $thumbPath, $destUrl ?: null, $targetPlatform, $durationDays, $price, $isFree, $displayFreq, $isFree ? 'paid' : 'unpaid', $isFree ? 'free' : 'online']);
+    $stmt = $pdo->prepare('INSERT INTO ads (publisher_id, tenant_id, title, media_type, file_path, thumbnail_path, destination_url, target_platform, duration_days, price, is_free, display_frequency, payment_status, payment_method, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "pending")');
+    $stmt->execute([(int) $pub['id'], (int) $pub['tenant_id'], $title, $mediaType, $filePath, $thumbPath, $destUrl ?: null, $targetPlatform, $durationDays, $price, $isFree, $displayFreq, $isFree ? 'paid' : 'unpaid', $isFree ? 'free' : 'online']);
+    $adId = (int) $pdo->lastInsertId();
 
-    flash('pub_success', 'Your new advertisement has been submitted and is pending admin approval.');
+    /*
+     * A PAID package chosen here must take the advertiser to the payment, exactly as the public /advertise
+     * form does.
+     *
+     * It did not, and that was a hole in the middle of the product. This handler inserted the advert with
+     * `payment_status = "unpaid"` and `payment_method = "online"` and then redirected straight to the
+     * dashboard saying "submitted and pending admin approval" — so an advertiser who picked a premium
+     * package from their own portal was told their advert was in, was never shown a payment page, and no
+     * payment attempt was ever opened. The advert then sat in the admin queue unpaid, and since 7h-5 an
+     * unsettled advert cannot be approved either: it could never go live, for a reason nothing on screen
+     * explained.
+     *
+     * Two create paths for the same product, and only one of them collected the money.
+     */
+    if ($isFree) {
+        flash('pub_success', 'Your free advertisement has been submitted and is pending admin approval.');
+        redirect('/ad-manager?token=' . rawurlencode($token));
+    }
+
+    // Reload the row so the attempt is opened against what was actually written rather than what we meant
+    // to write, then hand the advertiser the same checkout the public form hands out.
+    $stmt = $pdo->prepare('SELECT * FROM ads WHERE id = ? LIMIT 1');
+    $stmt->execute([$adId]);
+    $newAd = $stmt->fetch();
+
+    if ($newAd) {
+        $attempt = AdPayments::startAttempt($newAd);
+        $_SESSION['ad_checkout_ref'] = $attempt['reference'];
+        redirect('/advertise/checkout?ref=' . urlencode($attempt['reference']));
+    }
+
+    // Nothing written means nothing to pay for; the dashboard is the honest place to land.
+    flash('pub_error', 'Your advertisement could not be created. Please try again.');
     redirect('/ad-manager?token=' . rawurlencode($token));
+});
+
+// Edit a rejected advert and send it back for review.
+//
+// The point of this route is what it does NOT touch. "Without paying again" is not a discount applied
+// here; it is the absence of any write to `payment_status`, `payment_reference`, `payment_attempts` or
+// `ad_payments`. An advertiser whose advert was rejected after paying keeps that payment, the reviewer
+// sees the same settled advert come back, and no second attempt is ever opened. Anything that added a
+// payment write to this handler would be charging twice for one advert.
+$router->post('/ad-manager/revise', function () {
+    Csrf::requireValid();
+
+    $token = trim((string) ($_POST['token'] ?? ''));
+    if ($token === '') {
+        http_response_code(403);
+        render('ad-manager');
+        return;
+    }
+
+    $pdo = Database::getInstance()->getConnection();
+    // The token is the credential — the same rule as the create handler above.
+    $stmt = $pdo->prepare('SELECT id, tenant_id FROM ad_publishers WHERE token = ? LIMIT 1');
+    $stmt->execute([$token]);
+    $pub = $stmt->fetch();
+
+    if (!$pub) {
+        http_response_code(403);
+        exit('Access denied.');
+    }
+
+    $back = '/ad-manager?token=' . rawurlencode($token);
+
+    // The advert has to belong to THIS publisher. Without the second condition one advertiser's token
+    // could rewrite another advertiser's campaign by guessing an id.
+    $stmt = $pdo->prepare('SELECT * FROM ads WHERE id = ? AND publisher_id = ? LIMIT 1');
+    $stmt->execute([(int) ($_POST['ad_id'] ?? 0), (int) $pub['id']]);
+    $ad = $stmt->fetch();
+
+    if (!$ad) {
+        flash('pub_error', 'That advert could not be found.');
+        redirect($back);
+    }
+
+    /*
+     * Only a rejected advert may be resubmitted, and this is not a formality.
+     *
+     * An approved advert pushed back to `pending` would stop being served — and an advertiser with a
+     * month of display left could use that to restart the clock on it. A pending one is already waiting
+     * and needs nothing, and resubmitting it would only inflate its revision count.
+     */
+    if ((string) $ad['status'] !== 'rejected') {
+        flash('pub_error', 'That advert is not waiting for a change, so there is nothing to resubmit.');
+        redirect($back);
+    }
+
+    $title = trim((string) ($_POST['title'] ?? ''));
+    $destUrl = trim((string) ($_POST['destination_url'] ?? ''));
+
+    if ($title === '') {
+        flash('pub_error', 'Please enter an Ad title.');
+        redirect($back);
+    }
+
+    $filePath = (string) $ad['file_path'];
+    $thumbPath = $ad['thumbnail_path'];
+    $mediaType = (string) $ad['media_type'];
+
+    // A replacement creative, if one was chosen — through the same processors the first upload went
+    // through, so a resubmission cannot smuggle in a file the original path would have refused.
+    $fileUpload = $_FILES['media_file'] ?? null;
+    if ($fileUpload && ($fileUpload['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK) {
+        $mediaType = in_array($_POST['media_type'] ?? '', ['image', 'video'], true) ? (string) $_POST['media_type'] : $mediaType;
+
+        if ($mediaType === 'image') {
+            $processed = MediaProcessor::processAdImage($fileUpload['tmp_name'], UPLOADS_PATH . '/ads');
+            if (!$processed) {
+                flash('pub_error', 'Failed to process the uploaded image.');
+                redirect($back);
+            }
+            $filePath = 'ads/' . $processed;
+            $thumbPath = null;
+        } else {
+            $res = MediaProcessor::processAdVideo($fileUpload['tmp_name'], UPLOADS_PATH . '/ads/reels', UPLOADS_PATH . '/ads/thumbs');
+            if (empty($res['file'])) {
+                flash('pub_error', 'Failed to process the uploaded video.');
+                redirect($back);
+            }
+            $filePath = 'ads/reels/' . $res['file'];
+            $thumbPath = !empty($res['thumbnail']) ? 'ads/thumbs/' . $res['thumbnail'] : null;
+        }
+    }
+
+    /*
+     * Back into the queue — and that is the entire write.
+     *
+     * `rejection_reason` is deliberately NOT cleared: the reviewer's list shows it beside the revision
+     * count, so whoever rejected it last time can see what they objected to and whether it was addressed.
+     * A reason that vanished on resubmission would make the second review blind.
+     */
+    $pdo->prepare('UPDATE ads SET title = ?, destination_url = ?, media_type = ?, file_path = ?, thumbnail_path = ?, status = "pending", resubmitted_at = NOW(), revision_count = revision_count + 1 WHERE id = ?')
+        ->execute([$title, $destUrl !== '' ? $destUrl : null, $mediaType, $filePath, $thumbPath, (int) $ad['id']]);
+
+    flash('pub_success', 'Your advert has been sent back for review. Your payment still stands — there is nothing more to pay.');
+    redirect($back);
 });
 
 // Payhub Callback & Webhook Verification Endpoint
@@ -188,25 +382,37 @@ $router->get('/payment/payhub/callback', function () {
 
     $secKey = (string) setting('payhub_secret_key');
 
-    // Verify transaction with Payhub API
-    $url = 'https://merchant.payhub.com.ng/api/transaction/verify/' . urlencode($reference);
-    $paid = false;
+    /*
+     * The gateway is asked, server-side, and its answer is the only thing that decides.
+     *
+     * This block used to set `$paid = true` whenever it could not reach PayHub — no curl, no secret key,
+     * a timeout — so `?ref=…` on this URL marked a donation completed with no money behind it, and marked
+     * an advert paid. A verification that cannot be made is not a payment, and `Payhub::verify()` says so
+     * with the reason instead.
+     *
+     * ⚠️ And it asks about **the reference the gateway minted**, not the one in the URL. PayHub ignores the
+     * reference it is given when a transaction is created, so this URL's reference — the one the giver or
+     * the advertiser is holding — is the only one the gateway has never heard of. Asking with it returns
+     * "The reference not found" for a payment that has already been taken. The stored reference is looked up
+     * here; the URL's own reference remains the fallback for a gateway that honours what it is sent.
+     */
+    $verifyRef = $isGiving
+        ? AdPayments::donationGatewayReference($reference)
+        : AdPayments::gatewayReferenceFor($reference);
 
-    if ($secKey !== '' && function_exists('curl_init')) {
-        $ch = curl_init($url);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_HTTPHEADER => ['Authorization: Bearer ' . $secKey],
-        ]);
-        $res = curl_exec($ch);
-        curl_close($ch);
+    $verified = Payhub::verify($verifyRef);
+    $paid = $verified['paid'];
+    $gatewayNote = $verified['error'] !== '' ? $verified['error'] : $verified['reason'];
+    $gatewayPayload = $verified['raw'] === [] ? null : (string) json_encode($verified['raw']);
 
-        $data = json_decode((string) $res, true);
-        if (!empty($data['paid']) || (!empty($data['data']['status']) && $data['data']['status'] === 'success')) {
-            $paid = true;
+    // Remember the gateway's own reference against the row it belongs to, so a later webhook, a fresh
+    // callback and anybody looking at the transaction in six months all name the same thing.
+    if ($paid && (string) ($verified['gateway_reference'] ?? '') !== '') {
+        if ($isGiving) {
+            AdPayments::recordDonationGatewayReference($reference, (string) $verified['gateway_reference']);
+        } else {
+            AdPayments::recordGatewayReferenceByReference($reference, (string) $verified['gateway_reference']);
         }
-    } else {
-        $paid = true; // Sandbox fallback
     }
 
     if ($paid) {
@@ -220,54 +426,49 @@ $router->get('/payment/payhub/callback', function () {
 
             $amtStr = $don ? ' ₦' . number_format((float) $don['amount']) : '';
             flash('give_success', 'Thank you for your generosity!' . $amtStr . ' online giving has been processed successfully.');
-            redirect('/give');
+
+            // Send them back to the campaign they gave to, if they gave to one, so the progress bar
+            // they were looking at has moved by the time they return.
+            $backTo = '/give';
+            if ($don && !empty($don['campaign_id'])) {
+                $campaign = GivingCampaign::find((int) $don['campaign_id']);
+                if ($campaign !== null) {
+                    $backTo = '/give/c/' . $campaign['slug'];
+                }
+            }
+            redirect($backTo);
         } else {
             $stmt = $pdo->prepare('UPDATE ads SET payment_status = "paid" WHERE payment_reference = ?');
             $stmt->execute([$reference]);
 
-            $stmt = $pdo->prepare('UPDATE ad_payments SET status = "success" WHERE reference = ?');
-            $stmt->execute([$reference]);
+            $stmt = $pdo->prepare('UPDATE ad_payments SET status = "success", gateway_response = ? WHERE reference = ?');
+            $stmt->execute([$gatewayPayload ?? $gatewayNote, $reference]);
 
             flash('advertise_sent', '1');
             redirect('/advertise?sent=1');
         }
     } else {
         if ($isGiving) {
-            flash('give_error', 'Online giving payment verification was not successful.');
+            // The attempt is recorded as failed rather than left pending for ever, so the record matches
+            // what the giver was told.
+            $pdo->prepare('UPDATE donations SET payment_status = "failed" WHERE payment_reference = ? AND payment_status <> "completed"')->execute([$reference]);
+
+            flash('give_error', $gatewayNote !== ''
+                ? 'Your payment was not completed: ' . $gatewayNote . ' Nothing has been charged.'
+                : 'Your payment was not completed. Nothing has been charged.');
             redirect('/give');
         }
-        flash('advertise_error', 'Payment verification failed or payment was not successful.');
+
+        // Recorded on the attempt, where the advertiser's report reads it, and never over an earlier
+        // success — a replayed return URL must not be able to un-pay a paid advert.
+        $pdo->prepare('UPDATE ad_payments SET status = "failed", gateway_response = ? WHERE reference = ? AND status <> "success"')
+            ->execute([$gatewayPayload ?? $gatewayNote, $reference]);
+
+        flash('advertise_error', $gatewayNote !== ''
+            ? 'Payment was not completed: ' . $gatewayNote
+            : 'Payment was not completed.');
         redirect('/advertise');
     }
-});
-
-$router->post('/payment/payhub/webhook', function () {
-    $pdo = Database::getInstance()->getConnection();
-    $body = (string) file_get_contents('php://input');
-    $sig = $_SERVER['HTTP_X_PAYHUB_SIGNATURE'] ?? '';
-    $secKey = (string) setting('payhub_secret_key');
-
-    if ($secKey !== '') {
-        if ($sig === '' || !hash_equals(hash_hmac('sha256', $body, $secKey), $sig)) {
-            http_response_code(401);
-            exit('Invalid signature');
-        }
-    }
-
-    $payload = json_decode($body, true);
-    if (($payload['event'] ?? '') === 'charge.success' && !empty($payload['data']['reference'])) {
-        $ref = $payload['data']['reference'];
-        if (str_starts_with($ref, 'GIVE_') || str_starts_with($ref, 'DON_')) {
-            $pdo->prepare('UPDATE donations SET payment_status = "completed" WHERE payment_reference = ?')->execute([$ref]);
-        } else {
-            $pdo->prepare('UPDATE ads SET payment_status = "paid" WHERE payment_reference = ?')->execute([$ref]);
-            $pdo->prepare('UPDATE ad_payments SET status = "success" WHERE reference = ?')->execute([$ref]);
-        }
-    }
-
-    http_response_code(200);
-    echo json_encode(['status' => 'success']);
-    exit;
 });
 
 // Public Ad placement page and submission handler
@@ -324,6 +525,18 @@ $router->post('/advertise', function () {
         $displayFreq = 'once_daily';
     } else {
         $paymentStatus = 'unpaid';
+
+        // A crafted POST asking for card payment on a site that cannot verify one is refused here, before
+        // an advert exists, rather than after — the alternative is an advert on the books that nobody can
+        // pay for and no admin can collect, which is worse than an error message.
+        //
+        // The form only offers the online option when Payhub::configured(), so this is the branch a
+        // request that never saw the form takes.
+        if ($paymentMethod === 'online' && !Payhub::configured()) {
+            keepFormOld($_POST);
+            flash('advertise_error', 'Card payment is not available on this site right now. Please choose bank transfer.');
+            redirect('/advertise');
+        }
     }
 
     $errors = [];
@@ -364,17 +577,22 @@ $router->post('/advertise', function () {
         redirect('/advertise');
     }
 
-    // Find or create publisher
-    $stmt = $pdo->prepare('SELECT id, token FROM ad_publishers WHERE email = ? LIMIT 1');
-    $stmt->execute([$pubEmail]);
+    // Find or create publisher, within the church being served. The same advertiser buying space on two
+    // churches gets an account on each rather than one account whose adverts belong to a church it does
+    // not — and each account needs its own portal token anyway.
+    [$tenantClause, $tenantParams] = tenantScope();
+    $stmt = $pdo->prepare('SELECT id, token, tenant_id FROM ad_publishers WHERE email = ? AND ' . $tenantClause . ' LIMIT 1');
+    $stmt->execute(array_merge([$pubEmail], $tenantParams));
     $pub = $stmt->fetch();
     if ($pub) {
         $publisherId = (int) $pub['id'];
         $pubToken = $pub['token'];
+        $publisherTenant = (int) $pub['tenant_id'];
     } else {
         $pubToken = bin2hex(random_bytes(24));
-        $stmt = $pdo->prepare('INSERT INTO ad_publishers (name, email, phone, token) VALUES (?, ?, ?, ?)');
-        $stmt->execute([$pubName, $pubEmail, $pubPhone ?: null, $pubToken]);
+        $publisherTenant = (int) (Tenant::id() ?? 0);
+        $stmt = $pdo->prepare('INSERT INTO ad_publishers (name, email, phone, token, tenant_id) VALUES (?, ?, ?, ?, ?)');
+        $stmt->execute([$pubName, $pubEmail, $pubPhone ?: null, $pubToken, $publisherTenant]);
         $publisherId = (int) $pdo->lastInsertId();
     }
 
@@ -405,9 +623,9 @@ $router->post('/advertise', function () {
 
     $reference = 'PH_AD_' . time() . '_' . mt_rand(1000, 9999);
 
-    $stmt = $pdo->prepare('INSERT INTO ads (publisher_id, title, media_type, file_path, thumbnail_path, destination_url, target_platform, duration_days, price, is_free, display_frequency, payment_status, payment_method, payment_proof_path, payment_reference, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "pending")');
+    $stmt = $pdo->prepare('INSERT INTO ads (publisher_id, tenant_id, title, media_type, file_path, thumbnail_path, destination_url, target_platform, duration_days, price, is_free, display_frequency, payment_status, payment_method, payment_proof_path, payment_reference, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "pending")');
     $stmt->execute([
-        $publisherId, $title, $mediaType, $filePath, $thumbPath, $destUrl ?: null, $targetPlatform,
+        $publisherId, $publisherTenant, $title, $mediaType, $filePath, $thumbPath, $destUrl ?: null, $targetPlatform,
         $durationDays, $price, $isFree ? 1 : 0, $displayFreq, $paymentStatus, $paymentMethod, $proofPath, $reference
     ]);
     $adId = (int) $pdo->lastInsertId();
@@ -426,45 +644,606 @@ $router->post('/advertise', function () {
         } catch (Throwable $e) {}
     }
 
-    // Online Payment via Payhub
-    if (!$isFree && $paymentMethod === 'online' && setting('payhub_enabled') && setting('payhub_secret_key')) {
-        $secKey = (string) setting('payhub_secret_key');
-        $callbackUrl = baseUrl('payment/payhub/callback');
-        $koboAmount = (int) round($price * 100);
-
-        $payload = json_encode([
-            'email' => $pubEmail,
-            'amount' => $koboAmount,
-            'reference' => $reference,
-            'name' => $pubName,
-            'phone' => $pubPhone,
-            'callback_url' => $callbackUrl,
-            'metadata' => ['ad_id' => $adId, 'publisher_id' => $publisherId]
-        ]);
-
-        if (function_exists('curl_init')) {
-            $ch = curl_init('https://merchant.payhub.com.ng/api/transaction/initialize');
-            curl_setopt_array($ch, [
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_POST => true,
-                CURLOPT_POSTFIELDS => $payload,
-                CURLOPT_HTTPHEADER => [
-                    'Content-Type: application/json',
-                    'Authorization: Bearer ' . $secKey
-                ],
-            ]);
-            $res = curl_exec($ch);
-            curl_close($ch);
-
-            $data = json_decode((string) $res, true);
-            if (!empty($data['data']['authorization_url'])) {
-                clearFormOld();
-                redirect($data['data']['authorization_url']);
-            }
-        }
+    // Card payment. The advertiser pays on THIS site now — the checkout page below renders the gateway's
+    // inline checkout — so this is a redirect to our own page rather than to PayHub's website, and the
+    // browser is never handed off. It is a redirect and not a render because a render would re-run this
+    // whole handler on a refresh, creating a second advert and a second attempt for one payment.
+    //
+    // ⚠️ **The gateway is deliberately NOT called here, and it used to be.**
+    //
+    // This block initialized a transaction and then *replaced* the attempt's reference with whatever PayHub
+    // returned — and PayHub returns its own reference, always, ignoring the one we send. The substitution
+    // broke the two things the reference is for: the browser was redirected with the NEW reference while
+    // the attempt row's guarded writes match on the reference the browser holds, and the checkout page then
+    // initialized a SECOND transaction, so the attempt pointed at a reference nobody could pay while the
+    // money was taken against a third one. One initialize, on the page that shows the checkout, is what
+    // this flow needs — and that page now stores the gateway's reference where verification can find it.
+    if (!$isFree && $paymentMethod === 'online') {
+        $_SESSION['ad_checkout_ref'] = $reference;
+        clearFormOld();
+        redirect('/advertise/checkout?ref=' . urlencode($reference));
     }
 
     clearFormOld();
+    flash('advertise_sent', '1');
+    redirect('/advertise?sent=1');
+});
+
+/**
+ * Loads an advert by its payment reference, within the church being served.
+ *
+ * Shared by the three money routes below so they cannot disagree about which advert a reference names —
+ * the same reasoning as `Payhub::amountInKobo()` being the only conversion: one answer to one question.
+ *
+ * @return array<string, mixed>|null
+ */
+$loadAdByReference = function (string $reference): ?array {
+    if (trim($reference) === '') {
+        return null;
+    }
+    $pdo = Database::getInstance()->getConnection();
+    [$tenantClause, $tenantParams] = tenantScope(null, 'a.tenant_id');
+
+    // Resolved through the ATTEMPT, not through `ads.payment_reference`.
+    //
+    // A retry gets its own reference — a gateway identifies a transaction by its reference, so re-offering
+    // one it has already seen is asking it to answer about the previous attempt. That makes the reference an
+    // identifier for the attempt, and an older attempt's return URL has to keep routing after a newer one
+    // exists. `ads.payment_reference` tracks the newest attempt; `ad_payments.reference` remembers all of
+    // them, and it is the one that can answer the question.
+    $stmt = $pdo->prepare('SELECT a.*, p.name AS publisher_name, p.email AS publisher_email, p.token AS publisher_token, pay.reference AS attempt_reference
+                           FROM ad_payments pay
+                           JOIN ads a ON a.id = pay.ad_id
+                           JOIN ad_publishers p ON p.id = a.publisher_id
+                           WHERE pay.reference = ? AND ' . $tenantClause . ' LIMIT 1');
+    $stmt->execute(array_merge([trim($reference)], $tenantParams));
+    $row = $stmt->fetch();
+
+    if ($row) {
+        return $row;
+    }
+
+    /*
+     * Second try: the **gateway's** reference.
+     *
+     * A webhook names the transaction by the reference PayHub minted (`PH_<hex>`), not by ours, because
+     * PayHub ignores the one we send. Looked up only after ours fails, so an advert whose attempt
+     * reference happens to be a gateway reference still resolves the same way it always did.
+     *
+     * This is the half that never worked: the webhook used to resolve only on our reference, matched
+     * nothing, and therefore marked nothing — the money arrived and the advert stayed unpaid. It is the
+     * same shape as the note above: one reference for "this attempt exists", another for "this transaction
+     * exists", and the row is the only place that knows both.
+     */
+    $stmt = $pdo->prepare('SELECT a.*, p.name AS publisher_name, p.email AS publisher_email, p.token AS publisher_token, pay.reference AS attempt_reference
+                           FROM ad_payments pay
+                           JOIN ads a ON a.id = pay.ad_id
+                           JOIN ad_publishers p ON p.id = a.publisher_id
+                           WHERE pay.gateway_reference = ? AND ' . $tenantClause . ' LIMIT 1');
+    $stmt->execute(array_merge([trim($reference)], $tenantParams));
+    $row = $stmt->fetch();
+
+    if ($row) {
+        return $row;
+    }
+
+    // An advert whose attempt row is missing: the submission handler writes both, so this is a state it
+    // cannot normally produce, and the fallback exists so that a half-written advert is still reachable
+    // rather than showing the advertiser a 404 for a payment they may have made.
+    $stmt = $pdo->prepare('SELECT a.*, p.name AS publisher_name, p.email AS publisher_email, p.token AS publisher_token, a.payment_reference AS attempt_reference
+                           FROM ads a JOIN ad_publishers p ON p.id = a.publisher_id
+                           WHERE a.payment_reference = ? AND ' . $tenantClause . ' LIMIT 1');
+    $stmt->execute(array_merge([trim($reference)], $tenantParams));
+
+    return $stmt->fetch() ?: null;
+};
+
+/** How many online attempts this advert has actually failed. The retry rule is measured on this. */
+
+/*
+ * The webhook — how PayHub tells this site that money arrived when the browser never came back.
+ *
+ * Per the API reference: the event is `charge.success`, the reference is at **`data.reference` — and that
+ * reference is PayHub's own (`PH_abc123` in the documentation's own example), never ours.** That single
+ * fact is why none of this route worked, and it is the one thing to hold on to when reading it. The
+ * signature is `HMAC-SHA256(raw body, secret)` in `X-Payhub-Signature`; a wrong signature is refused, and
+ * an absent one is not — see the note beside the check for why, and why it costs nothing.
+ *
+ * The body is never trusted on its own: the payment is re-verified with the gateway server-side and only
+ * the gateway's own answer credits anything.
+ *
+ * Three things it used to get wrong, all of which lost money:
+ *
+ * 1. It resolved the advert by `ads.payment_reference`, which tracks only the NEWEST attempt. A webhook for
+ *    any earlier attempt therefore matched nothing, so the attempt row was marked successful while the
+ *    advert stayed unpaid. It resolves through the same attempt-reference lookup the return URL uses.
+ * 2. It wrote payment state by hand instead of calling `AdPayments::recordOutcome()`. That duplicated the
+ *    paid guard and the attempt-counter sync in a second place, which is the class of drift 7h-0 removed
+ *    from the gateway client. Both money paths now go through the one decision.
+ * 3. ⚠️ **It looked everything up by OUR reference, and a webhook never carries our reference.** PayHub
+ *    names the transaction by the reference it minted, so this route matched nothing, ever — and it also
+ *    refused every delivered webhook with 401 when the signature header was absent. A payment taken while
+ *    the advertiser closed the tab had no way of reaching the books at all. It now resolves by the
+ *    gateway's reference, falls back to ours when the metadata echoed it, and only ever credits what the
+ *    gateway confirms.
+ *
+ * It is registered here, below the lookup, because a closure's `use` binds at creation — above this point
+ * the variable does not exist yet.
+ */
+$router->post('/payment/payhub/webhook', function () use ($loadAdByReference) {
+    $pdo = Database::getInstance()->getConnection();
+    $body = (string) file_get_contents('php://input');
+    $signature = (string) ($_SERVER['HTTP_X_PAYHUB_SIGNATURE'] ?? '');
+
+    $payload = json_decode($body, true);
+    $payload = is_array($payload) ? $payload : [];
+    $event = (string) ($payload['event'] ?? '');
+    $data = is_array($payload['data'] ?? null) ? $payload['data'] : $payload;
+
+    // The reference the GATEWAY minted. PayHub ignores the one we send, so this — and never our own
+    // reference — is what a webhook names, and asking the gateway about anything else is the fault.
+    $gatewayRef = trim((string) ($data['reference'] ?? ($payload['reference'] ?? '')));
+
+    // Our own reference, if the gateway echoed the metadata back. The safety net: it ties the transaction to
+    // an advert even when the gateway reference matches nothing we stored.
+    $metadataRef = Payhub::metadataReference($payload);
+
+    /*
+     * Nothing to act on. Acknowledged rather than refused, or the gateway retries it for ever.
+     */
+    if ($gatewayRef === '' && $metadataRef === '') {
+        http_response_code(200);
+        echo json_encode(['status' => 'ignored', 'reason' => 'no reference']);
+        exit;
+    }
+
+    $verifyRef = $gatewayRef !== '' ? $gatewayRef : $metadataRef;
+
+    /*
+     * An install with no secret key cannot verify a payment **or** a signature, so it is answered before
+     * either question is asked.
+     *
+     * Acknowledged, not retried: a 500 or a 401 here would have the gateway redeliver this event for as long
+     * as it cares to and nothing could ever come of it, because no amount of retrying installs a key. This
+     * is the state a church is in before it pastes its keys in — and it is the one state in which the
+     * gateway's own documentation cannot be followed, since there is nothing to compute the HMAC with.
+     */
+    if (!Payhub::configured()) {
+        http_response_code(200);
+        echo json_encode(['status' => 'ignored', 'reason' => 'the gateway is not configured']);
+        exit;
+    }
+
+    /*
+     * The signature is checked, and a signature that is **present but wrong is refused outright** — which is
+     * what the gateway's documentation asks for in as many words: *"Always verify this signature before
+     * crediting a wallet, and reject any request whose signature does not match."*
+     *
+     * An **absent** header is treated differently, and that is a deliberate trade rather than an oversight.
+     * The documentation says every webhook is signed, but this route also has to survive a gateway — or a
+     * proxy in front of it — that does not send the header, and refusing those is how a paid advert stayed
+     * unpaid with the money sitting at the gateway. Being lenient about an *absent* header costs nothing
+     * here, because the body is never trusted either way: the payment is re-verified with the gateway below,
+     * and only the gateway's own answer credits anything. A forged request naming a real paid reference
+     * credits exactly the advert that payment belongs to — which is the correct outcome — and it cannot
+     * invent a reference the gateway will confirm.
+     *
+     * A *wrong* signature is different: it is positive evidence that somebody computed an HMAC and got it
+     * wrong, so it is refused.
+     *
+     * (The working PayHub integration this was checked against does not require the header either, for the
+     * same reason — see the note above `Payhub::initialize()`. Its own comment calls the body unsigned and
+     * insists the payment be confirmed through the API instead.)
+     */
+    $signed = Payhub::verifyWebhook($body, $signature);
+
+    if ($signature !== '' && !$signed) {
+        Payhub::logEvent('webhook-rejected', ['reference' => $verifyRef, 'reason' => 'signature mismatch']);
+
+        http_response_code(401);
+        echo json_encode(['status' => 'rejected', 'reason' => 'signature mismatch']);
+        exit;
+    }
+
+    // Recorded, because "is my merchant dashboard actually signing?" is the next question after any webhook
+    // trouble, and it is answerable only from here.
+    $signatureNote = $signed ? 'verified' : 'absent';
+    Payhub::logEvent('webhook', ['reference' => $verifyRef, 'signature' => $signatureNote, 'event' => $event]);
+
+    $verified = Payhub::verify($verifyRef);
+
+    $verified = Payhub::verify($verifyRef);
+
+    if (!$verified['ok']) {
+        // The gateway could not be asked, so nothing is known. A 500 asks it to deliver the webhook again
+        // rather than swallowing an event that may be the only record of a real payment.
+        http_response_code(500);
+        echo json_encode(['status' => 'retry', 'reason' => $verified['error']]);
+        exit;
+    }
+
+    if (!$verified['paid']) {
+        http_response_code(200);
+        echo json_encode(['status' => 'ignored', 'reason' => 'not paid']);
+        exit;
+    }
+
+    /*
+     * Giving first, and by *lookup* rather than by the reference's prefix.
+     *
+     * The old test was `str_starts_with($reference, 'GIVE_')` — which can only ever have been true for our
+     * own reference, never for the `PH_<hex>` one a webhook actually carries, so a gift could not be
+     * credited by this route at all. Resolving the row is the only test that works for both.
+     */
+    $donRef = $gatewayRef !== '' ? $gatewayRef : $metadataRef;
+    $stmt = $pdo->prepare('SELECT id, payment_reference FROM donations
+                           WHERE (gateway_reference = ? OR payment_reference = ? OR payment_reference = ?) LIMIT 1');
+    $stmt->execute([$donRef, $metadataRef, $gatewayRef]);
+    $donation = $stmt->fetch();
+
+    if ($donation) {
+        $pdo->prepare('UPDATE donations SET payment_status = "completed", gateway_reference = COALESCE(NULLIF(?, ""), gateway_reference)
+                       WHERE id = ? AND payment_status <> "completed"')
+            ->execute([$gatewayRef, (int) $donation['id']]);
+
+        http_response_code(200);
+        echo json_encode(['status' => 'success']);
+        exit;
+    }
+
+    // Then the advert, resolved by the gateway's reference (and by our own as a fallback).
+    $ad = $loadAdByReference($gatewayRef) ?? ($metadataRef !== '' ? $loadAdByReference($metadataRef) : null);
+
+    if ($ad !== null) {
+        $attemptRef = (string) ($ad['attempt_reference'] ?? '');
+        if ($attemptRef === '') {
+            $attemptRef = $metadataRef !== '' ? $metadataRef : $gatewayRef;
+        }
+
+        AdPayments::recordGatewayReference((int) $ad['id'], $attemptRef, $gatewayRef);
+
+        // The decision belongs to `AdPayments`, exactly as on the return URL — and the answer is the
+        // gateway's own, not the body's. A forged webhook can name a reference; it cannot make the gateway
+        // say that reference was paid.
+        AdPayments::recordOutcome($ad, $verified, $attemptRef);
+    }
+
+    http_response_code(200);
+    echo json_encode(['status' => 'success', 'event' => $event, 'signature' => $signatureNote]);
+    exit;
+});
+
+// The page that takes the money, on this site.
+$router->get('/advertise/checkout', function () use ($loadAdByReference) {
+    $ref = trim((string) ($_GET['ref'] ?? ''));
+
+    /*
+     * The REFERENCE is the credential here, not the session.
+     *
+     * This used to 404 unless the session that created the reference matched — and that is exactly what
+     * made the page disappear for the advertiser it was built for. A revisit, a restored tab, a link opened
+     * in another browser, or a session that expired between the form and the payment all produced a 404 on
+     * the one screen where somebody is trying to give the church money.
+     *
+     * `Payhub::reference()` is 16 hex characters from `random_bytes` — the same class of unguessable bearer
+     * token the publisher portal already accepts as the credential for a whole account. Holding it is the
+     * authorisation. What must NOT be reachable is a reference that resolves to no advert, and that is still
+     * a 404 below.
+     */
+    if ($ref === '') {
+        http_response_code(404);
+        render('404', [], true);
+        return;
+    }
+
+    $ad = $loadAdByReference($ref);
+    if ($ad === null) {
+        /*
+         * This 404 is invisible from the outside, and that has cost several rounds of guessing. It looks
+         * identical whether the reference was never written, was written for a different church (the lookup
+         * is church-scoped), or was typed wrong — three different faults with one symptom. So it is recorded
+         * in one line, with the two facts that tell them apart: the church this request resolved to, and
+         * whether a row for that reference exists at all, and under whose church.
+         *
+         * The page stays a plain 404. Nothing here reaches the visitor: a stranger must not be able to probe
+         * references and read the answer back.
+         */
+        try {
+            $diag = Database::getInstance()->getConnection()->prepare(
+                'SELECT a.tenant_id, a.status, a.payment_status FROM ad_payments pay'
+                . ' JOIN ads a ON a.id = pay.ad_id WHERE pay.reference = ? LIMIT 1'
+            );
+            $diag->execute([$ref]);
+            $row = $diag->fetch(PDO::FETCH_ASSOC);
+
+            $logDir = STORAGE_PATH . '/logs';
+            if (!is_dir($logDir)) { @mkdir($logDir, 0775, true); }
+            @file_put_contents(
+                $logDir . '/payment.log',
+                date('c') . ' checkout 404'
+                . ' ref=' . $ref
+                . ' resolved_tenant=' . var_export(Tenant::id(), true)
+                . ' session_ref=' . ((string) ($_SESSION['ad_checkout_ref'] ?? '') !== '' ? 'set' : 'none')
+                . ' row_anywhere=' . ($row ? json_encode($row) : 'NONE')
+                . PHP_EOL,
+                FILE_APPEND
+            );
+        } catch (Throwable $e) {
+            // Diagnosing a 404 must never itself become a 500.
+        }
+
+        http_response_code(404);
+        render('404', [], true);
+        return;
+    }
+
+    // Keep the session pointing at this attempt, so the hosted route and a retry agree with this page.
+    $_SESSION['ad_checkout_ref'] = $ref;
+
+    // Already settled — a refresh, a back button, a bookmarked step. Sending them to the report is the
+    // only answer that cannot take a second payment for an advert that is already paid for.
+    if ((string) $ad['payment_status'] === 'paid') {
+        redirect('/advertise/return?ref=' . urlencode($ref));
+    }
+
+    // Bank transfer has become the only option, or the advert is not an online one. Either way this page
+    // must not offer a card payment; 7h-4 owns the rule that decides when, so until then the advert simply
+    // is not sent here.
+    if ((string) $ad['payment_method'] !== 'online') {
+        redirect('/advertise?sent=1');
+    }
+
+    render('advertise-checkout', [
+        'ad' => $ad,
+        'returnTo' => '/advertise/return',
+        'metaTitle' => 'Complete your payment',
+    ]);
+});
+
+// The hosted checkout, reached from the button on the page above. Still inside the site as far as the
+// advertiser is concerned — they chose it — but it is the gateway's page, which is why it is a separate
+// deliberate step rather than what happens by default.
+$router->post('/advertise/hosted', function () use ($loadAdByReference) {
+    Csrf::requireValid();
+
+    $ref = trim((string) ($_POST['ref'] ?? ''));
+
+    // Same rule as the page above: the reference is the credential. See the note there.
+    if ($ref === '') {
+        http_response_code(404);
+        render('404', [], true);
+        return;
+    }
+
+    $ad = $loadAdByReference($ref);
+    if ($ad === null || (string) $ad['payment_status'] === 'paid') {
+        redirect('/advertise/return?ref=' . urlencode($ref));
+    }
+
+    $_SESSION['ad_checkout_ref'] = $ref;
+
+    $result = Payhub::initialize([
+        'email' => (string) $ad['publisher_email'],
+        // NAIRA, not kobo: the hosted checkout renders the figure it is given as naira. See
+        // Payhub::amountInNaira() — sending kobo here charged ₦900,000 for a ₦9,000 advert.
+        'amount' => Payhub::amountInNaira((float) $ad['price']),
+        'reference' => $ref,
+        'name' => (string) $ad['publisher_name'],
+        'callback_url' => baseUrl('advertise/return?ref=' . urlencode($ref)),
+        'metadata' => ['ad_id' => (int) $ad['id'], 'publisher_id' => (int) $ad['publisher_id']],
+    ]);
+
+    /*
+     * The reference the gateway minted goes on the attempt row BEFORE the browser leaves.
+     *
+     * Order matters: PayHub ignores our `callback_url`, so the browser may come back through the gateway's
+     * own page, or not at all. Whatever brings it back, the only way to ask about this payment afterwards is
+     * with the gateway's reference — and this is the last moment at which we know it and the advertiser is
+     * still on our site. It is also what makes the advertiser's own return URL work if they bookmark it.
+     */
+    if ($result['ok'] && $result['gateway_reference'] !== '') {
+        AdPayments::recordGatewayReference((int) $ad['id'], (string) ($ad['attempt_reference'] ?? $ref), $result['gateway_reference']);
+    }
+
+    if ($result['ok'] && $result['authorization_url'] !== '') {
+        redirect($result['authorization_url']);
+    }
+
+    // The gateway could not be reached. Nothing has been charged, and the advert is untouched — the
+    // advertiser is told rather than shown a page that implies a payment happened.
+    flash('advertise_error', 'The card payment could not be started (' . $result['error']
+        . '). Nothing has been charged — please try again, or pay by bank transfer.');
+    redirect('/advertise/checkout?ref=' . urlencode($ref));
+});
+
+// Where the payment comes back to, and where the only decision about it is made.
+//
+// The browser is what arrives here, and a browser can be told to ask for any reference. So the reference is
+// verified with the gateway **server-side**, and what the browser says about the outcome is worth nothing.
+$router->get('/advertise/return', function () use ($loadAdByReference) {
+    $ref = trim((string) ($_GET['ref'] ?? ''));
+
+    $ad = $loadAdByReference($ref);
+    if ($ad === null) {
+        http_response_code(404);
+        render('404', [], true);
+        return;
+    }
+
+    // The browser is what arrives here, and a browser can be told to ask for any reference. So the gateway
+    // is asked **server-side**, and what the browser claims the outcome was counts for nothing.
+    //
+    // What the answer means is `core/AdPayments.php`, not this closure: a route handler ends in
+    // `redirect()`, which calls `exit`, so logic living here could never be driven from a harness. Every
+    // branch of the decision is tested directly on that class instead.
+    if ((string) $ad['payment_status'] === 'paid') {
+        $result = ['outcome' => 'paid', 'reason' => ''];
+    } else {
+        /*
+         * ASK ABOUT THE GATEWAY'S REFERENCE, NOT OURS.
+         *
+         * This is the line the whole fault was in. PayHub ignores the reference we send and mints its own,
+         * so asking about ours gets "The reference not found" **for a payment that has actually been taken**
+         * — which is what the advertiser was shown, twice, while the money sat at the gateway.
+         * `gatewayReferenceFor()` returns the reference stored for this attempt when there is one and the
+         * attempt reference itself when there is not.
+         */
+        $attemptRef = trim((string) ($ad['attempt_reference'] ?? '')) !== '' ? (string) $ad['attempt_reference'] : $ref;
+        $gatewayRef = AdPayments::gatewayReferenceFor($attemptRef);
+
+        $verifyRes = Payhub::verify($gatewayRef);
+
+        if ($verifyRes['paid']) {
+            // Written down so the webhook, an admin looking at the attempt years later, and a replayed
+            // return URL all name the same transaction.
+            AdPayments::recordGatewayReference((int) $ad['id'], $attemptRef, $gatewayRef);
+        }
+
+        /*
+         * The gateway's own report of what it charged, handed to our page by the inline iframe.
+         *
+         * Used only as a fallback, and only when the gateway itself says the transaction was created with
+         * THIS attempt's reference in its metadata. A reference quoted in a URL is worth nothing on its own
+         * — an advertiser can put any reference there, including one belonging to a stranger's paid
+         * transaction — so a `trxref` is believed only when the metadata ties it back to this advert.
+         */
+        $trxref = trim((string) ($_GET['trxref'] ?? ($_GET['reference'] ?? '')));
+        if (!$verifyRes['paid'] && $trxref !== '' && $trxref !== $gatewayRef) {
+            $secondVerify = Payhub::verify($trxref);
+            if ($secondVerify['paid'] && Payhub::metadataReference($secondVerify['raw']) === $attemptRef) {
+                $verifyRes = $secondVerify;
+                AdPayments::recordGatewayReference((int) $ad['id'], $attemptRef, $trxref);
+            }
+        }
+
+        $result = AdPayments::recordOutcome($ad, $verifyRes, $attemptRef);
+    }
+
+    $fresh = $loadAdByReference($ref) ?? $ad;
+
+    /*
+     * A payment that succeeded goes to the advertiser's own dashboard, not to a report.
+     *
+     * The report page exists to explain a failure and to offer the retry and the bank-transfer proof; a
+     * successful payment has nothing to explain, and the advertiser's next question is about the advert,
+     * not the transaction. So they land where the advert lives, told what happened to their money and what
+     * happens next — pending review and approval — with the advert itself listed below the message.
+     *
+     * A failure still renders the report, because retry and proof upload are the whole point of it.
+     */
+    if ($result['outcome'] === 'paid' && !empty($fresh['publisher_token'])) {
+        flash('pub_success', 'Payment received — ₦' . number_format((float) $fresh['price'], 2)
+            . ' for "' . (string) $fresh['title'] . '".'
+            . ' Transaction status: PAID (reference ' . $ref . ').'
+            . ' Your advert is now pending review and approval — we will email you the moment it goes live.');
+        redirect('/ad-manager?token=' . rawurlencode((string) $fresh['publisher_token']));
+    }
+
+    render('advertise-return', [
+        'ad' => $fresh,
+        'reference' => $ref,
+        'outcome' => $result['outcome'],
+        'reason' => $result['reason'],
+        'attempts' => (int) $fresh['payment_attempts'],
+        'remaining' => AdPayments::remainingOnlineAttempts((int) $fresh['id']),
+        // The retry offer is decided here and not in the view: whether the advertiser may try a card payment
+        // again is a rule about their money, and a view is the wrong place for it.
+        //
+        // Deliberately NOT also requiring that the inline checkout is available. Those are different
+        // questions: a church with a verification key but no public key can still take and confirm a card
+        // payment, it just does so on the gateway's own page — and hiding the retry from that church's
+        // advertisers would strand a payment they can perfectly well make. The checkout page chooses
+        // between the frame and the hosted form; the report only decides whether to offer a retry.
+        'canRetry' => (string) $fresh['payment_status'] !== 'paid'
+            && AdPayments::canRetryOnline((int) $fresh['id']),
+        'manualEnabled' => (bool) setting('manual_payment_enabled', 1),
+        'manualInstructions' => (string) setting('manual_payment_instructions', ''),
+    ]);
+});
+
+// Retry: opens a new attempt and sends the advertiser back to the checkout for it.
+//
+// A POST rather than a link, because it creates a payment attempt and a GET that creates anything is a GET
+// that a mail client will pre-fetch, or a crawler will follow, or somebody will bookmark and reload.
+$router->post('/advertise/retry', function () use ($loadAdByReference) {
+    Csrf::requireValid();
+
+    $ref = trim((string) ($_POST['ref'] ?? ''));
+
+    /*
+     * The same rule as the checkout page: the reference is the credential, not the session.
+     *
+     * This gate used to 404 on a session mismatch, so an advertiser whose session had changed could not
+     * retry a payment the report page had just offered them — on the page whose entire purpose is to let
+     * them try again. What must not be reachable is a reference that resolves to no advert, checked below.
+     */
+    if ($ref === '') {
+        http_response_code(404);
+        render('404', [], true);
+        return;
+    }
+
+    $ad = $loadAdByReference($ref);
+    if ($ad === null) {
+        http_response_code(404);
+        render('404', [], true);
+        return;
+    }
+
+    if ((string) $ad['payment_status'] === 'paid') {
+        redirect('/advertise/return?ref=' . urlencode($ref));
+    }
+
+    // Refused in the handler, not merely hidden in the view. Two failed attempts is the advertiser's own
+    // rule and a hidden button is not an enforcement of it.
+    if (!AdPayments::canRetryOnline((int) $ad['id'])) {
+        flash('advertise_error', 'Card payment has not worked after two attempts. Please pay by bank transfer instead.');
+        redirect('/advertise/return?ref=' . urlencode($ref));
+    }
+
+    $attempt = AdPayments::startAttempt($ad);
+
+    // The session follows the newest attempt, so the earlier attempt's checkout page stops being payable the
+    // moment a new one exists — otherwise going back in the browser would offer to charge twice.
+    $_SESSION['ad_checkout_ref'] = $attempt['reference'];
+
+    redirect('/advertise/checkout?ref=' . urlencode($attempt['reference']));
+});
+
+// The bank-transfer proof. What an advertiser uploads as evidence of a transfer they have made.
+$router->post('/advertise/proof', function () use ($loadAdByReference) {
+    Csrf::requireValid();
+
+    $ref = trim((string) ($_POST['ref'] ?? ''));
+    $ad = $loadAdByReference($ref);
+
+    if ($ad === null) {
+        http_response_code(404);
+        render('404', [], true);
+        return;
+    }
+
+    if ((string) $ad['payment_status'] === 'paid') {
+        redirect('/advertise/return?ref=' . urlencode($ref));
+    }
+
+    $upload = $_FILES['payment_proof'] ?? null;
+    if (!$upload || empty($upload['tmp_name']) || ($upload['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        flash('advertise_error', 'Please choose the receipt or screenshot of your bank transfer.');
+        redirect('/advertise/return?ref=' . urlencode($ref));
+    }
+
+    // The same processor the submission form has always used for a proof, so a receipt is stored one way.
+    $proofName = MediaProcessor::processImage($upload['tmp_name'], UPLOADS_PATH . '/ads/proofs');
+    if (!$proofName) {
+        flash('advertise_error', 'That file could not be read as an image. A photo or a screenshot of the receipt is fine.');
+        redirect('/advertise/return?ref=' . urlencode($ref));
+    }
+
+    AdPayments::recordProof($ad, 'ads/proofs/' . $proofName);
+
+    // `pending_review` is not one of the three outcomes the report page renders, so the advertiser is sent
+    // to the page that says what happens next rather than to one that would have to invent a fourth state.
     flash('advertise_sent', '1');
     redirect('/advertise?sent=1');
 });
@@ -478,6 +1257,11 @@ $router->get('/register', function () {
 });
 
 $router->post('/register', function () {
+    // Every other public POST handler validates CSRF; this one did not, while the
+    // small church-name-flag form further down the page did. That is the wrong way
+    // round, so the check now covers both forms.
+    Csrf::requireValid();
+
     $pdo = Database::getInstance()->getConnection();
 
     // Church name correction flag (small second form on the register page).
@@ -520,11 +1304,18 @@ $router->post('/register', function () {
     $unblockPin = trim((string) ($_POST['unblock_pin'] ?? ''));
     $role = in_array($_POST['role'] ?? '', ['admin', 'editor', 'media_team'], true) ? $_POST['role'] : 'admin';
     $altEmail = trim($_POST['alt_email'] ?? '');
-    $provinceId = (int) ($_POST['province_id'] ?? 0);
-    $zoneId = (int) ($_POST['zone_id'] ?? 0);
-    $areaId = (int) ($_POST['area_id'] ?? 0);
+    // The chosen branch is posted as an ordered id path covering every level
+    // above the church itself; the church name is typed in at the deepest level.
+    $legacyAreaId = (int) ($_POST['area_id'] ?? 0);
+    $unitPath = Unit::decodePath($_POST['unit_path'] ?? '', $legacyAreaId > 0 ? $legacyAreaId : null);
+    $chain = Unit::validateChain($unitPath);
+    $parentId = $chain ? (int) $chain[count($chain) - 1]['id'] : 0;
     $parishId = (int) ($_POST['parish_id'] ?? 0);
-    $parishName = Unit::nameFor((string) ($_POST['parish_name'] ?? ''));
+    $parishName = Unit::nameFor((string) ($_POST['parish_name'] ?? $_POST['leaf_name'] ?? ''));
+
+    // Labels drive every message so they always match the configured levels.
+    $leafLabel = Unit::labelFor(Unit::leafType());
+    $parentLabels = array_slice(array_map(static fn (array $l): string => $l['label'], Unit::levels()), 0, max(0, Unit::levelCount() - 1));
 
     $errors = [];
     if ($name === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
@@ -550,12 +1341,11 @@ $router->post('/register', function () {
     if ($altEmail !== '' && !filter_var($altEmail, FILTER_VALIDATE_EMAIL)) {
         $errors[] = 'The alternative email address is not valid.';
     }
-    $area = $areaId > 0 ? Unit::find($areaId) : null;
-    if (!$area || $area['type'] !== 'area') {
-        $errors[] = 'Please select your Province, Zone, and Area.';
+    if (count($chain) !== count($parentLabels)) {
+        $errors[] = 'Please select your ' . implode(', ', $parentLabels) . '.';
     }
     if ($parishName === '') {
-        $errors[] = 'Please enter your Parish church name.';
+        $errors[] = 'Please enter your ' . $leafLabel . ' name.';
     }
 
     if (!$errors) {
@@ -582,17 +1372,19 @@ $router->post('/register', function () {
         redirect('/register');
     }
 
-    // Link to an existing parish if one matches; otherwise the parish is created
-    // on approval (its name is saved here, in CAPS).
+    // Link to an existing church if one matches; otherwise it is created on
+    // approval (its name is saved here, in CAPS).
     $parish = $parishId > 0 ? Unit::find($parishId) : null;
-    if ($parish && (int) ($parish['parent_id'] ?? 0) !== $areaId) {
+    if ($parish && (int) ($parish['parent_id'] ?? 0) !== $parentId) {
         $parish = null;
     }
-    if (!$parish) {
-        $parish = Unit::findByName('parish', $parishName, $areaId);
+    if (!$parish && $parentId > 0) {
+        $parish = Unit::findByName(Unit::leafType(), $parishName, $parentId);
     }
 
-    $stmt = $pdo->prepare('INSERT INTO pending_registrations (name, email, phone, username, password_hash, unblock_pin_hash, password_enc, role, alt_email, province_id, zone_id, area_id, parish_name, parish_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "pending")');
+    // province_id/zone_id/area_id are kept populated for the older admin views;
+    // unit_path is the authoritative branch at any depth.
+    $stmt = $pdo->prepare('INSERT INTO pending_registrations (name, email, phone, username, password_hash, unblock_pin_hash, password_enc, role, alt_email, province_id, zone_id, area_id, parish_name, parish_id, unit_path, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "pending")');
     $stmt->execute([
         mb_substr($name, 0, 150),
         mb_substr($email, 0, 150),
@@ -603,11 +1395,12 @@ $router->post('/register', function () {
         encryptSecret($password),
         $role,
         $altEmail !== '' ? mb_substr($altEmail, 0, 190) : null,
-        $provinceId > 0 ? $provinceId : null,
-        $zoneId > 0 ? $zoneId : null,
-        $areaId,
+        $chain ? (int) $chain[0]['id'] : null,
+        isset($chain[1]) ? (int) $chain[1]['id'] : null,
+        $parentId > 0 ? $parentId : null,
         mb_substr($parishName, 0, 150),
         $parish ? (int) $parish['id'] : null,
+        $chain ? json_encode(array_map(static fn (array $u): array => ['type' => $u['type'], 'id' => (int) $u['id']], $chain), JSON_UNESCAPED_SLASHES) : null,
     ]);
     clearFormOld();
     flash('register_sent', '1');
@@ -619,7 +1412,39 @@ $router->get('/events', function () {
 });
 
 $router->get('/events/{slug}', function (array $params) {
+    Analytics::recordEntityBySlug('event', 'events', (string) $params['slug']);
     render('event-detail', ['slug' => $params['slug']]);
+});
+
+// RSVP taken on the page itself. A plain form POST, so it works with JavaScript
+// off — the app uses POST /api/rsvp with the same underlying logic.
+$router->post('/events/{slug}', function (array $params) {
+    Csrf::requireValid();
+    RateLimiter::require('rsvp', 10, 300);
+
+    $slug = (string) $params['slug'];
+    $pdo = Database::getInstance()->getConnection();
+    $stmt = $pdo->prepare('SELECT * FROM events WHERE slug = ? AND is_published = 1 LIMIT 1');
+    $stmt->execute([$slug]);
+    $event = $stmt->fetch();
+
+    if (!$event || !Rsvp::takesRsvps($event)) {
+        flash('rsvp_error', 'That event is not taking RSVPs here.');
+        redirect('/events/' . rawurlencode($slug));
+    }
+
+    $result = Rsvp::submit($event, $_POST);
+    if (!$result['ok']) {
+        keepFormOld($_POST);
+        flash('rsvp_error', $result['message']);
+    } else {
+        // A smaller party may have freed seats for whoever is waiting.
+        Rsvp::promoteWaitlist((int) $event['id']);
+        clearFormOld();
+        flash('rsvp_ok', $result['message']);
+    }
+
+    redirect('/events/' . rawurlencode($slug));
 });
 
 $router->get('/sermons', function () {
@@ -627,7 +1452,58 @@ $router->get('/sermons', function () {
 });
 
 $router->get('/sermons/{slug}', function (array $params) {
+    Analytics::recordEntityBySlug('sermon', 'sermons', (string) $params['slug']);
     render('sermon-detail', ['slug' => $params['slug']]);
+});
+
+// ---------------------------------------------------------------------------
+// News & blog — the public half of the feature whose authoring screens live in admin/news.php.
+//
+// Registered in this order because the router takes the first pattern that matches: an archive URL has
+// two segments after `/news`, so `/news/{slug}` could never have swallowed it — but the day somebody
+// adds a second archive shape, the order is the thing that keeps it working.
+$router->get('/news', function () {
+    render('news', ['action' => 'index']);
+});
+
+$router->get('/news/category/{slug}', function (array $params) {
+    render('news', ['action' => 'category', 'slug' => (string) $params['slug']]);
+});
+
+$router->get('/news/{slug}', function (array $params) {
+    // Deliberately NOT Analytics::recordEntityBySlug(), which every other detail route uses. That helper
+    // loads its row by slug with no church filter, and news is the one content type here whose slugs are
+    // explicitly *not* globally unique — two churches may both publish `announcement`. Its `LIMIT 1` would
+    // then be free to attribute the view to the other church's post. The post carries its own counter
+    // instead (News::countView), which is church-scoped and is the number an editor actually wants.
+    render('news-detail', ['slug' => (string) $params['slug']]);
+});
+
+// The news feed, beside the podcast feed and shaped exactly like it: served straight to the output
+// rather than through render(), because its reader is a machine and the site's layout around the XML
+// would make the document invalid.
+$router->get('/news.xml', function () {
+    require VIEWS_PATH . '/news-feed.php';
+});
+
+$router->get('/series', function () {
+    render('series');
+});
+
+$router->get('/series/{slug}', function (array $params) {
+    render('series-detail', ['slug' => $params['slug']]);
+});
+
+// The podcast feed. Served directly rather than through render(), because it is a document
+// for a machine: an RSS reader, Spotify, or Apple Podcasts. Wrapping it in the site layout
+// would put HTML around the XML and break every one of them.
+$router->get('/podcast.xml', function () {
+    require VIEWS_PATH . '/podcast.php';
+});
+
+// A human-readable page explaining how to subscribe, for people who are not podcast apps.
+$router->get('/podcast', function () {
+    render('podcast-page');
 });
 
 $router->get('/about', function () {
@@ -650,8 +1526,104 @@ $router->get('/contact', function () {
     render('contact');
 });
 
+$router->get('/testimonies', function () {
+    render('testimonies');
+});
+
+$router->post('/testimonies', function () {
+    Csrf::requireValid();
+    RateLimiter::require('testimonies', 5, 300);
+
+    $pdo = Database::getInstance()->getConnection();
+
+    $name = trim((string) ($_POST['name'] ?? ''));
+    $email = trim((string) ($_POST['email'] ?? ''));
+    $phone = trim((string) ($_POST['phone'] ?? ''));
+    $unitId = (int) ($_POST['unit_id'] ?? 0);
+    $unitId = $unitId > 0 ? $unitId : null;
+    $title = trim((string) ($_POST['title'] ?? ''));
+    $content = trim((string) ($_POST['content'] ?? ''));
+
+    if ($name === '') {
+        flash('testimony_error', 'Your full name is required.');
+        redirect('/testimonies#submit-testimony');
+    }
+    if ($title === '') {
+        flash('testimony_error', 'Please provide a title for your testimony.');
+        redirect('/testimonies#submit-testimony');
+    }
+    if ($content === '') {
+        flash('testimony_error', 'Please write your testimony details.');
+        redirect('/testimonies#submit-testimony');
+    }
+
+    $mediaUrl = null;
+    if (!empty($_FILES['media']['tmp_name']) && is_uploaded_file($_FILES['media']['tmp_name'])) {
+        $filename = MediaProcessor::processImage($_FILES['media']['tmp_name'], UPLOADS_WEBP_PATH);
+        if ($filename) {
+            $mediaUrl = 'webp/' . $filename;
+        }
+    }
+
+    $stmt = $pdo->prepare('INSERT INTO testimonies (unit_id, name, email, phone, title, content, media_url, status) VALUES (?, ?, ?, ?, ?, ?, ?, "pending")');
+    $stmt->execute([$unitId, $name, $email ?: null, $phone ?: null, $title, $content, $mediaUrl]);
+
+    flash('testimony_success', 'Thank you for sharing your praise report! Our ministry team will review it and publish it to the website shortly.');
+    redirect('/testimonies');
+});
+
 $router->get('/give', function () {
     render('give');
+});
+
+// A single campaign. Renders the same giving page in campaign mode rather than a second view, so the
+// payment flow, the forms and the validation cannot drift apart between "give" and "give to this".
+$router->get('/give/c/{slug}', function (array $params) {
+    $campaign = GivingCampaign::findBySlug((string) $params['slug']);
+    if ($campaign === null) {
+        http_response_code(404);
+        render('404');
+        return;
+    }
+    render('give', array('campaign' => $campaign));
+});
+
+// A pledge is taken on the campaign's own address rather than /give, because a promise has to be a
+// promise *about* something. The money forms still post to /give with a campaign_id, so there is one
+// payment path and only one place where a gift is recorded.
+$router->post('/give/c/{slug}', function (array $params) {
+    Csrf::requireValid();
+
+    $campaign = GivingCampaign::findBySlug((string) $params['slug']);
+    if ($campaign === null) {
+        http_response_code(404);
+        render('404');
+        return;
+    }
+
+    if (empty($_POST['pledge'])) {
+        redirect('/give/c/' . $campaign['slug']);
+    }
+
+    // Rate limited like the other public forms: a pledge creates a row somebody has to read, so an
+    // open endpoint is an invitation to fill the church's list with rubbish.
+    RateLimiter::require('pledge', 10, 600);
+
+    $result = GivingCampaign::pledge((int) $campaign['id'], array(
+        'donor_name' => (string) ($_POST['donor_name'] ?? ''),
+        'donor_email' => (string) ($_POST['donor_email'] ?? ''),
+        'donor_phone' => (string) ($_POST['donor_phone'] ?? ''),
+        'amount' => (string) ($_POST['amount'] ?? ''),
+        'promised_on' => (string) ($_POST['promised_on'] ?? ''),
+        'note' => (string) ($_POST['note'] ?? ''),
+    ));
+
+    if (empty($result['ok'])) {
+        flash('pledge_error', (string) ($result['errors'][0] ?? 'Please check the pledge form.'));
+    } else {
+        flash('pledge_ok', 'Thank you — your pledge has been recorded. It is not counted as money received; the church will see it as something promised.');
+    }
+    redirect('/give/c/' . $campaign['slug']);
 });
 
 $router->post('/give', function () {
@@ -666,20 +1638,32 @@ $router->post('/give', function () {
     $donorPhone = trim((string) ($_POST['donor_phone'] ?? ''));
     $description = trim((string) ($_POST['description'] ?? ''));
 
+    // A gift offered to a campaign is only accepted while that campaign is taking gifts. Silently
+    // recording it as general giving instead would leave the donor believing they gave to a project
+    // and the treasurer unable to tell them otherwise.
+    $campaignId = (int) ($_POST['campaign_id'] ?? 0);
+    $campaign = $campaignId > 0 ? GivingCampaign::find($campaignId) : null;
+    if ($campaignId > 0 && ($campaign === null || !GivingCampaign::acceptsGifts($campaign))) {
+        flash('give_error', $campaign === null
+            ? 'That campaign is no longer available.'
+            : 'Giving to "' . $campaign['title'] . '" has closed, so nothing was taken.');
+        redirect($campaign !== null ? '/give/c/' . $campaign['slug'] : '/give');
+    }
+
     if ($amount < 100) {
         flash('give_error', 'Giving amount must be at least ₦100.');
-        redirect('/give');
+        redirect($campaign !== null ? '/give/c/' . $campaign['slug'] : '/give');
     }
     if ($donorEmail === '' || !filter_var($donorEmail, FILTER_VALIDATE_EMAIL)) {
         flash('give_error', 'Please provide a valid email address.');
-        redirect('/give');
+        redirect($campaign !== null ? '/give/c/' . $campaign['slug'] : '/give');
     }
 
     if ($paymentMethod === 'manual_bank') {
         $fileUpload = $_FILES['receipt_file'] ?? null;
         if (!$fileUpload || empty($fileUpload['tmp_name']) || ($fileUpload['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
             flash('give_error', 'Please upload a bank transfer receipt image or PDF proof.');
-            redirect('/give');
+            redirect($campaign !== null ? '/give/c/' . $campaign['slug'] : '/give');
         }
 
         $receiptDir = UPLOADS_PATH . '/donations';
@@ -690,71 +1674,87 @@ $router->post('/give', function () {
         $ext = strtolower(pathinfo($fileUpload['name'], PATHINFO_EXTENSION));
         if (!in_array($ext, ['jpg', 'jpeg', 'png', 'webp', 'pdf'], true)) {
             flash('give_error', 'Invalid file type. Upload JPG, PNG, WebP or PDF receipt.');
-            redirect('/give');
+            redirect($campaign !== null ? '/give/c/' . $campaign['slug'] : '/give');
         }
 
         $fileName = 'receipt_' . time() . '_' . bin2hex(random_bytes(6)) . '.' . $ext;
         if (!move_uploaded_file($fileUpload['tmp_name'], $receiptDir . '/' . $fileName)) {
             flash('give_error', 'Failed to save receipt file. Please try again.');
-            redirect('/give');
+            redirect($campaign !== null ? '/give/c/' . $campaign['slug'] : '/give');
         }
 
         $ref = 'GIVE_MANUAL_' . strtoupper(bin2hex(random_bytes(6)));
-        $stmt = $pdo->prepare('INSERT INTO donations (donor_name, donor_email, donor_phone, category, amount, currency, description, payment_method, payment_status, payment_reference, receipt_path) VALUES (?, ?, ?, ?, ?, "NGN", ?, "manual_bank", "pending", ?, ?)');
-        $stmt->execute([$donorName ?: 'Anonymous Giver', $donorEmail, $donorPhone ?: null, $category, $amount, $description ?: null, $ref, 'donations/' . $fileName]);
+        $stmt = $pdo->prepare('INSERT INTO donations (donor_name, donor_email, donor_phone, category, amount, currency, description, payment_method, payment_status, payment_reference, receipt_path, campaign_id) VALUES (?, ?, ?, ?, ?, "NGN", ?, "manual_bank", "pending", ?, ?, ?)');
+        $stmt->execute([$donorName ?: 'Anonymous Giver', $donorEmail, $donorPhone ?: null, $category, $amount, $description ?: null, $ref, 'donations/' . $fileName, $campaign !== null ? (int) $campaign['id'] : null]);
 
         flash('give_success', 'Thank you! Your bank transfer receipt of ₦' . number_format($amount) . ' for ' . $category . ' has been submitted and is pending verification by our finance team.');
-        redirect('/give');
+        redirect($campaign !== null ? '/give/c/' . $campaign['slug'] : '/give');
     }
 
     // Online Payment Gateway (Payhub)
     $ref = 'GIVE_' . strtoupper(bin2hex(random_bytes(8)));
-    $stmt = $pdo->prepare('INSERT INTO donations (donor_name, donor_email, donor_phone, category, amount, currency, description, payment_method, payment_status, payment_reference) VALUES (?, ?, ?, ?, ?, "NGN", ?, "online", "pending", ?)');
-    $stmt->execute([$donorName ?: 'Anonymous Giver', $donorEmail, $donorPhone ?: null, $category, $amount, $description ?: null, $ref]);
+    $stmt = $pdo->prepare('INSERT INTO donations (donor_name, donor_email, donor_phone, category, amount, currency, description, payment_method, payment_status, payment_reference, campaign_id) VALUES (?, ?, ?, ?, ?, "NGN", ?, "online", "pending", ?, ?)');
+    $stmt->execute([$donorName ?: 'Anonymous Giver', $donorEmail, $donorPhone ?: null, $category, $amount, $description ?: null, $ref, $campaign !== null ? (int) $campaign['id'] : null]);
 
-    $apiKey = (string) setting('payhub_api_key');
-    $secKey = (string) setting('payhub_secret_key');
+    $apiKey = Payhub::publicKey();
+    $secKey = Payhub::secretKey();
 
-    if ($apiKey !== '' && $secKey !== '') {
+    if (Payhub::configured()) {
         $callbackUrl = baseUrl('payment/payhub/callback?ref=' . urlencode($ref));
-        $payhubUrl = 'https://merchant.payhub.com.ng/api/v1/checkout/initialize';
 
-        $payload = [
-            'amount' => $amount,
+        $result = Payhub::initialize([
+            // Kobo, per the gateway's documentation: `500000` is ₦5,000. This used to send naira here and
+            // kobo in the advert flow, so one of the two was always going to be a hundred times out.
+            // NAIRA, not kobo — the hosted route's unit. See Payhub::amountInNaira().
+            'amount' => Payhub::amountInNaira($amount),
             'email' => $donorEmail,
             'reference' => $ref,
             'callback_url' => $callbackUrl,
             'description' => 'Church Giving: ' . $category . ($description ? ' - ' . substr($description, 0, 80) : ''),
             'currency' => 'NGN',
-        ];
+            // Carried so the webhook can tie a transaction back to this gift even when it names a reference
+            // we have never seen — see `Payhub::metadataReference()`.
+            'metadata' => ['gift' => $category],
+        ]);
 
-        if (function_exists('curl_init')) {
-            $ch = curl_init($payhubUrl);
-            curl_setopt_array($ch, [
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_POST => true,
-                CURLOPT_POSTFIELDS => json_encode($payload),
-                CURLOPT_HTTPHEADER => [
-                    'Content-Type: application/json',
-                    'Authorization: Bearer ' . $secKey,
-                ],
-            ]);
-            $res = curl_exec($ch);
-            curl_close($ch);
-
-            $data = json_decode((string) $res, true);
-            if (!empty($data['checkout_url'])) {
-                redirect($data['checkout_url']);
-            } elseif (!empty($data['data']['authorization_url'])) {
-                redirect($data['data']['authorization_url']);
-            }
+        /*
+         * Store the reference the gateway minted, before the giver leaves for the gateway's page.
+         *
+         * PayHub ignores ours, so this is the only name the gift can be verified by afterwards — and this is
+         * the last moment at which we have it. Without it a completed gift sits at `pending` for ever: the
+         * callback URL we send is ignored along with the reference, so the giver may never come back here at
+         * all, and the webhook names a reference this row did not hold.
+         */
+        if ($result['ok'] && $result['gateway_reference'] !== '') {
+            AdPayments::recordDonationGatewayReference($ref, (string) $result['gateway_reference']);
         }
+
+        if ($result['ok'] && $result['authorization_url'] !== '') {
+            redirect($result['authorization_url']);
+        }
+
+        /*
+         * The gateway could not be reached. Say so and stop.
+         *
+         * What used to be here was a "Sandbox / fallback mode" that marked the donation **completed** and
+         * thanked the giver for money that was never taken. On any install where a giver chose online
+         * giving, the church's donation record said it had been paid. An honest dead end is the only
+         * acceptable behaviour when the alternative is a lie in the accounts.
+         */
+        $pdo->prepare('UPDATE donations SET payment_status = "failed" WHERE payment_reference = ?')->execute([$ref]);
+
+        flash('give_error', 'Online giving could not be started just now (' . $result['error'] . '). '
+            . 'Nothing has been charged. Please use the bank transfer option below, or try again in a few minutes.');
+        redirect($campaign !== null ? '/give/c/' . $campaign['slug'] : '/give');
     }
 
-    // Sandbox / fallback mode
-    $pdo->prepare('UPDATE donations SET payment_status = "completed" WHERE payment_reference = ?')->execute([$ref]);
-    flash('give_success', 'Thank you for your cheerful giving of ₦' . number_format($amount) . ' towards ' . $category . '! Your online donation has been recorded.');
-    redirect('/give');
+    // Reachable only with a crafted request: the page does not offer online giving while the gateway is
+    // unconfigured. Refused rather than recorded as a gift.
+    $pdo->prepare('UPDATE donations SET payment_status = "failed" WHERE payment_reference = ?')->execute([$ref]);
+
+    flash('give_error', 'Online giving is not available at the moment. Nothing has been charged — '
+        . 'please use the bank transfer option below.');
+    redirect($campaign !== null ? '/give/c/' . $campaign['slug'] : '/give');
 });
 
 $router->get('/live', function () {
@@ -763,6 +1763,37 @@ $router->get('/live', function () {
 
 $router->get('/prayer', function () {
     render('prayer');
+});
+
+// A prayer request taken on the page itself, so it is not lost when JavaScript
+// fails. The app and the page's remote form both use POST /api/prayer, which
+// shares PrayerWall::submit() with this handler.
+$router->post('/prayer', function () {
+    Csrf::requireValid();
+    RateLimiter::require('prayer', 10, 300);
+
+    // Honeypot: a real visitor never fills the hidden field.
+    if (trim((string) ($_POST['website'] ?? '')) !== '') {
+        redirect('/prayer');
+    }
+
+    $result = PrayerWall::submit(
+        (string) ($_POST['name'] ?? ''),
+        (string) ($_POST['email'] ?? ''),
+        (string) ($_POST['message'] ?? ''),
+        !empty($_POST['is_public']),
+        !empty($_POST['is_anonymous'])
+    );
+
+    if (isset($result['errors'])) {
+        keepFormOld($_POST);
+        flash('prayer_error', (string) ($result['errors'][0] ?? 'Please check the form.'));
+    } else {
+        clearFormOld();
+        flash('prayer_ok', 'Your prayer request has been received. Our team is praying with you.');
+    }
+
+    redirect('/prayer');
 });
 
 $router->get('/bible', function () {
@@ -1014,17 +2045,534 @@ $router->get('/search', function () {
     render('search');
 });
 
+// The language switcher. A GET that records one preference and returns to the page it was clicked on, so
+// it carries no CSRF token: it changes no data, and the worst a forged link can do is choose a language.
+$router->get('/lang/{code}', function (array $params) {
+    $code = strtolower((string) ($params['code'] ?? ''));
+
+    // An unknown code is refused rather than turned into a 404: the visitor clicked a link on a real page,
+    // so they go back to it. `remember()` checks the code against the catalogues on disk itself, so the
+    // cookie can never hold a language that `Lang::current()` would then have to ignore.
+    Lang::remember($code);
+
+    // Already reduced to a same-site path by `Lang::safeNext()` — see the note there about why a switcher
+    // that can be pointed anywhere is an open redirect.
+    redirect(Lang::safeNext($_GET['next'] ?? '/'));
+});
+
 $router->get('/sitemap.xml', function () {
     require VIEWS_PATH . '/sitemap.php';
 });
 
+// The web app manifest and the offline page — what makes the site installable to a home screen and
+// openable without a connection. Both are public on purpose: the manifest is built from this church's
+// own settings, so it cannot be a static file, and the offline page is precached by public/sw.js.
+$router->get('/manifest.webmanifest', function () {
+    require VIEWS_PATH . '/manifest.php';
+});
+
+$router->get('/offline', function () {
+    render('offline', [
+        'metaTitle' => 'Offline',
+        // Never indexed: it is a state, not a page. A search result pointing here is a dead end that
+        // says the church's site is broken.
+        'metaRobots' => 'noindex, nofollow',
+    ]);
+});
+
+// ---------------------------------------------------------------------------
+// Member accounts — the first visitor-facing logins in this project.
+//
+// Deliberately not /admin: a member session can never satisfy Auth::check(), and
+// every lookup here is tenant-scoped, so a member of one church cannot sign in on
+// another church's site. See core/MemberAuth.php for why the two are kept apart.
+// ---------------------------------------------------------------------------
+
+$router->get('/member/register', function () {
+    if (MemberAuth::check()) {
+        redirect('/member');
+    }
+    render('member/register', [
+        'metaTitle' => 'Create your account',
+        'metaRobots' => 'noindex, nofollow',
+    ]);
+});
+
+$router->post('/member/register', function () {
+    Csrf::requireValid();
+
+    // Honeypot: bots fill hidden fields, humans never see them.
+    if (trim((string) ($_POST['company'] ?? '')) !== '') {
+        redirect('/member/register?sent=1');
+    }
+
+    if (!RateLimiter::attempt('member_register', clientIp(), 5, 900)) {
+        keepFormOld($_POST);
+        flash('member_error', 'Too many attempts — please wait a few minutes and try again.');
+        redirect('/member/register');
+    }
+
+    $name = trim((string) ($_POST['name'] ?? ''));
+    $email = (string) ($_POST['email'] ?? '');
+    $phone = (string) ($_POST['phone'] ?? '');
+    $password = (string) ($_POST['password'] ?? '');
+    $confirm = (string) ($_POST['password_confirm'] ?? '');
+
+    $errors = Member::validateRegistration($name, $email, $password, $confirm);
+    if (!$errors) {
+        $result = Member::register($name, $email, $phone, $password);
+        if (!empty($result['errors'])) {
+            $errors = $result['errors'];
+        }
+    }
+
+    if ($errors) {
+        keepFormOld($_POST);
+        flash('member_error', implode(' ', $errors));
+        redirect('/member/register');
+    }
+
+    $mailSent = Member::sendVerification(Member::normaliseEmail($email), $name, (string) $result['token']);
+
+    // Sign them in rather than making them wait on an email to use what they just
+    // created — and because a broken SMTP setting would otherwise strand them.
+    MemberAuth::login((int) $result['id']);
+
+    flash('member_notice', $mailSent
+        ? 'Welcome! We have emailed you a link to confirm your address.'
+        : 'Welcome! We could not send the confirmation email — please ask an admin to check the mail settings.');
+    redirect('/member');
+});
+
+$router->get('/member/login', function () {
+    if (MemberAuth::check()) {
+        redirect('/member');
+    }
+    render('member/login', [
+        'metaTitle' => 'Sign in',
+        'metaRobots' => 'noindex, nofollow',
+    ]);
+});
+
+$router->post('/member/login', function () {
+    Csrf::requireValid();
+
+    if (!RateLimiter::attempt('member_login', clientIp(), 10, 900)) {
+        flash('member_error', 'Too many attempts — please wait a few minutes and try again.');
+        redirect('/member/login');
+    }
+
+    $email = (string) ($_POST['email'] ?? '');
+    $password = (string) ($_POST['password'] ?? '');
+
+    if (!MemberAuth::attempt($email, $password)) {
+        keepFormOld(['email' => $email]);
+        flash('member_error', 'Those details did not match an account.');
+        redirect('/member/login');
+    }
+
+    // Where they were headed, remembered by MemberAuth::requireLogin(). Only
+    // /member paths are honoured, so a tampered session value cannot turn this
+    // into an open redirect off-site.
+    $intended = (string) ($_SESSION['member_intended'] ?? '');
+    unset($_SESSION['member_intended']);
+    redirect(($intended !== '' && str_starts_with($intended, '/member')) ? $intended : '/member');
+});
+
+$router->post('/member/logout', function () {
+    Csrf::requireValid();
+    MemberAuth::logout();
+    flash('member_notice', 'You have been signed out.');
+    redirect('/');
+});
+
+$router->get('/member/verify', function () {
+    $memberId = Member::verify((string) ($_GET['token'] ?? ''));
+    if ($memberId === null) {
+        flash('member_error', 'That confirmation link is no longer valid. Sign in and we will send a fresh one.');
+        redirect('/member/login');
+    }
+    MemberAuth::login($memberId);
+    flash('member_notice', 'Your email address is confirmed. Welcome!');
+    redirect('/member');
+});
+
+$router->get('/member/forgot-password', function () {
+    render('member/forgot-password', [
+        'metaTitle' => 'Reset your password',
+        'metaRobots' => 'noindex, nofollow',
+    ]);
+});
+
+$router->post('/member/forgot-password', function () {
+    Csrf::requireValid();
+
+    if (!RateLimiter::attempt('member_forgot', clientIp(), 5, 900)) {
+        flash('member_error', 'Too many attempts — please wait a few minutes and try again.');
+        redirect('/member/forgot-password');
+    }
+
+    $email = (string) ($_POST['email'] ?? '');
+    $token = Member::issueReset($email);
+
+    if ($token !== null) {
+        $member = Member::findByEmail($email);
+        if ($member !== null) {
+            Member::sendReset(Member::normaliseEmail($email), (string) $member['name'], $token);
+        }
+    }
+
+    // The same answer whether or not the address exists: which emails are registered
+    // is not something an anonymous visitor gets to ask.
+    flash('member_notice', 'If that address has an account, a reset link is on its way.');
+    redirect('/member/forgot-password?sent=1');
+});
+
+$router->get('/member/reset-password', function () {
+    $token = (string) ($_GET['token'] ?? '');
+    render('member/reset-password', [
+        'metaTitle' => 'Choose a new password',
+        'metaRobots' => 'noindex, nofollow',
+        'token' => $token,
+        'tokenValid' => Member::tokenLooksValid($token),
+    ]);
+});
+
+$router->post('/member/reset-password', function () {
+    Csrf::requireValid();
+
+    $token = (string) ($_POST['token'] ?? '');
+    $password = (string) ($_POST['password'] ?? '');
+    $confirm = (string) ($_POST['password_confirm'] ?? '');
+
+    if (strlen($password) < 8 || $password !== $confirm) {
+        flash('member_error', 'Choose a password of at least 8 characters, and make sure both boxes match.');
+        redirect('/member/reset-password?token=' . urlencode($token));
+    }
+
+    $memberId = Member::resetPassword($token, $password);
+    if ($memberId === null) {
+        flash('member_error', 'That reset link has expired or was already used. Please request a new one.');
+        redirect('/member/forgot-password');
+    }
+
+    MemberAuth::login($memberId);
+    flash('member_notice', 'Your password has been changed.');
+    redirect('/member');
+});
+
+$router->get('/member', function () {
+    MemberAuth::requireLogin();
+    $member = MemberAuth::member();
+    if ($member === null) {
+        // Session outlived the row, or the tenant changed underneath it.
+        MemberAuth::logout();
+        redirect('/member/login');
+    }
+    $memberId = (int) $member['id'];
+    $email = (string) $member['email'];
+
+    // The reading plan, if they are on one. `next_day` is the first day they have not ticked,
+    // which is what the dashboard offers to tick — not today's date, because a plan is a list of
+    // readings rather than a calendar, and a member catching up after a week away should be
+    // offered the reading they actually stopped at.
+    $plan = ReadingPlan::currentFor($memberId);
+    $planProgress = null;
+    $planReadings = array();
+    if ($plan !== null) {
+        $planProgress = ReadingPlan::progressFor($memberId, (int) $plan['id']);
+        if ($planProgress['next_day'] !== null) {
+            $planReadings = ReadingPlan::passagesForDay((int) $plan['id'], (int) $planProgress['next_day']);
+        }
+    }
+
+    render('member/dashboard', [
+        'metaTitle' => 'My account',
+        'metaRobots' => 'noindex, nofollow',
+        'member' => $member,
+        'prefs' => Member::preferences($member),
+        'plan' => $plan,
+        'planProgress' => $planProgress,
+        'planReadings' => $planReadings,
+        'planChoices' => ReadingPlan::published(),
+        // The reads take the current fingerprint and email alongside the member id, so
+        // activity from this browser appears straight away rather than at the next
+        // sign-in when the claim runs.
+        'saved' => MemberActivity::savedPosts($memberId, Fingerprint::hash(), 24),
+        'giving' => MemberActivity::givingHistory($memberId, $email, 25),
+        'totals' => MemberActivity::givingTotals($memberId, $email),
+        'homeCell' => Member::homeCell($member),
+        // Roster invitations waiting on this member. Capped, because the dashboard is a summary —
+        // "what am I on next" rather than a full history of everything they have ever served.
+        'serving' => ServiceRoster::upcomingForMember($memberId, 5),
+        'servingPending' => ServiceRoster::pendingForMember($memberId),
+    ]);
+});
+
+$router->post('/member', function () {
+    Csrf::requireValid();
+    MemberAuth::requireLogin();
+
+    $member = MemberAuth::member();
+    if ($member === null) {
+        MemberAuth::logout();
+        redirect('/member/login');
+    }
+
+    $memberId = (int) $member['id'];
+
+    switch ((string) ($_POST['do'] ?? '')) {
+        case 'profile':
+            $phone = (string) ($_POST['phone'] ?? '');
+            $waConsent = !empty($_POST['whatsapp_consent']);
+            $previousMsisdn = (string) ($member['phone'] ?? '');
+
+            Member::updateProfile(
+                $memberId,
+                (string) ($_POST['name'] ?? $member['name']),
+                $phone,
+                !empty($_POST['sms_consent']),
+                $waConsent
+            );
+
+            // A WhatsApp broadcast only reads `wa_opt_ins`, so this tick has to reach it or
+            // it is a checkbox that changes nothing. WaCampaign owns that table, so the write
+            // sits with the read rather than being duplicated here.
+            $msisdn = Member::normalisePhone($phone);
+            if ($msisdn !== null) {
+                WaCampaign::setOptIn($msisdn, $waConsent, 'member');
+            }
+
+            // Changing to a new number must not leave the old one opted in for whoever
+            // inherits it.
+            if ($previousMsisdn !== '' && $previousMsisdn !== $msisdn) {
+                WaCampaign::setOptIn($previousMsisdn, false, 'member');
+            }
+
+            flash('member_notice', 'Your details are saved.');
+            break;
+
+        case 'prefs':
+            Member::savePreferences($memberId, (array) ($_POST['prefs'] ?? []));
+            flash('member_notice', 'Your notification choices are saved.');
+            break;
+
+        case 'serving':
+            // A member answering their own roster invitation. The ownership check lives in
+            // ServiceRoster::respondAsMember rather than here, so a guessed assignment id changes
+            // nothing and no future screen can forget to make the check itself.
+            $answer = ServiceRoster::respondAsMember(
+                $memberId,
+                (int) ($_POST['assignment_id'] ?? 0),
+                (string) ($_POST['status'] ?? '')
+            );
+
+            if (empty($answer['ok'])) {
+                flash('member_error', implode(' ', $answer['errors'] ?? array('We could not record that answer.')));
+            } else {
+                flash('member_notice', (string) ($_POST['status'] ?? '') === 'accepted'
+                    ? 'Thank you — the team can see you are coming.'
+                    : 'Thank you for saying — the team will ask somebody else.');
+            }
+            break;
+
+        case 'resend':
+            $token = Member::reissueVerification($memberId);
+            $sent = $token !== null
+                && Member::sendVerification((string) $member['email'], (string) $member['name'], $token);
+            flash($sent ? 'member_notice' : 'member_error', $sent
+                ? 'A fresh confirmation link is on its way.'
+                : 'We could not send that email — please ask an admin to check the mail settings.');
+            break;
+
+        case 'homecell':
+            // Typed rather than picked from a dropdown: this organisation has hundreds of
+            // units, and a select listing them all is unusable on a phone. Phase 6's cell
+            // finder (meeting day, address, nearest-to-me) is what replaces this.
+            $typed = Unit::nameFor((string) ($_POST['unit_name'] ?? ''));
+
+            if ($typed === '') {
+                Member::setHomeCell($memberId, null);
+                flash('member_notice', 'Your home church has been cleared.');
+                break;
+            }
+
+            $unit = Unit::findByNameAnywhere($typed);
+            if ($unit === null) {
+                flash('member_error', 'We could not find a church called "' . $typed . '". Check the spelling, or ask an admin to add it.');
+                break;
+            }
+
+            if (!Member::setHomeCell($memberId, (int) $unit['id'])) {
+                flash('member_error', 'That name matches a group rather than one church. Please type the church itself.');
+                break;
+            }
+
+            flash('member_notice', 'Your home church is saved.');
+            break;
+    }
+
+    redirect('/member');
+});
+
+// The whole plan on one page. Every day is a checkbox in a single form, because the form replaces
+// the member's set of read days wholesale — that is what makes unticking work — and a form that
+// only covered one page of days would clear every day on the others.
+$router->get('/member/plan', function () {
+    MemberAuth::requireLogin();
+    $member = MemberAuth::member();
+    if ($member === null) {
+        MemberAuth::logout();
+        redirect('/member/login');
+    }
+
+    $plan = ReadingPlan::currentFor((int) $member['id']);
+    if ($plan === null) {
+        // The picker lives on the dashboard, so there is nothing to show here yet.
+        redirect('/member');
+    }
+
+    render('member/plan', [
+        'metaTitle' => $plan['name'],
+        'metaRobots' => 'noindex, nofollow',
+        'member' => $member,
+        'plan' => $plan,
+        'progress' => ReadingPlan::progressFor((int) $member['id'], (int) $plan['id']),
+        'days' => ReadingPlan::days((int) $plan['id']),
+        'read' => ReadingPlan::completedDays((int) $member['id'], (int) $plan['id']),
+    ]);
+});
+
+$router->post('/member/plan', function () {
+    Csrf::requireValid();
+    MemberAuth::requireLogin();
+
+    $member = MemberAuth::member();
+    if ($member === null) {
+        MemberAuth::logout();
+        redirect('/member/login');
+    }
+    $memberId = (int) $member['id'];
+
+    switch ((string) ($_POST['do'] ?? '')) {
+        case 'join':
+            // 0 means "leave", and is allowed: progress is kept, so coming back finds their place.
+            $planId = (int) ($_POST['plan_id'] ?? 0);
+            if ($planId > 0 && ReadingPlan::find($planId) === null) {
+                flash('member_error', 'That reading plan is no longer available.');
+                break;
+            }
+            ReadingPlan::join($memberId, $planId);
+            flash('member_notice', $planId > 0
+                ? 'You are now following that plan.'
+                : 'You have left the plan. Your progress has been kept.');
+            break;
+
+        case 'tick':
+            // Marks one day and nothing else, so the quick action on the dashboard can never
+            // untick something by omission.
+            $plan = ReadingPlan::currentFor($memberId);
+            if ($plan === null) {
+                flash('member_error', 'Choose a reading plan first.');
+                break;
+            }
+            $day = (int) ($_POST['day'] ?? 0);
+            if ($day < 1 || $day > (int) $plan['days_count']) {
+                flash('member_error', 'That is not a day of this plan.');
+                break;
+            }
+            ReadingPlan::markRead($memberId, (int) $plan['id'], $day);
+            flash('member_notice', 'Day ' . $day . ' is marked as read.');
+            break;
+
+        case 'days':
+            $plan = ReadingPlan::currentFor($memberId);
+            if ($plan === null) {
+                flash('member_error', 'Choose a reading plan first.');
+                break;
+            }
+            $planId = (int) $plan['id'];
+            $total = (int) $plan['days_count'];
+
+            // Whatever was submitted is the whole truth. Out-of-range values are dropped rather
+            // than trusted, so a hand-edited form cannot mark day 9000 or reach another plan.
+            $wanted = array();
+            foreach ((array) ($_POST['days'] ?? array()) as $day) {
+                $day = (int) $day;
+                if ($day >= 1 && $day <= $total) {
+                    $wanted[$day] = $day;
+                }
+            }
+
+            $already = ReadingPlan::completedDays($memberId, $planId);
+            foreach ($wanted as $day) {
+                if (!isset($already[$day])) {
+                    ReadingPlan::markRead($memberId, $planId, $day);
+                }
+            }
+            foreach ($already as $day) {
+                if (!isset($wanted[$day])) {
+                    ReadingPlan::unmarkRead($memberId, $planId, $day);
+                }
+            }
+
+            flash('member_notice', count($wanted) . ' day' . (count($wanted) === 1 ? '' : 's') . ' marked as read.');
+            redirect('/member/plan');
+
+        default:
+            break;
+    }
+
+    redirect('/member/plan');
+});
+
+$router->get('/devotional', function () {
+    render('devotional', [
+        'metaTitle' => 'Daily Devotional',
+        'metaDescription' => 'A short devotional for each day from ' . setting('site_title') . '.',
+        'date' => null,
+    ]);
+});
+
+// A permalink per day, so a devotional can be shared on WhatsApp or read again later without
+// hunting through the archive. A malformed date is a 404 rather than a page for today, which
+// would quietly hand back the wrong entry under the right-looking URL.
+$router->get('/devotional/{date}', function (array $params) {
+    $date = (string) ($params['date'] ?? '');
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) || strtotime($date) === false) {
+        http_response_code(404);
+        render('404');
+        return;
+    }
+    render('devotional', [
+        'metaTitle' => 'Devotional for ' . date('j F Y', strtotime($date)),
+        'metaRobots' => 'noindex, follow',
+        'date' => $date,
+    ]);
+});
+
+// The site icon. A route rather than a file on disk on purpose: a real
+// public/favicon.ico is served by the web server ahead of the front controller
+// (.htaccess and public/router.php both skip existing files), which is why every
+// site built from this code showed the same icon no matter what was uploaded.
+// Do not add that file back — deleting it is what makes this reachable.
 $router->get('/favicon.ico', function () {
-    $path = setting('favicon_path');
-    if ($path && is_file(UPLOADS_PATH . '/' . $path)) {
-        header('Content-Type: image/webp');
+    $path = (string) (setting('favicon_path') ?? '');
+    if ($path !== '' && is_file(UPLOADS_PATH . '/' . $path)) {
+        // processImage() stores WebP, but the type comes from the extension so a
+        // differently stored icon still declares itself correctly.
+        $types = [
+            'webp' => 'image/webp', 'png' => 'image/png', 'jpg' => 'image/jpeg',
+            'jpeg' => 'image/jpeg', 'gif' => 'image/gif', 'svg' => 'image/svg+xml',
+            'ico' => 'image/x-icon',
+        ];
+        $ext = strtolower((string) pathinfo($path, PATHINFO_EXTENSION));
+        header('Content-Type: ' . ($types[$ext] ?? 'application/octet-stream'));
         header('Cache-Control: public, max-age=86400');
         readfile(UPLOADS_PATH . '/' . $path);
         exit;
     }
-    MediaProcessor::renderDynamicFavicon(setting('site_title', 'C'));
+    // Nothing uploaded yet: a generated letter tile from the church's initial, so a
+    // new site shows its own mark instead of the browser's blank placeholder.
+    MediaProcessor::renderDynamicFavicon((string) setting('site_title', 'C'));
 });

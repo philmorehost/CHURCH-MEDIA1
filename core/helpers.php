@@ -25,9 +25,29 @@ if (!function_exists('str_ends_with')) {
     }
 }
 
-function e(?string $value): string
+/**
+ * HTML-escapes a value for output.
+ *
+ * This accepts the scalars a template actually holds, numbers included, because
+ * `declare(strict_types=1)` is on everywhere and a `?string` parameter turns `e(42)` into a
+ * TypeError. A page whose only sin is printing a count should not die.
+ *
+ * It also defuses a PHP trap that did exactly that: array keys which look like integers *are*
+ * integers, so `['7' => 'Last 7 days']` hands a foreach an `int`, and `e($key)` took the whole
+ * analytics dashboard down with it.
+ *
+ * Arrays and objects still fail, and loudly. Rendering the word "Array" would hide the mistake
+ * rather than surface it.
+ */
+function e($value): string
 {
-    return htmlspecialchars($value ?? '', ENT_QUOTES, 'UTF-8');
+    if ($value === null) {
+        return '';
+    }
+    if (!is_scalar($value)) {
+        throw new InvalidArgumentException('e() expects a scalar or null; ' . gettype($value) . ' given.');
+    }
+    return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
 }
 
 function clientIp(): string
@@ -39,8 +59,25 @@ function clientIp(): string
 
 function baseUrl(string $path = ''): string
 {
+    $host = $_SERVER['HTTP_HOST'] ?? '';
+
+    // A shell has no Host header, so every absolute link built in a cron came out as
+    // `http://localhost/...` — which is what the daily publisher report's portal link did. Fall back to
+    // the church being served, whose `domain` is what the site is actually reachable at. Web requests are
+    // untouched: they always have a Host.
+    if ($host === '' && class_exists('Tenant')) {
+        $tenantId = Tenant::id();
+        if ($tenantId !== null) {
+            $church = Tenant::find((int) $tenantId);
+            $host = (string) ($church['domain'] ?? '');
+        }
+    }
+
     $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    if ($host === '') {
+        $host = 'localhost';
+    }
+
     return $scheme . '://' . $host . '/' . ltrim($path, '/');
 }
 
@@ -80,6 +117,41 @@ function uploadUrl(?string $path): ?string
         return $path;
     }
     return baseUrl('uploads/' . ltrim($path, '/'));
+}
+
+/**
+ * The markup for a hero background photo — two elements, never one.
+ *
+ * A hero fills the viewport, so on a phone it is very tall and very narrow (roughly
+ * 375 x 709). A landscape photo cannot fill a box like that without being blown up until
+ * almost all of it is off-screen: a 2:1 photo at 375px wide is only 188px tall, so
+ * `object-fit: cover` would scale it to 709px tall, giving a 1,418px-wide image of which
+ * just 375px — 26% — is visible. The church uploads a picture of the congregation and sees
+ * a zoomed crop of the middle of it.
+ *
+ * So the photo is never asked to fill the box. The whole thing is shown, complete, over a
+ * blurred copy of itself, which keeps the hero looking deliberate rather than like a
+ * photo floating on a background. Nothing the church uploads is ever lost, at any screen
+ * size, whatever shape their picture is.
+ *
+ * The blurred layer is decorative: it is hidden from assistive technology and carries no
+ * alt text, and the real alt belongs to the sharp copy. Both are the same URL, so the
+ * browser fetches it once.
+ *
+ * @param string $alt     Meaningful alt for the photo; empty for a purely decorative one.
+ * @param string $loading 'eager' for the first hero on a page, otherwise 'lazy'.
+ */
+function heroPhotoMarkup(?string $src, string $alt = '', string $loading = 'eager'): string
+{
+    if (!$src) {
+        return '';
+    }
+
+    $safeSrc = e($src);
+
+    return '<img class="hero-img-blur" src="' . $safeSrc . '" alt="" aria-hidden="true" loading="' . e($loading) . '" decoding="async">'
+        . '<img class="hero-img-contain" src="' . $safeSrc . '" alt="' . e($alt) . '" loading="' . e($loading) . '" decoding="async"'
+        . ($loading === 'eager' ? ' fetchpriority="high"' : '') . '>';
 }
 
 function redirect(string $path)
@@ -228,31 +300,186 @@ function strongEnoughPassword(string $pw): bool
     return cpanelPasswordScore($pw) >= 65;
 }
 
-/** Lazily loads the single settings row and caches it for the request. */
+/**
+ * Lazily loads settings for the current tenant and caches them for the request.
+ *
+ * Resolution order, each layer overriding the last: config/site.php defaults →
+ * the shared `settings` row (tenant_id IS NULL) → this tenant's own row. A
+ * single-church install keeps one shared row and behaves exactly as before; a
+ * tenant only stores the handful of values that differ (site title, branding,
+ * SMS credentials, …).
+ */
 function settings(): array
 {
-    static $cache = null;
-    if ($cache !== null) {
-        return $cache;
+    $tenantId = class_exists('Tenant') ? Tenant::id() : null;
+
+    if (isset($GLOBALS['__settings_cache']) && ($GLOBALS['__settings_cache_tenant'] ?? 'unset') === $tenantId) {
+        return $GLOBALS['__settings_cache'];
     }
+    $GLOBALS['__settings_cache_tenant'] = $tenantId;
+
     $defaults = require CONFIG_PATH . '/site.php';
     if (!defined('APP_IS_INSTALLED') || !APP_IS_INSTALLED) {
-        return $cache = $defaults;
+        return $GLOBALS['__settings_cache'] = $defaults;
     }
+
     try {
-        $row = Database::getInstance()->getConnection()
-            ->query('SELECT * FROM settings ORDER BY id ASC LIMIT 1')
-            ->fetch();
-        $cache = $row ? array_merge($defaults, array_filter($row, fn ($v) => $v !== null)) : $defaults;
+        $pdo = Database::getInstance()->getConnection();
+        $merged = $defaults;
+
+        $shared = $pdo->query('SELECT * FROM settings WHERE tenant_id IS NULL ORDER BY id ASC LIMIT 1')->fetch();
+        if ($shared) {
+            $merged = array_merge($merged, array_filter($shared, fn ($v) => $v !== null));
+        }
+
+        if ($tenantId !== null) {
+            $stmt = $pdo->prepare('SELECT * FROM settings WHERE tenant_id = ? ORDER BY id ASC LIMIT 1');
+            $stmt->execute([$tenantId]);
+            $own = $stmt->fetch();
+            if ($own) {
+                $merged = array_merge($merged, array_filter($own, fn ($v) => $v !== null));
+            }
+        }
+
+        $GLOBALS['__settings_cache'] = $merged;
     } catch (Throwable $e) {
-        $cache = $defaults;
+        $GLOBALS['__settings_cache'] = $defaults;
     }
-    return $cache;
+    return $GLOBALS['__settings_cache'];
+}
+
+/** Drops the cached settings so a read after a write in the same request is accurate. */
+function settingsForget(): void
+{
+    unset($GLOBALS['__settings_cache'], $GLOBALS['__settings_cache_tenant']);
 }
 
 function setting(string $key, $default = null)
 {
     return settings()[$key] ?? $default;
+}
+
+/**
+ * The short label for a church, for the line under a home-screen icon.
+ *
+ * Used by `views/manifest.php` for `short_name` and by the layout for the `apple-mobile-web-app-title`
+ * meta tag, and it lives here because those two have to agree. A launcher gives `short_name` a narrow
+ * strip and truncates whatever does not fit; iOS ignores the manifest for the home-screen name and uses
+ * the meta tag instead. Church-shaped names ("Grace and Life Assembly, Ikorodu") are long, so without
+ * the trim an icon ends up captioned "Grace and Life Ass…".
+ *
+ * The tagline is the natural source — it is written to be short — and the church's own name is the
+ * fallback. `mb_strimwidth` with an empty suffix trims rather than adding an ellipsis, because a
+ * launcher would then truncate the ellipsis too.
+ */
+function appShortName(): string
+{
+    $s = settings();
+
+    $name = trim((string) ($s['site_title'] ?? ''));
+    if ($name === '') {
+        $name = 'Church';
+    }
+
+    $short = trim((string) ($s['site_tagline'] ?? ''));
+    if ($short === '') {
+        $short = $name;
+    }
+
+    return trim(mb_strimwidth($short, 0, 12, ''));
+}
+
+/**
+ * Translates a key into the language this visitor is reading.
+ *
+ * `:name` placeholders are substituted from `$vars`, and they are placeholders rather than
+ * concatenation on purpose: "© 2026 Grace Church" is a different word order in most languages, and a
+ * translator who can move `:church` and `:year` around does not need the code changed.
+ *
+ * A key with no translation anywhere returns **the key itself**, never an empty string. An empty label
+ * is invisible and looks like a layout bug; `footer.explore` in a footer is unmistakable, appears in a
+ * screenshot, and can be grepped.
+ *
+ * The return value is trusted text from a file in this repository, exactly like the view that echoes it,
+ * but it still belongs inside `e()` at the point of output — the same rule as every other string here.
+ */
+function t(string $key, array $vars = []): string
+{
+    return class_exists('Lang') ? Lang::translate($key, $vars) : $key;
+}
+
+/**
+ * Writes settings for the current tenant.
+ *
+ * Creates the tenant's own `settings` row on first write and updates it after
+ * that, so a tenant only ever stores the values that differ from the shared
+ * defaults row. Column names come from our own code, never from request input.
+ *
+ * Note: this writes **this church's** row, creating it on first save. Every screen that writes a
+ * setting now goes through it — branding, general settings, ads, analytics, comments, devotionals,
+ * roster, and the SMS and WhatsApp screens — so a church can no longer change a value that every other
+ * church inherits. The shared row (`tenant_id IS NULL`) is written only by the installer, before any
+ * church exists.
+ */
+function settingSave(array $values): bool
+{
+    $values = array_filter($values, static fn ($key): bool => is_string($key), ARRAY_FILTER_USE_KEY);
+    if (!$values) {
+        return false;
+    }
+
+    $pdo = Database::getInstance()->getConnection();
+    $tenantId = class_exists('Tenant') ? Tenant::id() : null;
+
+    if ($tenantId === null) {
+        $row = $pdo->query('SELECT id FROM settings WHERE tenant_id IS NULL ORDER BY id ASC LIMIT 1')->fetch();
+    } else {
+        $lookup = $pdo->prepare('SELECT id FROM settings WHERE tenant_id = ? ORDER BY id ASC LIMIT 1');
+        $lookup->execute([$tenantId]);
+        $row = $lookup->fetch();
+    }
+
+    $columns = array_keys($values);
+    $params = array_values($values);
+
+    if ($row) {
+        $set = implode(', ', array_map(static fn (string $c): string => '`' . $c . '` = ?', $columns));
+        $params[] = (int) $row['id'];
+        $pdo->prepare('UPDATE settings SET ' . $set . ' WHERE id = ?')->execute($params);
+    } else {
+        $cols = implode(', ', array_map(static fn (string $c): string => '`' . $c . '`', $columns));
+        $marks = implode(', ', array_fill(0, count($columns), '?'));
+        $pdo->prepare('INSERT INTO settings (tenant_id, ' . $cols . ') VALUES (?, ' . $marks . ')')
+            ->execute(array_merge([$tenantId], $params));
+    }
+
+    settingsForget();
+    return true;
+}
+
+/**
+ * The clause that confines a query to the church being served, plus the parameters that go with it.
+ *
+ * `tenant_id IS NULL` is the platform-wide scope, the same convention `settings()` uses for its shared
+ * row, and it applies only when nothing resolves to a church at all. Every SMS screen builds its
+ * single-row lookups and its listings from this one rule, so the two cannot disagree.
+ *
+ * This exists because they did disagree. Each screen checked the admin's *unit* scope and treated a row
+ * with no unit as "shared with the whole church" — but never checked the church itself, so a unit-less
+ * sender ID, campaign, group or template belonging to another church could be read, re-checked, edited
+ * and deleted simply by posting its id.
+ *
+ * @param  int|null $tenantId  the church, or null to resolve the one being served
+ * @param  string   $column    the tenant column, for a query that aliases its table
+ * @return array{0:string,1:array<int,int>}  the SQL fragment, then the parameters that go with it
+ */
+function tenantScope(?int $tenantId = null, string $column = 'tenant_id'): array
+{
+    $resolved = $tenantId ?? (class_exists('Tenant') ? Tenant::id() : null);
+
+    return $resolved === null
+        ? [$column . ' IS NULL', []]
+        : [$column . ' = ?', [$resolved]];
 }
 
 function flash(string $key, ?string $message = null): ?string
@@ -417,8 +644,8 @@ function formFieldOptions(array $field): array
 }
 
 /**
- * Splits "Province > Zone > Area > Parish" path lines into nested path arrays.
- * Used by the cascading-dropdown field type ('cascade').
+ * Splits "Province > Zone > Area > Parish" style path lines into nested path
+ * arrays. Used by the cascading-dropdown field type ('cascade').
  */
 function formCascadeOptions(array $field): array
 {
@@ -439,8 +666,8 @@ function formCascadePaths(array $field): array
 }
 
 /**
- * Full "Province > Zone > Area > Parish" paths for every church in the org
- * hierarchy (leaves only). Powers the auto church-list field ('church').
+ * Full "A > B > C" paths for every church in the org hierarchy (leaves only),
+ * using the configured level names. Powers the auto church-list field ('church').
  */
 function churchCascadePaths(): array
 {
@@ -628,7 +855,7 @@ function renderPageSections(array $sections): void
                 $img = !empty($section['image']) ? uploadUrl((string) $section['image']) : null;
                 echo '<section class="page-hero' . ($img ? ' has-img' : '') . '">';
                 if ($img) {
-                    echo '<img src="' . e($img) . '" alt="' . e((string) ($section['alt'] ?? '')) . '" loading="eager">';
+                    echo heroPhotoMarkup($img, (string) ($section['alt'] ?? ''));
                     echo '<div class="page-hero-shade"></div>';
                 }
                 echo '<div class="page-hero-inner">';
@@ -664,15 +891,25 @@ function renderPageSections(array $sections): void
                 if (!empty($section['heading'])) {
                     echo '<div class="section-head"><span class="eyebrow">' . e((string) ($section['eyebrow'] ?? '')) . '</span><h2>' . e((string) $section['heading']) . '</h2></div>';
                 }
-                $n = min(4, max(1, count($cols)));
+                $layoutCols = !empty($section['layout_columns']) ? (int) $section['layout_columns'] : count($cols);
+                $n = min(4, max(1, $layoutCols));
                 echo '<div class="grid grid-' . $n . '">';
                 foreach ($cols as $col) {
-                    echo '<div class="glass-card" style="padding:26px;">';
+                    $colImage = !empty($col['image']) ? uploadUrl((string) $col['image']) : '';
+                    echo '<div class="glass-card cms-card">';
+                    if ($colImage !== '') {
+                        echo '<div class="cms-card-media"><img src="' . e($colImage) . '" alt="' . e((string) ($col['alt'] ?? '')) . '" loading="lazy" decoding="async"></div>';
+                    }
+                    echo '<div class="cms-card-body">';
                     if (!empty($col['heading'])) {
-                        echo '<h3 style="margin:0 0 10px;">' . e((string) $col['heading']) . '</h3>';
+                        echo '<h3 class="cms-card-title">' . e((string) $col['heading']) . '</h3>';
                     }
                     if (!empty($col['body'])) {
-                        echo '<p style="color:var(--ink-dim); margin:0;">' . nl2br(e((string) $col['body'])) . '</p>';
+                        echo '<p class="cms-card-text">' . nl2br(e((string) $col['body'])) . '</p>';
+                    }
+                    echo '</div>';
+                    if (!empty($col['link'])) {
+                        echo '<div class="cms-card-foot"><a href="' . e((string) $col['link']) . '" class="btn sm secondary">Learn More →</a></div>';
                     }
                     echo '</div>';
                 }

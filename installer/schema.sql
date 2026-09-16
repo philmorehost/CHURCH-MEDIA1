@@ -3,9 +3,34 @@
 
 SET NAMES utf8mb4;
 
+-- SaaS tenants. A tenant is one church organisation; the installer seeds a
+-- single default tenant, so a single-church install behaves exactly as before.
+-- Tables added from the SaaS work onward carry `tenant_id`; the older content
+-- tables are still single-tenant and are migrated in the Phase 7 rollout.
+CREATE TABLE IF NOT EXISTS `tenants` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `name` VARCHAR(150) NOT NULL,
+  `slug` VARCHAR(80) NOT NULL,
+  `domain` VARCHAR(190) NULL COMMENT 'Full host match, e.g. yaya.example.org',
+  `subdomain` VARCHAR(80) NULL COMMENT 'Leading label match, e.g. yaya',
+  `logo_path` VARCHAR(255) NULL,
+  `primary_colour` VARCHAR(20) NULL,
+  `plan` VARCHAR(40) NOT NULL DEFAULT 'standard',
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `is_default` TINYINT(1) NOT NULL DEFAULT 0,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_tenant_slug` (`slug`),
+  UNIQUE KEY `uniq_tenant_domain` (`domain`),
+  UNIQUE KEY `uniq_tenant_subdomain` (`subdomain`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO `tenants` (`id`, `name`, `slug`, `is_default`)
+VALUES (1, 'Default Church', 'default', 1);
+
 CREATE TABLE IF NOT EXISTS `settings` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
-  `site_title` VARCHAR(255) NOT NULL DEFAULT 'Grace & Life Church',
+  `tenant_id` INT NULL COMMENT 'NULL = shared defaults; otherwise this row overrides them for one tenant',
+  `site_title` VARCHAR(255) NOT NULL DEFAULT 'Church Media',
   `site_tagline` VARCHAR(255) NULL,
   `logo_path` VARCHAR(255) NULL,
   `favicon_path` VARCHAR(255) NULL,
@@ -40,6 +65,13 @@ CREATE TABLE IF NOT EXISTS `settings` (
   `app_download_url` VARCHAR(500) NULL,
   `app_download_pages` TEXT NULL COMMENT "'all' or comma-separated page paths",
   `app_redirect_mode` VARCHAR(12) NOT NULL DEFAULT 'off' COMMENT 'off | interstitial | force',
+  `payhub_enabled` TINYINT(1) NOT NULL DEFAULT 0,
+  `payhub_public_key` VARCHAR(255) NULL,
+  `payhub_secret_key` VARCHAR(255) NULL COMMENT 'Server-side only; never rendered and never sent to a browser',
+  `manual_payment_enabled` TINYINT(1) NOT NULL DEFAULT 1,
+  `manual_payment_instructions` TEXT NULL COMMENT "The church's own bank details, shown to an advertiser paying by transfer",
+  `ad_display_frequency` VARCHAR(20) NOT NULL DEFAULT '5_min',
+  `free_ad_frequency` VARCHAR(20) NOT NULL DEFAULT 'once_daily',
   `footer_about_text` TEXT NULL,
   `meta_description` VARCHAR(255) NULL,
   `bible_source` VARCHAR(20) NOT NULL DEFAULT 'keyless' COMMENT 'keyless or api_bible',
@@ -57,19 +89,87 @@ CREATE TABLE IF NOT EXISTS `settings` (
   `email_domain` VARCHAR(190) NULL COMMENT 'Domain used for auto-created church admin emails',
   `email_default_quota` INT NOT NULL DEFAULT 500 COMMENT 'MB',
   `license_key` VARCHAR(120) NULL,
+  `comments_moderation` VARCHAR(20) NOT NULL DEFAULT 'off' COMMENT 'off|all|links|words — how much is held for review',
+  `comments_flag_threshold` INT NOT NULL DEFAULT 3 COMMENT 'Reader reports before a comment is auto-flagged',
+  `analytics_enabled` TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'Collect anonymous traffic analytics',
+  `analytics_retention_days` INT NOT NULL DEFAULT 180 COMMENT 'Days of raw events kept; daily roll-ups are kept forever',
+  `backup_retention_days` INT NOT NULL DEFAULT 14 COMMENT 'Newest N backups kept; 0 turns pruning off',
+  `backup_offsite_path` VARCHAR(255) NULL COMMENT 'Directory copied to after each backup; empty = none',
+  `sms_token` TEXT NULL COMMENT 'PhilmoreSMS API token, encrypted at rest - never logged or rendered in full',
+  `sms_default_country` VARCHAR(4) NOT NULL DEFAULT '234' COMMENT 'Dial code used when a number is written in local form',
+  `sms_default_sender_id` VARCHAR(11) NULL COMMENT 'Must be approved at the gateway before it will send',
+  `sms_sender_display_name` VARCHAR(60) NULL COMMENT 'Shown as the sender name on the handset, where the network supports it',
+  `sms_quiet_start` TINYINT NOT NULL DEFAULT 7 COMMENT 'Hour sending may begin, site time',
+  `sms_quiet_end` TINYINT NOT NULL DEFAULT 20 COMMENT 'Hour sending must stop, site time',
+  `sms_daily_unit_cap` INT NOT NULL DEFAULT 0 COMMENT '0 = no cap',
+  `sms_sender_cap` INT NOT NULL DEFAULT 0 COMMENT 'Max sender IDs one church may register; 0 = no cap',
+  `sms_batch_size` INT NOT NULL DEFAULT 100 COMMENT 'Recipients per gateway call',
+  `sms_allow_unit_sending` TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'Whether a scoped church may send at all',
+  `sms_optout_footer` VARCHAR(160) NOT NULL DEFAULT 'Reply STOP to opt out.',
+  `sms_log_retention_days` INT NOT NULL DEFAULT 30,
+  `devotional_push_enabled` TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'Whether the daily devotional notification is sent',
+  `reading_reminder_enabled` TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'Whether the daily reading-plan reminder is sent',
+  `roster_reminder_enabled` TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'Whether rota notices and day-before reminders are emailed',
+  `wa_enabled` TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'WhatsApp Cloud API, official only',
+  `wa_phone_number_id` VARCHAR(40) NULL,
+  `wa_business_account_id` VARCHAR(40) NULL,
+  `wa_access_token` TEXT NULL COMMENT 'Encrypted at rest; never logged or rendered in full',
+  `wa_app_secret` TEXT NULL COMMENT 'Encrypted at rest; used to sign the webhook payload',
+  `wa_verify_token` VARCHAR(120) NULL COMMENT 'Echoed back during Meta webhook verification',
+  `wa_display_name` VARCHAR(60) NULL,
+  `wa_default_language` VARCHAR(12) NOT NULL DEFAULT 'en',
+  `wa_log_retention_days` INT NOT NULL DEFAULT 60,
+  `wa_daily_message_cap` INT NOT NULL DEFAULT 250,
+  `wa_send_delay_ms` INT NOT NULL DEFAULT 250,
+  `wa_batch_size` INT NOT NULL DEFAULT 50,
+  `wa_allow_unit_broadcast` TINYINT(1) NOT NULL DEFAULT 1,
   `timezone` VARCHAR(64) NOT NULL DEFAULT 'Africa/Lagos',
-  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  `default_locale` VARCHAR(12) NOT NULL DEFAULT 'en' COMMENT 'Catalogue code from lang/, e.g. en or yo',
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_settings_tenant` (`tenant_id`),
+  FOREIGN KEY (`tenant_id`) REFERENCES `tenants`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Province → Zone → Area → Parish hierarchy (posts tag to a parish and roll up).
+-- Configurable hierarchy levels. `type` is the stable key stored in
+-- org_units.type; label/plural are shown to admins and sort_order is the depth
+-- (1 = top level). The super admin can rename, reorder, add or remove levels.
+CREATE TABLE IF NOT EXISTS `unit_levels` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `type` VARCHAR(40) NOT NULL,
+  `label` VARCHAR(60) NOT NULL,
+  `plural` VARCHAR(60) NOT NULL,
+  `sort_order` INT NOT NULL DEFAULT 0,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_unit_level_type` (`type`),
+  UNIQUE KEY `uniq_unit_level_sort` (`sort_order`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO `unit_levels` (`type`, `label`, `plural`, `sort_order`) VALUES
+  ('province', 'Province', 'Provinces', 1),
+  ('zone', 'Zone', 'Zones', 2),
+  ('area', 'Area', 'Areas', 3),
+  ('parish', 'Parish', 'Parishes', 4);
+
+-- Church hierarchy (posts tag to a leaf unit and roll up through its ancestors).
+-- `type` is a VARCHAR key into unit_levels so levels stay configurable.
 CREATE TABLE IF NOT EXISTS `org_units` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `parent_id` INT NULL,
-  `type` ENUM('province','zone','area','parish') NOT NULL,
+  `tenant_id` INT NOT NULL DEFAULT 0 COMMENT '0 = no church assigned; otherwise Tenant::id(). The church whose hierarchy this unit is part of.',
+  `type` VARCHAR(40) NOT NULL,
   `name` VARCHAR(150) NOT NULL,
   `slug` VARCHAR(160) NULL UNIQUE,
   `sort_order` INT NOT NULL DEFAULT 0,
+  `meeting_day` VARCHAR(12) NULL COMMENT 'Sunday..Saturday, or NULL when this unit does not meet as a cell',
+  `meeting_time` VARCHAR(12) NULL COMMENT 'Free text, e.g. "6:30 PM" — see HomeCell for why this is not a TIME',
+  `meeting_address` VARCHAR(255) NULL,
+  `leader_name` VARCHAR(150) NULL,
+  `leader_phone` VARCHAR(32) NULL COMMENT 'Normalised dial code + number. Collected always, published only when leader_phone_public = 1',
+  `leader_phone_public` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '0 = never shown on the public finder, even if a number is stored',
+  `capacity` INT NULL COMMENT 'How many people the meeting place holds; NULL = not recorded',
+  `cell_is_public` TINYINT(1) NOT NULL DEFAULT 1 COMMENT '0 hides this cell from the public finder without deleting anything',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_unit_tenant` (`tenant_id`),
   FOREIGN KEY (`parent_id`) REFERENCES `org_units`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -79,6 +179,8 @@ CREATE TABLE IF NOT EXISTS `users` (
   `username` VARCHAR(100) NOT NULL UNIQUE,
   `email` VARCHAR(150) NOT NULL UNIQUE,
   `alt_email` VARCHAR(190) NULL,
+  `phone` VARCHAR(32) NULL COMMENT 'Normalised dial code + national number, e.g. 2348031234567. Set by the user or an admin.',
+  `sms_consent` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 = this person agreed to receive text messages on that number',
   `password` VARCHAR(255) NOT NULL,
   `unblock_pin_hash` VARCHAR(255) NULL,
   `reset_otp` VARCHAR(10) NULL,
@@ -86,6 +188,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   `role` ENUM('admin','media_team','editor') NOT NULL DEFAULT 'media_team',
   `is_super_admin` TINYINT(1) NOT NULL DEFAULT 0,
   `org_unit_id` INT NULL,
+  `tenant_id` INT NOT NULL DEFAULT 0 COMMENT '0 = no church assigned; otherwise Tenant::id(). Super admins are platform-wide.',
   `is_suspended` TINYINT(1) NOT NULL DEFAULT 0,
   `notify_on_login` TINYINT(1) NOT NULL DEFAULT 1,
   `bio` TEXT NULL,
@@ -93,6 +196,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   `last_login_at` TIMESTAMP NULL,
   `last_login_ip` VARCHAR(45) NULL,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_user_tenant` (`tenant_id`),
   FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -110,6 +214,7 @@ CREATE TABLE IF NOT EXISTS `pending_registrations` (
   `area_id` INT NULL,
   `parish_name` VARCHAR(150) NULL,
   `parish_id` INT NULL,
+  `unit_path` TEXT NULL COMMENT 'JSON [{level,id}] - the chosen chain at any depth',
   `role` VARCHAR(20) NOT NULL DEFAULT 'admin',
   `alt_email` VARCHAR(190) NULL COMMENT 'Optional backup inbox; used as the corporate email forwarder',
   `password_enc` TEXT NULL COMMENT 'Encrypted plaintext password, used to create the cPanel email on approval',
@@ -217,8 +322,10 @@ CREATE TABLE IF NOT EXISTS `post_saves` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `media_post_id` INT NOT NULL,
   `fingerprint_hash` VARCHAR(64) NOT NULL,
+  `member_id` INT NULL COMMENT 'Set once the anonymous saver signs in, so bookmarks survive a change of device',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY `uniq_save_post_fingerprint` (`media_post_id`, `fingerprint_hash`),
+  INDEX `idx_save_member` (`member_id`),
   FOREIGN KEY (`media_post_id`) REFERENCES `media_posts`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -232,11 +339,20 @@ CREATE TABLE IF NOT EXISTS `post_comments` (
   `likes_count` INT NOT NULL DEFAULT 0,
   `fingerprint_hash` VARCHAR(64) NULL,
   `is_published` TINYINT(1) NOT NULL DEFAULT 1,
+  `status` ENUM('approved','pending','rejected','spam') NOT NULL DEFAULT 'approved' COMMENT 'Moderation state; existing rows stay visible', 
+  `moderated_by` INT NULL,
+  `moderated_at` DATETIME NULL,
+  `moderator_note` VARCHAR(255) NULL,
+  `report_count` INT NOT NULL DEFAULT 0,
+  `is_flagged` TINYINT(1) NOT NULL DEFAULT 0,
+  `held_reason` VARCHAR(255) NULL COMMENT 'Why the screener held it, shown in the queue',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (`media_post_id`) REFERENCES `media_posts`(`id`) ON DELETE CASCADE,
   FOREIGN KEY (`parent_id`) REFERENCES `post_comments`(`id`) ON DELETE CASCADE,
   INDEX `idx_comment_post` (`media_post_id`, `created_at`),
-  INDEX `idx_comment_parent` (`parent_id`)
+  INDEX `idx_comment_parent` (`parent_id`),
+  INDEX `idx_comment_status` (`status`, `created_at`),
+  INDEX `idx_comment_flagged` (`is_flagged`, `report_count`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `post_comment_likes` (
@@ -246,6 +362,30 @@ CREATE TABLE IF NOT EXISTS `post_comment_likes` (
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY `uniq_comment_like` (`comment_id`, `fingerprint_hash`),
   FOREIGN KEY (`comment_id`) REFERENCES `post_comments`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Reader reports on a comment. One report per fingerprint per comment, so a
+-- single person cannot pile on and force a comment off the site.
+CREATE TABLE IF NOT EXISTS `comment_reports` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `comment_id` INT NOT NULL,
+  `fingerprint_hash` VARCHAR(64) NULL,
+  `reason` VARCHAR(255) NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_comment_report` (`comment_id`, `fingerprint_hash`),
+  FOREIGN KEY (`comment_id`) REFERENCES `post_comments`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Admin-managed word lists. kind='block' holds a comment for review, kind='spam'
+-- sends it straight to the spam queue. `tenant_id` keeps them per church.
+CREATE TABLE IF NOT EXISTS `comment_blocklist` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NULL,
+  `kind` ENUM('block','spam') NOT NULL DEFAULT 'block',
+  `word` VARCHAR(100) NOT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_blocklist_word` (`tenant_id`, `kind`, `word`),
+  INDEX `idx_blocklist_kind` (`kind`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `media_post_categories` (
@@ -285,10 +425,59 @@ CREATE TABLE IF NOT EXISTS `events` (
   `location` VARCHAR(255) NULL,
   `rsvp_enabled` TINYINT(1) NOT NULL DEFAULT 0,
   `rsvp_url` VARCHAR(500) NULL,
+  `rsvp_mode` ENUM('legacy','off','external','internal') NOT NULL DEFAULT 'legacy'
+    COMMENT 'legacy = keep using rsvp_enabled/rsvp_url so existing events behave unchanged',
+  `max_capacity` INT NOT NULL DEFAULT 0 COMMENT '0 = unlimited',
+  `allow_guests` TINYINT(1) NOT NULL DEFAULT 1,
+  `waitlist_enabled` TINYINT(1) NOT NULL DEFAULT 1,
+  `rsvp_closes_at` DATETIME NULL COMMENT 'Optional deadline; NULL = always open',
   `is_published` TINYINT(1) NOT NULL DEFAULT 1,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `org_unit_id` INT NULL,
   INDEX `idx_published_start` (`is_published`, `start_at`),
+  FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- RSVPs taken on the site or in the app. `token` is the guest's own key, so they
+-- can amend or cancel without an account. One row per email per event, and a
+-- NULL email is allowed (multiple NULLs are fine in a UNIQUE key) because nobody
+-- is turned away for not sharing an address.
+CREATE TABLE IF NOT EXISTS `event_rsvps` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `event_id` INT NOT NULL,
+  `name` VARCHAR(150) NOT NULL,
+  `email` VARCHAR(190) NULL,
+  `phone` VARCHAR(45) NULL,
+  `guests` INT NOT NULL DEFAULT 0 COMMENT 'Extra people aside from the guest themselves',
+  `status` ENUM('going','maybe','declined','waitlist','cancelled') NOT NULL DEFAULT 'going',
+  `token` VARCHAR(64) NOT NULL,
+  `note` VARCHAR(500) NULL,
+  `fingerprint_hash` VARCHAR(64) NULL,
+  `checked_in` TINYINT(1) NOT NULL DEFAULT 0,
+  `checked_in_at` DATETIME NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_rsvp_token` (`token`),
+  UNIQUE KEY `uniq_rsvp_event_email` (`event_id`, `email`),
+  INDEX `idx_rsvp_event_status` (`event_id`, `status`),
+  INDEX `idx_rsvp_email` (`email`),
+  FOREIGN KEY (`event_id`) REFERENCES `events`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- A named run of sermons. Defined before `sermons` because that table points at it.
+CREATE TABLE IF NOT EXISTS `sermon_series` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NULL,
+  `title` VARCHAR(150) NOT NULL,
+  `slug` VARCHAR(170) NOT NULL,
+  `description` TEXT NULL,
+  `cover_image` VARCHAR(255) NULL,
+  `org_unit_id` INT NULL,
+  `is_published` TINYINT(1) NOT NULL DEFAULT 1,
+  `sort_order` INT NOT NULL DEFAULT 0,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_sermon_series_slug` (`slug`),
+  INDEX `idx_sermon_series_unit` (`org_unit_id`, `is_published`),
   FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -297,10 +486,16 @@ CREATE TABLE IF NOT EXISTS `sermons` (
   `title` VARCHAR(200) NOT NULL,
   `slug` VARCHAR(220) NOT NULL UNIQUE,
   `speaker` VARCHAR(150) NULL,
-  `series` VARCHAR(150) NULL,
+  `series` VARCHAR(150) NULL COMMENT 'Legacy free text. Kept in step with series_id so older code keeps working.',
+  `series_id` INT NULL,
+  `series_position` INT NULL COMMENT 'Episode number within the series',
   `scripture_ref` VARCHAR(150) NULL,
   `description` TEXT NULL,
-  `audio_path` VARCHAR(255) NULL,
+  `audio_path` VARCHAR(255) NULL COMMENT 'Uploaded audio, relative to /uploads',
+  `audio_url` VARCHAR(500) NULL COMMENT 'External audio, e.g. a podcast host. Wins over audio_path when set.',
+  `duration_seconds` INT NULL,
+  `episode_guid` VARCHAR(190) NULL COMMENT 'Stable podcast episode id. Never change it once published.',
+  `is_explicit` TINYINT(1) NOT NULL DEFAULT 0,
   `video_embed_url` VARCHAR(500) NULL,
   `cover_image` VARCHAR(255) NULL,
   `is_published` TINYINT(1) NOT NULL DEFAULT 1,
@@ -308,6 +503,8 @@ CREATE TABLE IF NOT EXISTS `sermons` (
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `org_unit_id` INT NULL,
   INDEX `idx_published_at` (`is_published`, `published_at`),
+  INDEX `idx_sermon_series` (`series_id`, `series_position`),
+  UNIQUE KEY `uniq_sermon_episode_guid` (`episode_guid`),
   FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -325,20 +522,43 @@ CREATE TABLE IF NOT EXISTS `team_members` (
 
 CREATE TABLE IF NOT EXISTS `prayer_requests` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NULL,
   `name` VARCHAR(150) NULL,
   `email` VARCHAR(150) NULL,
   `message` TEXT NOT NULL,
   `is_public` TINYINT(1) NOT NULL DEFAULT 0,
+  `increment_count` INT NOT NULL DEFAULT 0,
+  `is_anonymous` TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Hides the name on the public wall, never from the pastoral team',
+  `is_featured` TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Floats the request to the top of the wall',
+  `answered_at` DATETIME NULL COMMENT 'NULL while the request is still open',
+  `answer_note` TEXT NULL COMMENT 'Shown publicly on the Answered Prayers wall',
   `status` ENUM('new','prayed','archived') NOT NULL DEFAULT 'new',
   `ip_address` VARCHAR(45) NULL,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `org_unit_id` INT NULL,
+  INDEX `idx_prayer_wall` (`tenant_id`, `is_public`, `status`, `created_at`),
+  INDEX `idx_prayer_answered` (`tenant_id`, `answered_at`),
   FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- One row per person per request, so the "I prayed for this" counter can never
+-- count the same visitor twice. The unique key does the de-duplication.
+CREATE TABLE IF NOT EXISTS `prayer_participants` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NULL,
+  `request_id` INT NOT NULL,
+  `session_hash` VARCHAR(64) NOT NULL COMMENT 'Rotating device hash - never an IP',
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_prayer_participant` (`request_id`, `session_hash`),
+  INDEX `idx_pp_request` (`request_id`),
+  FOREIGN KEY (`request_id`) REFERENCES `prayer_requests`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `newsletter_subscribers` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `email` VARCHAR(150) NOT NULL UNIQUE,
+  `phone` VARCHAR(32) NULL,
+  `sms_consent` TINYINT(1) NOT NULL DEFAULT 0,
   `is_active` TINYINT(1) NOT NULL DEFAULT 1,
   `subscribed_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `org_unit_id` INT NULL,
@@ -408,6 +628,7 @@ CREATE TABLE IF NOT EXISTS `export_files` (
 -- of design sections (hero / text / columns / image / quote / cta).
 CREATE TABLE IF NOT EXISTS `pages` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `parent_id` INT NULL DEFAULT NULL,
   `title` VARCHAR(200) NOT NULL,
   `slug` VARCHAR(220) NOT NULL UNIQUE,
   `eyebrow` VARCHAR(120) NULL,
@@ -425,10 +646,41 @@ CREATE TABLE IF NOT EXISTS `pages` (
 -- Seed the About page so the existing /about link has CMS content.
 INSERT INTO `pages` (`title`, `slug`, `eyebrow`, `content`, `meta_description`, `in_nav`, `nav_label`, `sort_order`)
 SELECT 'About Us', 'about', 'Our Story',
-  '[{"type":"text","heading":"Welcome to Grace & Life Church","body":"We are a family of believers on a journey together — growing in faith, building community, and serving our city with the love of Christ.","align":"center"},{"type":"columns","heading":"Why We Exist","columns":[{"heading":"Our Mission","body":"To lead people into a growing relationship with God, build authentic community, and serve our city with the love of Christ."},{"heading":"Our Vision","body":"A church without walls — reaching every generation, in the room and online, with hope that lasts."},{"heading":"Our Values","body":"Grace first. People over programs. Faith in action. Generosity, humility, and love in everything we do."}]},{"type":"quote","quote":"Wherever you are on your journey, you are welcome here — exactly as you are.","source":"Grace & Life Church"},{"type":"cta","title":"Come worship with us this weekend","subtitle":"Every Sunday — in the room and online.","label":"Plan a Visit","url":"/contact"}]',
+  '[{"type":"text","heading":"Welcome to Church Media","body":"We are a family of believers on a journey together — growing in faith, building community, and serving our city with the love of Christ.","align":"center"},{"type":"columns","heading":"Why We Exist","columns":[{"heading":"Our Mission","body":"To lead people into a growing relationship with God, build authentic community, and serve our city with the love of Christ."},{"heading":"Our Vision","body":"A church without walls — reaching every generation, in the room and online, with hope that lasts."},{"heading":"Our Values","body":"Grace first. People over programs. Faith in action. Generosity, humility, and love in everything we do."}]},{"type":"quote","quote":"Wherever you are on your journey, you are welcome here — exactly as you are.","source":"Church Media"},{"type":"cta","title":"Come worship with us this weekend","subtitle":"Every Sunday — in the room and online.","label":"Plan a Visit","url":"/contact"}]',
   'Learn about our story, mission, vision, and values.', 1, 'About',
   (SELECT COUNT(*) FROM `pages` WHERE `slug` = 'about')
 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `pages` WHERE `slug` = 'about');
+
+-- Giving campaigns: a named project with a target, and the gifts that count towards it.
+--
+-- Created before `donations` because `donations.campaign_id` points at it, and this file is a
+-- one-shot script: a foreign key needs its target to exist already.
+--
+-- **The raised total always comes from `donations`, never from `giving_pledges`.** A pledge is a
+-- promise. A church that adds promises to the amount raised is reporting money it does not have, so
+-- the two figures are shown side by side and never summed.
+CREATE TABLE IF NOT EXISTS `giving_campaigns` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NOT NULL DEFAULT 0 COMMENT '0 = no tenant resolved; otherwise Tenant::id()',
+  `org_unit_id` INT NULL COMMENT 'The church this campaign belongs to',
+  `title` VARCHAR(180) NOT NULL,
+  `slug` VARCHAR(190) NOT NULL COMMENT 'Used in the public URL; unique per tenant',
+  `summary` VARCHAR(255) NULL COMMENT 'One line under the title',
+  `description` TEXT NULL,
+  `goal_amount` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  `currency` VARCHAR(10) NOT NULL DEFAULT 'NGN' COMMENT 'The currency the goal is expressed in',
+  `starts_on` DATE NULL,
+  `ends_on` DATE NULL COMMENT 'After this date the campaign stops accepting gifts',
+  `image_path` VARCHAR(255) NULL,
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `sort_order` INT NOT NULL DEFAULT 0,
+  `created_by` INT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_campaign_slug` (`tenant_id`, `slug`),
+  INDEX `idx_campaign_unit` (`org_unit_id`, `is_active`),
+  FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Donations table for online giving, tithes, offerings, and manual bank transfers
 CREATE TABLE IF NOT EXISTS `donations` (
@@ -436,6 +688,7 @@ CREATE TABLE IF NOT EXISTS `donations` (
   `donor_name` VARCHAR(150) NULL,
   `donor_email` VARCHAR(255) NULL,
   `donor_phone` VARCHAR(50) NULL,
+  `member_id` INT NULL COMMENT 'Set when the donor is signed in, or adopted later by matching donor_email',
   `category` VARCHAR(100) NOT NULL DEFAULT 'Tithe',
   `amount` DECIMAL(12,2) NOT NULL,
   `currency` VARCHAR(10) NOT NULL DEFAULT 'NGN',
@@ -443,13 +696,45 @@ CREATE TABLE IF NOT EXISTS `donations` (
   `payment_method` ENUM('online', 'manual_bank') NOT NULL DEFAULT 'online',
   `payment_status` ENUM('pending', 'completed', 'failed') NOT NULL DEFAULT 'pending',
   `payment_reference` VARCHAR(100) NULL,
+  `gateway_reference` VARCHAR(120) NULL COMMENT 'The reference PayHub minted for this gift; ours is not known to the gateway',
   `receipt_path` VARCHAR(255) NULL,
+  `campaign_id` INT NULL COMMENT 'The giving campaign this gift counts towards, if any',
   `org_unit_id` INT NULL,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX `idx_donation_status` (`payment_status`, `payment_method`),
+  INDEX `idx_donation_gateway_ref` (`gateway_reference`),
   INDEX `idx_donation_category` (`category`),
+  INDEX `idx_donation_member` (`member_id`, `payment_status`),
+  INDEX `idx_donation_campaign` (`campaign_id`, `payment_status`),
+  FOREIGN KEY (`campaign_id`) REFERENCES `giving_campaigns`(`id`) ON DELETE SET NULL,
   FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Promises to give, kept apart from money that has actually arrived.
+--
+-- `status` separates a promise from a gift that was honoured, and `recorded_donation_id` is what stops
+-- a pledge being turned into a donation twice — the fact is recorded in a column rather than checked
+-- in PHP, so a double click cannot double the total.
+CREATE TABLE IF NOT EXISTS `giving_pledges` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NOT NULL DEFAULT 0,
+  `campaign_id` INT NOT NULL,
+  `donor_name` VARCHAR(150) NOT NULL,
+  `donor_email` VARCHAR(190) NULL,
+  `donor_phone` VARCHAR(32) NULL,
+  `amount` DECIMAL(12,2) NOT NULL,
+  `currency` VARCHAR(10) NOT NULL DEFAULT 'NGN',
+  `promised_on` DATE NULL COMMENT 'The date they said they would give it',
+  `note` VARCHAR(255) NULL,
+  `status` ENUM('pledged','received','cancelled') NOT NULL DEFAULT 'pledged',
+  `received_at` DATETIME NULL,
+  `recorded_donation_id` INT NULL COMMENT 'Set when the pledge was recorded as a real gift, so it cannot be counted twice',
+  `created_by` INT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_pledge_campaign` (`campaign_id`, `status`),
+  FOREIGN KEY (`campaign_id`) REFERENCES `giving_campaigns`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`recorded_donation_id`) REFERENCES `donations`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Seed the Privacy Policy page so it appears in admin/pages and renders at /page/privacy-policy
@@ -495,7 +780,10 @@ CREATE TABLE IF NOT EXISTS `notifications` (
   `sender_id` INT NULL,
   `title` VARCHAR(255) NOT NULL,
   `body` TEXT NOT NULL,
+  `target_unit_id` INT NULL COMMENT 'The unit picked when sending - any level. NULL = every unit in the sender scope',
+  `target_level` VARCHAR(40) NULL COMMENT 'Type of the target unit at send time, since level names are configurable',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_notifications_target` (`target_unit_id`),
   FOREIGN KEY (`sender_id`) REFERENCES `users`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -508,19 +796,6 @@ CREATE TABLE IF NOT EXISTS `notification_recipients` (
   FOREIGN KEY (`notification_id`) REFERENCES `notifications`(`id`) ON DELETE CASCADE,
   FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE CASCADE,
   UNIQUE KEY `uq_notif_recipient` (`notification_id`, `org_unit_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
--- Push device tokens registered by the mobile app (FCM, anonymous).
-CREATE TABLE IF NOT EXISTS `device_tokens` (
-  `id` INT AUTO_INCREMENT PRIMARY KEY,
-  `token` VARCHAR(512) NOT NULL,
-  `platform` VARCHAR(30) NULL,
-  `org_unit_id` INT NULL,
-  `user_agent` VARCHAR(255) NULL,
-  `last_seen_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE KEY `uniq_device_token` (`token`(255)),
-  FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Church growth tracking: per-service attendance + newcomer follow-up.
@@ -546,6 +821,7 @@ CREATE TABLE IF NOT EXISTS `newcomers` (
   `org_unit_id` INT NULL,
   `name` VARCHAR(150) NOT NULL,
   `whatsapp_phone` VARCHAR(40) NULL,
+  `email` VARCHAR(190) NULL COMMENT 'Needed for automatic follow-up email; NULL for a visitor who only left a number',
   `address` VARCHAR(255) NULL,
   `gender` ENUM('male','female','other') NULL,
   `age_group` ENUM('adult','children','youth') NOT NULL DEFAULT 'adult',
@@ -580,13 +856,16 @@ CREATE TABLE IF NOT EXISTS `ad_publishers` (
   `email` VARCHAR(150) NOT NULL,
   `phone` VARCHAR(45) NULL,
   `token` VARCHAR(64) NOT NULL UNIQUE,
+  `tenant_id` INT NOT NULL DEFAULT 0 COMMENT '0 = no church assigned; otherwise Tenant::id()',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  INDEX `idx_pub_email` (`email`)
+  INDEX `idx_pub_email` (`email`),
+  INDEX `idx_pub_tenant` (`tenant_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `ads` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `publisher_id` INT NOT NULL,
+  `tenant_id` INT NOT NULL DEFAULT 0 COMMENT '0 = no church assigned; otherwise Tenant::id()',
   `title` VARCHAR(200) NOT NULL,
   `media_type` ENUM('image','video') NOT NULL,
   `file_path` VARCHAR(255) NOT NULL,
@@ -601,7 +880,12 @@ CREATE TABLE IF NOT EXISTS `ads` (
   `payment_method` ENUM('online','manual','free') NOT NULL DEFAULT 'free',
   `payment_proof_path` VARCHAR(255) NULL,
   `payment_reference` VARCHAR(100) NULL,
+  `payment_attempts` INT NOT NULL DEFAULT 0 COMMENT 'Cache of how many ad_payments attempts exist; ad_payments.attempt_no is authoritative',
   `status` ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+  `rejection_reason` VARCHAR(500) NULL COMMENT 'Why a reviewer rejected it; shown to the advertiser',
+  `rejected_at` DATETIME NULL,
+  `resubmitted_at` DATETIME NULL,
+  `revision_count` INT NOT NULL DEFAULT 0 COMMENT 'How many times it has been edited and sent back for review',
   `start_at` DATETIME NULL,
   `expires_at` DATETIME NULL,
   `views_count` INT NOT NULL DEFAULT 0,
@@ -609,7 +893,8 @@ CREATE TABLE IF NOT EXISTS `ads` (
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (`publisher_id`) REFERENCES `ad_publishers`(`id`) ON DELETE CASCADE,
-  INDEX `idx_ad_status_expires` (`status`, `start_at`, `expires_at`, `target_platform`)
+  INDEX `idx_ad_status_expires` (`status`, `start_at`, `expires_at`, `target_platform`),
+  INDEX `idx_ad_tenant` (`tenant_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `ad_events` (
@@ -631,10 +916,432 @@ CREATE TABLE IF NOT EXISTS `ad_payments` (
   `amount` DECIMAL(10,2) NOT NULL,
   `payment_method` ENUM('online','manual','free') NOT NULL,
   `reference` VARCHAR(100) NOT NULL,
+  `gateway_reference` VARCHAR(120) NULL COMMENT 'The reference PayHub minted and ignores our own — the one the gateway must be asked about',
   `status` ENUM('pending','success','failed') NOT NULL DEFAULT 'pending',
+  `attempt_no` INT NOT NULL DEFAULT 1 COMMENT 'Which attempt at this advert this row records; the authoritative count',
+  `failure_reason` VARCHAR(255) NULL COMMENT 'Why the gateway declined it, as reported to the advertiser',
   `proof_path` VARCHAR(255) NULL,
-  `gateway_response` TEXT NULL,
+  `gateway_response` TEXT NULL COMMENT 'The gateway payload, verbatim, for a dispute years later',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (`ad_id`) REFERENCES `ads`(`id`) ON DELETE CASCADE,
-  FOREIGN KEY (`publisher_id`) REFERENCES `ad_publishers`(`id`) ON DELETE CASCADE
+  FOREIGN KEY (`publisher_id`) REFERENCES `ad_publishers`(`id`) ON DELETE CASCADE,
+  INDEX `idx_ad_payment_attempt` (`ad_id`, `status`),
+  INDEX `idx_ad_payment_gateway_ref` (`gateway_reference`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `testimonies` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `unit_id` INT NULL DEFAULT NULL,
+  `name` VARCHAR(150) NOT NULL,
+  `email` VARCHAR(190) NULL,
+  `phone` VARCHAR(50) NULL,
+  `title` VARCHAR(255) NOT NULL,
+  `content` TEXT NOT NULL,
+  `media_url` VARCHAR(500) NULL,
+  `status` VARCHAR(20) NOT NULL DEFAULT 'pending',
+  `submitted_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `approved_at` TIMESTAMP NULL DEFAULT NULL,
+  INDEX `idx_testimony_status` (`status`, `submitted_at`),
+  INDEX `idx_testimony_unit` (`unit_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Analytics: raw traffic/interaction events. Deliberately has NO foreign keys so
+-- pruning old rows can never cascade into content, and so events survive even if
+-- a post is later deleted. `session_hash` is a rotating device hash, never an IP.
+-- Counts that already live in their own tables (giving, newcomers, attendance,
+-- likes, saves, comments) are NOT duplicated here.
+CREATE TABLE IF NOT EXISTS `analytics_events` (
+  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NOT NULL DEFAULT 0 COMMENT '0 = not yet attributed',
+  `occurred_at` DATETIME NOT NULL,
+  `event` VARCHAR(60) NOT NULL,
+  `path` VARCHAR(255) NULL,
+  `org_unit_id` INT NULL,
+  `entity_type` VARCHAR(30) NULL,
+  `entity_id` INT NULL,
+  `device` VARCHAR(10) NOT NULL DEFAULT 'web' COMMENT 'web|app',
+  `session_hash` VARCHAR(64) NULL COMMENT 'Rotating device hash - never an IP',
+  `referrer_host` VARCHAR(120) NULL,
+  `country` VARCHAR(2) NULL,
+  `meta` VARCHAR(255) NULL COMMENT 'e.g. the search term, truncated',
+  INDEX `idx_ae_time` (`occurred_at`),
+  INDEX `idx_ae_event_time` (`event`, `occurred_at`),
+  INDEX `idx_ae_tenant_time` (`tenant_id`, `occurred_at`),
+  INDEX `idx_ae_entity` (`entity_type`, `entity_id`),
+  INDEX `idx_ae_session` (`session_hash`, `occurred_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Nightly roll-up, kept indefinitely. Raw events are pruned after
+-- `analytics_retention_days`, so these rows are the long-term history.
+-- Every key column is NOT NULL so the upsert below is deterministic.
+CREATE TABLE IF NOT EXISTS `analytics_daily` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NOT NULL DEFAULT 0,
+  `day` DATE NOT NULL,
+  `event` VARCHAR(60) NOT NULL,
+  `device` VARCHAR(10) NOT NULL DEFAULT 'web',
+  `entity_type` VARCHAR(30) NOT NULL DEFAULT '',
+  `entity_id` INT NOT NULL DEFAULT 0,
+  `org_unit_id` INT NOT NULL DEFAULT 0,
+  `hits` INT NOT NULL DEFAULT 0,
+  UNIQUE KEY `uniq_analytics_day` (`tenant_id`, `day`, `event`, `device`, `entity_type`, `entity_id`, `org_unit_id`),
+  INDEX `idx_ad_day` (`day`),
+  INDEX `idx_ad_event_day` (`event`, `day`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Member accounts — the first visitor-facing logins in this project. Kept separate
+-- from `users`, which is staff. `tenant_id` is NOT NULL DEFAULT 0 rather than NULL
+-- because MySQL treats every NULL as distinct, which would let the same email
+-- register twice on the default church and defeat `uniq_member_email`.
+CREATE TABLE IF NOT EXISTS `members` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NOT NULL DEFAULT 0 COMMENT '0 = no tenant resolved; otherwise Tenant::id()',
+  `org_unit_id` INT NULL COMMENT 'Home church, once the member tells us or an admin sets it',
+  `name` VARCHAR(150) NOT NULL,
+  `email` VARCHAR(190) NOT NULL,
+  `phone` VARCHAR(32) NULL COMMENT 'Normalised dial code + national number, e.g. 2348031234567',
+  `sms_consent` TINYINT(1) NOT NULL DEFAULT 0,
+  `whatsapp_consent` TINYINT(1) NOT NULL DEFAULT 0,
+  `password_hash` VARCHAR(255) NOT NULL,
+  `is_verified` TINYINT(1) NOT NULL DEFAULT 0,
+  `verify_token_hash` CHAR(64) NULL COMMENT 'SHA-256 of the emailed token; the token itself is never stored',
+  `verify_expires_at` DATETIME NULL,
+  `reset_token_hash` CHAR(64) NULL,
+  `reset_expires_at` DATETIME NULL,
+  `notification_prefs` TEXT NULL COMMENT 'JSON: devotional, events, prayer, giving, reading_plan',
+  `reading_plan_id` INT NULL,
+  `reading_reminded_on` DATE NULL COMMENT 'The last day a reading reminder went to this member; what stops an hourly cron repeating it',
+  `last_read_day` DATE NULL,
+  `streak` INT NOT NULL DEFAULT 0,
+  `is_suspended` TINYINT(1) NOT NULL DEFAULT 0,
+  `last_seen_at` TIMESTAMP NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_member_email` (`tenant_id`, `email`),
+  INDEX `idx_member_unit` (`org_unit_id`),
+  INDEX `idx_member_verify` (`verify_token_hash`),
+  INDEX `idx_member_reset` (`reset_token_hash`),
+  -- The index for the foreign key migration 2026_30 adds. The CONSTRAINT cannot be declared here —
+  -- `reading_plans` is created lower down this one-shot file than `members` is — but the INDEX can,
+  -- because an index has no ordering dependency. InnoDB then reuses it for the constraint rather than
+  -- building a second one, so a fresh install and an upgraded one end up identical instead of one of
+  -- them quietly carrying a table scan on every reading-plan lookup.
+  INDEX `idx_member_plan` (`reading_plan_id`),
+  FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Push device tokens registered by the mobile app (FCM).
+--
+-- Deliberately placed after `members`: a table must be created after anything it references,
+-- and this one has a foreign key to it. Order matters in this file because it is a one-shot
+-- script, unlike the migrations, which can add a constraint later.
+--
+-- `member_id` is what lets a notification honour a member's own settings; a device that has
+-- never signed in leaves it NULL, has expressed no preference, and keeps receiving.
+CREATE TABLE IF NOT EXISTS `device_tokens` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `token` VARCHAR(512) NOT NULL,
+  `platform` VARCHAR(30) NULL,
+  `org_unit_id` INT NULL,
+  `tenant_id` INT NOT NULL DEFAULT 0 COMMENT '0 = no church assigned; otherwise Tenant::id(). The church whose app this device belongs to.',
+  `member_id` INT NULL COMMENT 'NULL = anonymous device, no stated preferences',
+  `phone` VARCHAR(32) NULL COMMENT 'Dial code + national number; what an SMS fallback would use',
+  `user_agent` VARCHAR(255) NULL,
+  `last_seen_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_device_token` (`token`(255)),
+  INDEX `idx_device_member` (`member_id`),
+  INDEX `idx_device_tenant` (`tenant_id`),
+  FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL,
+  FOREIGN KEY (`member_id`) REFERENCES `members`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Duty roster: one row per service, with the roles that need filling.
+--
+-- A service is its own thing rather than an `events` row. A Sunday service is an operational
+-- occasion — somebody has to be on the door — while an event is something the church publicises.
+-- Tying the two together would mean publishing a roster before the event is ready.
+--
+-- There is deliberately no UNIQUE key over (tenant_id, org_unit_id, service_date, title). Two
+-- services on one day is normal ("1st Service", "2nd Service"), and the title is what tells them
+-- apart. It also sidesteps the trap the `devotionals` table needed NOT NULL DEFAULT 0 for: a unique
+-- key over a nullable column lets MySQL treat every NULL as distinct, so it would not have enforced
+-- anything anyway.
+CREATE TABLE IF NOT EXISTS `service_plans` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NOT NULL DEFAULT 0 COMMENT '0 = no tenant resolved; otherwise Tenant::id()',
+  `org_unit_id` INT NULL COMMENT 'The church whose roster this is',
+  `title` VARCHAR(150) NOT NULL COMMENT 'e.g. "Sunday 1st Service"',
+  `service_date` DATE NOT NULL,
+  `service_time` VARCHAR(40) NULL COMMENT 'Free text, e.g. "8:00 AM" — a label, not a clock value',
+  `location` VARCHAR(200) NULL,
+  `notes` TEXT NULL,
+  `is_cancelled` TINYINT(1) NOT NULL DEFAULT 0,
+  `created_by` INT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_service_date` (`service_date`),
+  INDEX `idx_service_unit` (`org_unit_id`),
+  FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- The slots within one service: "Ushering ×4", "Choir ×2".
+--
+-- One row per role with a count, rather than one row per person, because that is how a church says
+-- it out loud and it keeps the grid readable. The people are `service_assignments` rows.
+CREATE TABLE IF NOT EXISTS `service_roles` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `plan_id` INT NOT NULL,
+  `name` VARCHAR(80) NOT NULL COMMENT 'Ushering, Choir, Media, Children — free text',
+  `slots_needed` INT NOT NULL DEFAULT 1,
+  `sort_order` INT NOT NULL DEFAULT 0,
+  `notes` VARCHAR(255) NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_role_plan` (`plan_id`),
+  FOREIGN KEY (`plan_id`) REFERENCES `service_plans`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- One person in one slot.
+--
+-- `person_name` is always filled in, even when `member_id` is set. The roster is a record of who
+-- served on a day, and it has to still read correctly if that member later closes their account and
+-- the foreign key goes NULL — a roster is closer to history than to a join table.
+--
+-- `member_id` is nullable because ushers and choir members frequently are not registered members,
+-- and requiring them to sign up before they can be rostered would make this unusable.
+--
+-- A declined assignment is kept, not deleted: the church needs to see who said no in order to ask
+-- somebody else, and silently removing the row loses that.
+CREATE TABLE IF NOT EXISTS `service_assignments` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `role_id` INT NOT NULL,
+  `member_id` INT NULL COMMENT 'Set only when the person is a registered member',
+  `person_name` VARCHAR(150) NOT NULL,
+  `person_phone` VARCHAR(32) NULL COMMENT 'Normalised dial code + national number',
+  `status` ENUM('invited','accepted','declined') NOT NULL DEFAULT 'invited',
+  `invited_at` TIMESTAMP NULL,
+  `notified_at` DATETIME NULL COMMENT 'First "you have been asked to serve" message; NULL until sent',
+  `responded_at` DATETIME NULL,
+  `reminded_at` DATETIME NULL COMMENT 'The day-before reminder; NULL until sent. Kept apart from notified_at so the two cannot hide each other',
+  `notes` VARCHAR(255) NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_assign_role` (`role_id`),
+  INDEX `idx_assign_member` (`member_id`),
+  FOREIGN KEY (`role_id`) REFERENCES `service_roles`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`member_id`) REFERENCES `members`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Following up a first-time visitor.
+--
+-- `newcomers` originally had nowhere to put an email address, only `whatsapp_phone`, so an automatic
+-- email sequence could not have reached a single visitor: every step would have been created and then
+-- skipped, which is the worst kind of broken because it looks like it ran. Hence `newcomers.email`.
+--
+-- A step is either an **email** (free, sends itself) or a **task** (something a person must do — ring
+-- them, visit them). Both land in `follow_up_actions`, so "what is outstanding for this newcomer" is
+-- one question with one answer instead of a union of two tables.
+CREATE TABLE IF NOT EXISTS `follow_up_sequences` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NOT NULL DEFAULT 0 COMMENT '0 = no tenant resolved; otherwise Tenant::id()',
+  `org_unit_id` INT NULL COMMENT 'The church this sequence belongs to',
+  `name` VARCHAR(150) NOT NULL,
+  `description` VARCHAR(255) NULL COMMENT 'Shown under the name in the list',
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `created_by` INT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_fuseq_unit` (`org_unit_id`, `is_active`),
+  FOREIGN KEY (`org_unit_id`) REFERENCES `org_units`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- `day_offset` is days after enrolment, not a calendar date, so one sequence works for visitors who
+-- arrive on any day of the year. Two steps may share an offset — a "text and a task on day 3" is a
+-- reasonable thing to want, and a UNIQUE key here would refuse it for no good reason.
+CREATE TABLE IF NOT EXISTS `follow_up_steps` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `sequence_id` INT NOT NULL,
+  `day_offset` INT NOT NULL DEFAULT 0,
+  `channel` ENUM('email','task') NOT NULL DEFAULT 'email',
+  `subject` VARCHAR(200) NULL COMMENT 'Email only',
+  `body` TEXT NULL COMMENT 'Email only',
+  `task_label` VARCHAR(200) NULL COMMENT 'Task only — what the person is being asked to do',
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_fstep_seq` (`sequence_id`, `day_offset`),
+  FOREIGN KEY (`sequence_id`) REFERENCES `follow_up_sequences`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- One newcomer in one sequence.
+--
+-- `UNIQUE (newcomer_id, sequence_id)` is what stops somebody being enrolled twice — by a second click,
+-- by an import, or by an admin who forgot. Re-enrolling is a no-op rather than a second stream of
+-- messages.
+--
+-- `stopped` is a distinct state from `finished`: one means a person asked us to stop or the church
+-- gave up, the other means the sequence ran to its end. Collapsing them would lose why it ended.
+CREATE TABLE IF NOT EXISTS `follow_up_enrolments` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `sequence_id` INT NOT NULL,
+  `newcomer_id` INT NOT NULL,
+  `enrolled_on` DATE NOT NULL COMMENT 'Day 0 for every day_offset on this sequence',
+  `status` ENUM('active','stopped','finished') NOT NULL DEFAULT 'active',
+  `stopped_reason` VARCHAR(255) NULL,
+  `stopped_at` DATETIME NULL,
+  `enrolled_by` INT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_enrol` (`newcomer_id`, `sequence_id`),
+  INDEX `idx_enrol_status` (`sequence_id`, `status`),
+  FOREIGN KEY (`sequence_id`) REFERENCES `follow_up_sequences`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`newcomer_id`) REFERENCES `newcomers`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- One row per step per enrolment: either an email that went out, or a task still owed.
+--
+-- `UNIQUE (enrolment_id, step_id)` is the whole idempotency story. The worker writes this row to
+-- claim the work *before* it sends, so a cron that fires twice and an admin who clicks twice both lose
+-- the race in the database rather than in a PHP check that a future edit could remove.
+--
+-- `channel` is copied from the step rather than joined, so switching a step from email to task does
+-- not silently rewrite the record of what was already sent to people.
+CREATE TABLE IF NOT EXISTS `follow_up_actions` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `enrolment_id` INT NOT NULL,
+  `step_id` INT NOT NULL,
+  `channel` ENUM('email','task') NOT NULL,
+  `due_on` DATE NOT NULL,
+  `claimed_at` DATETIME NULL COMMENT 'Taken before sending, so two runs cannot both send',
+  `sent_at` DATETIME NULL,
+  `done_at` DATETIME NULL COMMENT 'A task somebody ticked off',
+  `done_by` INT NULL,
+  `note` VARCHAR(255) NULL,
+  `attempts` INT NOT NULL DEFAULT 0 COMMENT 'Send attempts so far; a bad address must not retry for ever',
+  `error` VARCHAR(255) NULL COMMENT 'Last send failure, cleared when a retry succeeds',
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_action` (`enrolment_id`, `step_id`),
+  INDEX `idx_action_open` (`channel`, `due_on`),
+  FOREIGN KEY (`enrolment_id`) REFERENCES `follow_up_enrolments`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`step_id`) REFERENCES `follow_up_steps`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Daily devotionals. `tenant_id` and `org_unit_id` are NOT NULL DEFAULT 0 rather than
+-- the NULL that `sermon_series` uses for "shared", because this table needs
+-- UNIQUE (tenant_id, org_unit_id, publish_on) and MySQL treats every NULL as distinct,
+-- which would silently allow two devotionals for the same day. 0 means church-wide.
+CREATE TABLE IF NOT EXISTS `devotionals` (  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NOT NULL DEFAULT 0,
+  `org_unit_id` INT NOT NULL DEFAULT 0 COMMENT '0 = church-wide, otherwise the church it belongs to',
+  `publish_on` DATE NOT NULL COMMENT 'The day this devotional is for',
+  `title` VARCHAR(180) NOT NULL,
+  `scripture_reference` VARCHAR(160) NULL COMMENT 'e.g. Psalm 23:1-6',
+  `scripture_text` TEXT NULL COMMENT 'The passage itself, so the reader need not leave the page',
+  `body` MEDIUMTEXT NULL,
+  `audio_path` VARCHAR(500) NULL,
+  `sermon_id` INT NULL COMMENT 'Set when this was generated from a sermon',
+  `is_published` TINYINT(1) NOT NULL DEFAULT 1,
+  `push_sent_at` DATETIME NULL COMMENT 'When the daily notification went out',
+  `created_by` INT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_devotional_day` (`tenant_id`, `org_unit_id`, `publish_on`),
+  INDEX `idx_devotional_day` (`publish_on`, `is_published`),
+  FOREIGN KEY (`sermon_id`) REFERENCES `sermons`(`id`) ON DELETE SET NULL,
+  FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Reading plans: a church's Bible-reading plan, and how far each member has got.
+--
+-- A day is not a row — it is the set of passages sharing a `day_number`, which is what lets a plan
+-- say "Genesis 1; Psalm 1" without a second child table that would carry nothing but a number.
+--
+-- `completed_on` is a DATE of its own rather than being read off `created_at`, because a streak
+-- counts calendar days.
+--
+-- These sit at the end of the file deliberately. `members.reading_plan_id` gains its foreign key in
+-- migration 2026_30 rather than here, because `members` is created earlier in this file than
+-- `reading_plans` is, and a one-shot script cannot reference a table it has not reached yet.
+CREATE TABLE IF NOT EXISTS `reading_plans` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NOT NULL DEFAULT 0 COMMENT '0 = no tenant resolved; otherwise Tenant::id()',
+  `name` VARCHAR(150) NOT NULL,
+  `description` TEXT NULL,
+  `days_count` INT NOT NULL DEFAULT 0 COMMENT 'Intended length in days; a plan may end with blank days that have no passage',
+  `is_published` TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Only a published plan can be chosen by a member',
+  `created_by` INT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_plan_name` (`tenant_id`, `name`),
+  FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `reading_plan_passages` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NOT NULL DEFAULT 0,
+  `plan_id` INT NOT NULL,
+  `day_number` INT NOT NULL COMMENT '1-based day of the plan; a day is every passage sharing it',
+  `sort_order` INT NOT NULL DEFAULT 0,
+  `book` VARCHAR(60) NOT NULL COMMENT 'Must match a book in the bundled KJV, e.g. Psalms',
+  `chapter_start` INT NOT NULL,
+  `chapter_end` INT NULL COMMENT 'NULL = the same chapter as chapter_start',
+  `verse_start` INT NULL COMMENT 'NULL = the whole chapter',
+  `verse_end` INT NULL COMMENT 'NULL with verse_start set = that one verse',
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_plan_day_passage` (`plan_id`, `day_number`, `sort_order`),
+  INDEX `idx_passage_plan_day` (`plan_id`, `day_number`),
+  FOREIGN KEY (`plan_id`) REFERENCES `reading_plans`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `reading_progress` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NOT NULL DEFAULT 0,
+  `member_id` INT NOT NULL,
+  `plan_id` INT NOT NULL,
+  `day_number` INT NOT NULL,
+  `completed_on` DATE NOT NULL COMMENT 'The calendar day it was read; this is what a streak counts',
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_progress_day` (`member_id`, `plan_id`, `day_number`),
+  INDEX `idx_progress_member_date` (`member_id`, `completed_on`),
+  FOREIGN KEY (`member_id`) REFERENCES `members`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`plan_id`) REFERENCES `reading_plans`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- News & blog. Categories first: news_posts references it. Appended at the end because this file is a
+-- ONE-SHOT script, so a table has to appear after anything it points at. `users` is created far above.
+CREATE TABLE IF NOT EXISTS `news_categories` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NOT NULL DEFAULT 0,
+  `name` VARCHAR(120) NOT NULL,
+  `slug` VARCHAR(120) NOT NULL,
+  `description` VARCHAR(255) NULL,
+  `sort_order` INT NOT NULL DEFAULT 0,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_news_cat_slug` (`tenant_id`, `slug`),
+  INDEX `idx_news_cat_tenant` (`tenant_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `news_posts` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NOT NULL DEFAULT 0,
+  `category_id` INT NULL,
+  `author_id` INT NULL,
+  `author_name` VARCHAR(150) NOT NULL,
+  `title` VARCHAR(200) NOT NULL,
+  `slug` VARCHAR(200) NOT NULL,
+  `excerpt` VARCHAR(400) NULL,
+  `body` MEDIUMTEXT NULL,
+  `featured_path` VARCHAR(255) NULL COMMENT 'Stored small: long edge capped at 1280px, WebP',
+  `featured_alt` VARCHAR(200) NULL,
+  `featured_width` INT NOT NULL DEFAULT 0,
+  `featured_height` INT NOT NULL DEFAULT 0,
+  `seo_title` VARCHAR(200) NULL,
+  `seo_description` VARCHAR(300) NULL,
+  `status` ENUM('draft','published') NOT NULL DEFAULT 'draft',
+  `is_featured` TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'The lead story on /news',
+  `views_count` INT NOT NULL DEFAULT 0,
+  `published_at` DATETIME NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_news_slug` (`tenant_id`, `slug`),
+  INDEX `idx_news_tenant_status` (`tenant_id`, `status`, `published_at`),
+  INDEX `idx_news_category` (`category_id`),
+  FOREIGN KEY (`category_id`) REFERENCES `news_categories`(`id`) ON DELETE SET NULL,
+  FOREIGN KEY (`author_id`) REFERENCES `users`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

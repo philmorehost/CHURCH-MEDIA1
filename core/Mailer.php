@@ -48,6 +48,20 @@ class Mailer
         return self::send($to, '[Security Alert] ' . $subject, $body);
     }
 
+    /**
+     * Whether mail is going out through configured SMTP, rather than PHP's mail().
+     *
+     * Deliberately not "can we send at all": the fallback will attempt mail(), which works on some
+     * hosts and vanishes into a void on others with no error. This answers the question an admin
+     * actually has — is delivery set up properly — and reading it here keeps the workers' status
+     * lines honest instead of reassuring.
+     */
+    public static function configured(): bool
+    {
+        $config = is_file(CONFIG_PATH . '/mail.php') ? require CONFIG_PATH . '/mail.php' : [];
+        return (string) (setting('smtp_host') ?: ($config['smtp_host'] ?? '')) !== '';
+    }
+
     private static function sendViaSmtp(array $config, string $to, string $subject, string $body): bool
     {
         $host = $config['smtp_host'];
@@ -55,10 +69,11 @@ class Mailer
         $secure = $config['smtp_secure'] ?? 'tls'; // 'ssl' | 'tls' | ''
         $transport = $secure === 'ssl' ? 'ssl://' . $host : $host;
 
-        $socket = @fsockopen($transport, $port, $errno, $errstr, 10);
+        $socket = @fsockopen($transport, $port, $errno, $errstr, 3);
         if (!$socket) {
             throw new RuntimeException("Could not connect to SMTP host: $errstr");
         }
+        @stream_set_timeout($socket, 3);
 
         $expect = function (string $prefix) use ($socket) {
             $line = fgets($socket, 512);
