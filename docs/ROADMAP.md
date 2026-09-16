@@ -2248,6 +2248,23 @@ Requested: *"pull phone numbers, church WhatsApp groups"*.
 > Localisation is **under way** — the PHP foundation, the site shell and the five "something went wrong"
 > pages have shipped; the rest of the public views, the admin screens and the Flutter `intl`/ARB files are
 > not done. The app widgets/shortcuts have not been started at all.
+
+> **Paused here, 2026-09-16 — verified as a safe state to leave.** `cli/lang_check.php` now reports
+> **interface coverage** alongside catalogue problems, which is the first time the localisation backlog has
+> been countable rather than guessed at: **views 9 of 50 wired, admin 0 of 59** — 109 screens still fixed
+> English. English is the fallback for an unwired screen *and* for an untranslated key, so nothing renders a
+> raw key or a blank label: the checker reports **0 problems**, and the default interface language is `en`
+> (`config/site.php` and the `settings` column default both say so).
+>
+> ⚠️ **Localisation cannot be finished from this repository alone.** `lang/yo.php` holds 11 keys against
+> English's 124, and says of itself that its strings *"have not been reviewed by a native speaker"*. It
+> carries `'__offered' => false`, which is what keeps unreviewed text out of the visitor switcher — so the
+> 11 strings can never reach a congregation by accident. Wiring the remaining 109 screens is mechanical and
+> **invisible on its own** (every untranslated string is simply English), which means the next move on
+> localisation is a translator, not a commit. The engineering-completable item is **self-service tenant
+> provisioning with plan limits** — see the note above on why it is what makes onboarding a third church
+> cheap. A translator working from `lang/en.php` plus `php cli/lang_check.php --missing` has everything
+> needed for either the PHP interface or the Flutter ARB files.
 >
 > *(The line that used to be here said church-admin branding was still to build. It shipped as 7e below —
 > and the field decision it was waiting on is the whitelist recorded there.)*
