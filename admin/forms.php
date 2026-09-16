@@ -539,8 +539,14 @@ require __DIR__ . '/partials/layout-open.php';
           <td><?= e(date('M j, Y g:i A', strtotime($sub['created_at']))) ?></td>
           <td><?= e($sub['ip_address'] ?: '—') ?></td>
           <td style="max-width:420px;">
-            <?php $preview = []; foreach ($subFields as $f) { $v = $data[(string) $f['id']] ?? ''; if ($f['field_type'] === 'image') { $v = is_array($v) ? $v : ($v === '' ? [] : [$v]); if ($v) { $thumbs = ''; foreach (array_slice($v, 0, 4) as $img) { $thumbs .= '<a href="' . e(uploadUrl($img)) . '" target="_blank" style="display:inline-block;"><img src="' . e(uploadUrl($img)) . '" style="width:44px;height:44px;object-fit:cover;border-radius:8px;border:1px solid var(--border);margin:2px;" loading="lazy"></a>'; } $preview[] = '<b>' . e($f['label']) . ':</b><br>' . $thumbs; } } else { if (is_array($v)) { $v = implode(', ', $v); } if ($v !== '' && $v !== null) { $preview[] = '<b>' . e($f['label']) . ':</b> ' . e(mb_strimwidth((string) $v, 0, 60, '…')); } } } ?>
-            <?= $preview ? implode('<br>', array_slice($preview, 0, 3)) : '<span style="color:var(--ink-faint);">(empty)</span>' ?>
+            <?php $preview = []; foreach ($subFields as $f) { $v = $data[(string) $f['id']] ?? ''; if ($f['field_type'] === 'image') { $v = is_array($v) ? $v : ($v === '' ? [] : [$v]); if ($v) { $thumbs = ''; foreach (array_slice($v, 0, 4) as $img) { $thumbs .= '<a href="' . e(uploadUrl($img)) . '" target="_blank" style="display:inline-block;"><img src="' . e(uploadUrl($img)) . '" style="width:44px;height:44px;object-fit:cover;border-radius:8px;border:1px solid var(--border);margin:2px;" loading="lazy"></a>'; } $preview[] = '<b>' . e($f['label']) . ':</b><br>' . $thumbs; } } else { if (is_array($v)) { $v = implode(', ', $v); } if ($v !== '' && $v !== null) {
+                  // Path answers (Church and cascading dropdowns) are shown in full: the last segment is
+                  // the church the person actually named, and a four-level path runs well past 60
+                  // characters, so trimming from the right cut off exactly the part that identified it.
+                  $show = in_array($f['field_type'], ['church', 'cascade'], true) ? (string) $v : mb_strimwidth((string) $v, 0, 60, '…');
+                  $preview[] = '<b>' . e($f['label']) . ':</b> ' . e($show);
+              } } } ?>
+            <?= $preview ? implode('<br>', $preview) : '<span style="color:var(--ink-faint);">(empty)</span>' ?>
           </td>
           <td>
             <form method="post" action="/admin/forms?action=delete_submission" onsubmit="return confirm('Delete this submission?');" style="display:inline;">
