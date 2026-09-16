@@ -232,8 +232,8 @@ class Database
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
             },
             '2026_08_forms_image_field' => function (PDO $pdo): void {
-                // Widens form_fields.field_type to accept the new 'image' upload type.
-                $pdo->exec("ALTER TABLE `form_fields` MODIFY COLUMN `field_type` ENUM('text','textarea','email','phone','number','date','url','select','radio','checkbox','image') NOT NULL DEFAULT 'text'");
+                // Widens form_fields.field_type to accept the 'image' upload type.
+                self::widenEnum($pdo, 'form_fields', 'field_type', ['image']);
             },
             '2026_08_pages' => function (PDO $pdo): void {
                 // Homepage hero: editable eyebrow text, background image, video/youtube background, and CTA labels/links.
@@ -585,7 +585,7 @@ class Database
                 // Form fields now support cascading dropdowns (Province > Zone >
                 // Area > Parish) and an auto church-list field that builds the
                 // same chained selects live from the org_units hierarchy.
-                $pdo->exec("ALTER TABLE `form_fields` MODIFY COLUMN `field_type` ENUM('text','textarea','email','phone','number','date','url','select','radio','checkbox','image','cascade','church') NOT NULL DEFAULT 'text'");
+                self::widenEnum($pdo, 'form_fields', 'field_type', ['cascade', 'church']);
             },
             '2026_08_export_files' => function (PDO $pdo): void {
                 // Server-hosted shareable CSV exports (Google-Forms style): each
@@ -616,7 +616,7 @@ class Database
             },
             '2026_08_form_datetime_fields' => function (PDO $pdo): void {
                 // New form field types: 'time' and 'datetime' (date and time).
-                $pdo->exec("ALTER TABLE `form_fields` MODIFY COLUMN `field_type` ENUM('text','textarea','email','phone','number','date','url','select','radio','checkbox','image','cascade','church','time','datetime') NOT NULL DEFAULT 'text'");
+                self::widenEnum($pdo, 'form_fields', 'field_type', ['time', 'datetime']);
             },
             '2026_08_church_registration' => function (PDO $pdo): void {
                 // Public church-admin self-registration, pending super-admin approval.
@@ -2492,6 +2492,49 @@ class Database
                 self::addIndexIfMissing($pdo, 'donations', 'idx_donation_gateway_ref', 'INDEX `idx_donation_gateway_ref` (`gateway_reference`)');
             },
         ];
+    }
+
+    /**
+     * Widens an ENUM column **additively** — it can only ever ADD an allowed value.
+     *
+     * A plain `MODIFY COLUMN ... ENUM(...)` is destructive whenever its list is narrower than the
+     * one it replaces: MySQL rewrites every row whose value is no longer a member to `''`. Three
+     * migrations here each asserted their own ENUM for `form_fields.field_type`, and because *every*
+     * migration re-runs on **every** bootstrap they fought in array order — the `image` migration
+     * (whose list predates `cascade`, `church`, `time` and `datetime`) ran before the ones that add
+     * them, so a saved "Church (auto)" field was wiped to `''` on the very next page load. The
+     * builder renders a type it does not recognise as its "Short text" default, so the admin saw the
+     * type selector appear to reset itself a moment after saving.
+     *
+     * The existing values are always kept and the requested ones added, which makes each statement
+     * order-independent, idempotent, and incapable of losing data — and on an already-wide column it
+     * issues no ALTER at all.
+     *
+     * @param string[] $values Values this migration requires the column to allow.
+     */
+    private static function widenEnum(PDO $pdo, string $table, string $column, array $values): void
+    {
+        $check = $pdo->prepare('SELECT COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
+        $check->execute([$table, $column]);
+        $row = $check->fetch(PDO::FETCH_ASSOC);
+        if (!$row) {
+            return; // No such column yet — its CREATE TABLE migration owns the definition.
+        }
+
+        preg_match_all("/'((?:[^']|'')*)'/", (string) $row['COLUMN_TYPE'], $matches);
+        $existing = array_values(array_unique($matches[1]));
+        if (array_diff($values, $existing) === []) {
+            return; // Already allows everything asked for: no rewrite, and nothing that could be lost.
+        }
+
+        $quote = function (string $value): string {
+            return "'" . str_replace("'", "''", $value) . "'";
+        };
+        $list = implode(',', array_map($quote, array_values(array_unique(array_merge($existing, $values)))));
+        $sql = 'ALTER TABLE `' . $table . '` MODIFY COLUMN `' . $column . '` ENUM(' . $list . ')'
+            . ($row['IS_NULLABLE'] === 'NO' ? ' NOT NULL' : ' NULL')
+            . ($row['COLUMN_DEFAULT'] === null ? '' : ' DEFAULT ' . $quote((string) $row['COLUMN_DEFAULT']));
+        $pdo->exec($sql);
     }
 
     private static function addColumnIfMissing(PDO $pdo, string $table, string $column, string $definition, ?string $after): void

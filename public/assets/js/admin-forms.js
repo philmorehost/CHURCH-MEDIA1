@@ -55,7 +55,15 @@
 
   function makeRow(field) {
     field = field || {};
-    var type = TYPE_VALUES.indexOf(field.field_type) !== -1 ? field.field_type : 'text';
+    // A stored type this builder cannot map is drawn as "Short text" with no hint at all, and the
+    // very next save writes 'text' over it — which is how a saved "Church (auto)" field turned
+    // itself back into Short text with nothing on screen to explain it. Show the field as needing
+    // attention instead: saving it then reports "has an invalid type" rather than quietly
+    // downgrading it.
+    var storedType = (field.field_type === undefined || field.field_type === null) ? null : String(field.field_type);
+    var knownType = storedType !== null && TYPE_VALUES.indexOf(storedType) !== -1;
+    var needsRetry = storedType !== null && !knownType;
+    var type = knownType ? storedType : 'text';
 
     var row = document.createElement('div');
     row.className = 'form-field-row';
@@ -95,6 +103,13 @@
       if (t[0] === type) { opt.selected = true; }
       typeSelect.appendChild(opt);
     });
+    if (needsRetry) {
+      var warnOpt = document.createElement('option');
+      warnOpt.value = '';
+      warnOpt.textContent = '⚠ Re-select a type — saved value was ' + (storedType === '' ? 'empty' : '"' + storedType + '"');
+      typeSelect.insertBefore(warnOpt, typeSelect.firstChild);
+      typeSelect.value = '';
+    }
     typeBox.appendChild(typeMini);
     typeBox.appendChild(typeSelect);
 

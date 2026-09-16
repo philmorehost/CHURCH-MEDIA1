@@ -102,7 +102,7 @@ function validateFieldPayload(array $fields): array
             continue;
         }
         if (!in_array($type, FORM_FIELD_TYPES, true)) {
-            $errors[] = 'Field #' . $i . ' has an invalid type.';
+            $errors[] = '"' . $label . '" has an unrecognised field type — please choose its type again.';
             continue;
         }
         $options = trim((string) ($field['options'] ?? ''));
