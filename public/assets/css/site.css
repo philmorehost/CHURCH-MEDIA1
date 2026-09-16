@@ -446,16 +446,27 @@ p{margin:0 0 1em;}
 .media-card .overlay .cap{font-size:13px; font-weight:600; color:#fff; line-height:1.3;}
 .media-card .badge-type{position:absolute; top:10px; right:10px; background:#00000066; backdrop-filter:blur(6px); color:#fff; font-size:10px; padding:4px 9px; border-radius:20px; font-weight:700;}
 
-/* Event / sermon card */
+/* Event / sermon card. The cover box keeps a fixed shape so the grid stays even, but the photo is
+   fitted INSIDE it rather than cropped to fill. A portrait flyer cropped to 16/10 showed only its
+   middle band, and the middle of a poster is rarely the part that matters. */
 .info-card{padding:0;}
 .info-card .cover{aspect-ratio:16/10; background:var(--bg-2); position:relative;}
-.info-card .cover img{width:100%; height:100%; object-fit:cover;}
+.info-card .cover img{width:100%; height:100%; object-fit:contain;}
 .info-card .date-badge{position:absolute; top:14px; left:14px; background:#0a0912ee; border:1px solid var(--border-soft); border-radius:12px; padding:8px 12px; text-align:center;}
 .info-card .date-badge .d{font-size:20px; font-weight:800; color:var(--gold-soft); line-height:1;}
 .info-card .date-badge .m{font-size:10px; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-dim);}
 .info-card .body{padding:20px;}
 .info-card h3{font-size:18px; margin-bottom:8px;}
 .info-card .meta{font-size:12.5px; color:var(--ink-faint); display:flex; gap:14px; flex-wrap:wrap; margin-bottom:10px;}
+
+/* The flyer on an event page keeps its OWN shape — a poster is portrait, a photo is landscape.
+   Both dimensions stay `auto` with max-* caps, which is what makes the browser scale the image
+   down proportionally: width:100% would fix the width, and the max-height would then squash the
+   picture instead of shrinking it. The height cap is in px, NOT vh: a vh cap shrank a portrait
+   flyer to 180px wide in a 411px-tall window (measured), which is worse than the crop it
+   replaced. 900px only bites on a desktop, where a 9:16 flyer would otherwise be 995px tall. */
+.event-cover{display:flex; justify-content:center; margin-bottom:32px;}
+.event-cover img{display:block; width:auto; height:auto; max-width:100%; max-height:900px;}
 
 /* Service times strip */
 .service-strip{display:flex; gap:14px; flex-wrap:wrap; justify-content:center;}

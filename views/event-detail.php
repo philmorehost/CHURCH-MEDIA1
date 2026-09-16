@@ -34,9 +34,14 @@ $rsvpError = flash('rsvp_error');
     </div>
 
     <?php if ($event['cover_image']): ?>
-      <div class="glass-card" style="aspect-ratio:16/8; margin-bottom:32px;">
-        <img src="<?= e(uploadUrl($event['cover_image'])) ?>" alt="" style="width:100%; height:100%; object-fit:cover;">
-      </div>
+      <?php /* The frame takes the flyer's OWN shape. A flyer is as often a portrait poster as it is a
+               landscape photo, and the old frame was a hard 16/8 with object-fit:cover, which showed
+               only the middle ~40% of a portrait one. See .event-cover in site.css. The image is a
+               link so a poster can be opened full size, where its small print is legible. */ ?>
+      <a class="glass-card event-cover" href="<?= e(uploadUrl($event['cover_image'])) ?>"
+         target="_blank" rel="noopener" title="Open the flyer full size">
+        <img src="<?= e(uploadUrl($event['cover_image'])) ?>" alt="Flyer for <?= e((string) $event['title']) ?>">
+      </a>
     <?php endif; ?>
 
     <?php if ($event['description']): ?>

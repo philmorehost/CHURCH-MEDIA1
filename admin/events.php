@@ -218,6 +218,7 @@ require __DIR__ . '/partials/layout-open.php';
       <input type="text" id="location" name="location" value="<?= e($editing['location'] ?? '') ?>" placeholder="Main Auditorium">
       <label for="cover_image">Cover Image</label>
       <input type="file" id="cover_image" name="cover_image" accept="image/*">
+      <p class="sub" style="margin-top:-6px;">Portrait or landscape — both are shown in full. A portrait flyer is displayed as it was designed instead of being cropped, and visitors can tap it to open it full size.</p>
       <h2 style="margin-top:24px;font-size:15px;">RSVP</h2>
       <label for="rsvp_mode">How should RSVPs work?</label>
       <select id="rsvp_mode" name="rsvp_mode">
