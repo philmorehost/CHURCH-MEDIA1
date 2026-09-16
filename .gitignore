@@ -1,0 +1,24 @@
+# Runtime artefacts that must never be committed.
+#
+# Note: storage/cache/{bible,ratelimit} and storage/installed.lock were added to
+# git before this file existed. Ignoring a path does not untrack it, so those
+# already-committed files keep working; this only stops new ones being added.
+
+/storage/installed.lock
+/storage/logs/*
+!/storage/logs/.gitkeep
+/storage/cache/og/
+/storage/cache/ratelimit/
+/storage/cache/bible/
+/storage/cache/adserve/
+
+# Backups hold the entire database, including password hashes and stored secrets.
+# They must never be committed.
+/storage/backups/
+
+# Cron lock files (cli/sms_worker.php, cli/sms_maintenance.php, ...). Runtime state by
+# definition: their contents are meaningless and they are recreated on the next run.
+/storage/cache/*.lock
+
+# Office lock files, created beside a document while it is open.
+~$*

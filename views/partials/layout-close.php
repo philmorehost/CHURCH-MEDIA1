@@ -27,6 +27,31 @@ $socialIcons = [
 ?>
 </main>
 
+<?php
+/*
+ * The language switcher.
+ *
+ * In the footer rather than the header: the top bar is already five groups wide with a live badge and a
+ * burger, and a switcher there competes with the navigation on exactly the screens where space is
+ * tightest. The footer is where a preference of this kind is looked for, and it is on every page —
+ * including the 404, which is where a lost visitor most needs it.
+ *
+ * Rendered only when a church has more than one language a visitor may actually choose: a
+ * single-language site showing "Language: English" is a control that cannot do anything, and a
+ * catalogue still being written stays out of the list until its own file says it is ready.
+ *
+ * `next` is the page being looked at, so switching language keeps the visitor where they were. It is
+ * validated by `Lang::safeNext()` before it is used as a redirect target, and it carries the query
+ * string — a page's own filters are part of "where they were".
+ */
+$langOptions = Lang::offered();
+$langNext = rtrim((string) parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH), '/') ?: '/';
+$langQuery = (string) ($_SERVER['QUERY_STRING'] ?? '');
+if ($langQuery !== '') {
+    $langNext .= '?' . $langQuery;
+}
+?>
+
 <footer class="site-footer">
   <div class="container">
     <div class="footer-grid">
@@ -43,27 +68,28 @@ $socialIcons = [
         </div>
       </div>
       <div>
-        <h4>Explore</h4>
-        <a href="/feed">Media Feed</a>
-        <a href="/events">Events</a>
-        <a href="/sermons">Sermons</a>
-        <a href="/live">Watch Live</a>
-        <a href="/prayer">Prayer Wall</a>
-        <a href="/app-features">App Features</a>
+        <h4><?= e(t('footer.explore')) ?></h4>
+        <a href="/news"><?= e(t('nav.news')) ?></a>
+        <a href="/feed"><?= e(t('footer.media_feed')) ?></a>
+        <a href="/events"><?= e(t('footer.events')) ?></a>
+        <a href="/sermons"><?= e(t('footer.sermons')) ?></a>
+        <a href="/live"><?= e(t('footer.watch_live')) ?></a>
+        <a href="/prayer"><?= e(t('footer.prayer_wall')) ?></a>
+        <a href="/app-features"><?= e(t('footer.app_features')) ?></a>
       </div>
       <div>
-        <h4>Connect</h4>
-        <a href="/about">About Us</a>
-        <a href="/contact">Contact</a>
-        <a href="/give">Give</a>
-        <a href="/advertise">Advertise with Us</a>
-        <a href="/ad-manager">Publisher Portal</a>
+        <h4><?= e(t('footer.connect')) ?></h4>
+        <a href="/about"><?= e(t('footer.about')) ?></a>
+        <a href="/contact"><?= e(t('footer.contact')) ?></a>
+        <a href="/give"><?= e(t('footer.give')) ?></a>
+        <a href="/advertise"><?= e(t('footer.advertise')) ?></a>
+        <a href="/ad-manager"><?= e(t('footer.publisher_portal')) ?></a>
         <?php if ($s['contact_email'] ?? null): ?><a href="mailto:<?= e($s['contact_email']) ?>"><?= e($s['contact_email']) ?></a><?php endif; ?>
         <?php if ($s['contact_phone'] ?? null): ?><a href="tel:<?= e($s['contact_phone']) ?>"><?= e($s['contact_phone']) ?></a><?php endif; ?>
       </div>
       <div>
-        <h4>Service Times</h4>
-        <?php if (!$serviceTimes): ?><p class="footer-about">Check back soon for our schedule.</p><?php endif; ?>
+        <h4><?= e(t('footer.service_times')) ?></h4>
+        <?php if (!$serviceTimes): ?><p class="footer-about"><?= e(t('footer.no_service_times')) ?></p><?php endif; ?>
         <?php foreach ($serviceTimes as $st): ?>
           <div style="margin-bottom:10px;">
             <div style="color:var(--ink); font-size:13.5px; font-weight:600;"><?= e($st['label']) ?></div>
@@ -71,22 +97,32 @@ $socialIcons = [
           </div>
         <?php endforeach; ?>
         <form data-remote-form="/api/newsletter" style="margin-top:14px;">
-          <label style="font-size:12px; color:var(--ink-dim); display:block; margin-bottom:8px;">Get updates by email</label>
+          <label style="font-size:12px; color:var(--ink-dim); display:block; margin-bottom:8px;"><?= e(t('footer.get_updates')) ?></label>
           <div style="display:flex; gap:8px;">
             <input type="email" name="email" required placeholder="you@example.com" style="flex:1; padding:10px 12px; border-radius:10px; border:1px solid var(--border-soft); background:#ffffff08; color:var(--ink); font-size:13px;">
-            <button class="btn btn-gold btn-sm" type="submit">Join</button>
+            <button class="btn btn-gold btn-sm" type="submit"><?= e(t('footer.join')) ?></button>
           </div>
           <div data-form-message class="form-message"></div>
         </form>
       </div>
     </div>
     <div class="footer-bottom">
-      <span>© <?= date('Y') ?> <?= e($s['site_title']) ?>. All rights reserved.</span>
+      <span><?= e(t('footer.rights', [':year' => date('Y'), ':church' => (string) $s['site_title']])) ?></span>
       <div class="legal-links">
-        <a href="/prayer">Prayer Wall</a>
-        <a href="/search">Search</a>
-        <a href="/page/privacy-policy">Privacy Policy</a>
-        <a href="/admin">Admin</a>
+        <a href="/prayer"><?= e(t('footer.prayer_wall')) ?></a>
+        <a href="/search"><?= e(t('footer.search')) ?></a>
+        <a href="/page/privacy-policy"><?= e(t('footer.privacy')) ?></a>
+        <a href="/admin"><?= e(t('footer.admin')) ?></a>
+        <?php if (count($langOptions) > 1): ?>
+          <span style="color:var(--ink-faint);"><?= e(t('lang.label')) ?>:</span>
+          <?php foreach ($langOptions as $langCode => $langName): ?>
+            <?php if ($langCode === Lang::current()): ?>
+              <span aria-current="true" style="color:var(--ink); font-weight:600;"><?= e($langName) ?></span>
+            <?php else: ?>
+              <a href="/lang/<?= e($langCode) ?>?next=<?= e(rawurlencode($langNext)) ?>" hreflang="<?= e($langCode) ?>" rel="alternate"><?= e($langName) ?></a>
+            <?php endif; ?>
+          <?php endforeach; ?>
+        <?php endif; ?>
       </div>
     </div>
   </div>
@@ -158,5 +194,12 @@ $isAppPage = $currentPathForRedirect === '/app';
 
 <script src="<?= asset('js/app-download.js') ?>"></script>
 <script src="<?= asset('js/site.js') ?>"></script>
+<?php if (class_exists('Analytics') && Analytics::enabled()): ?>
+  <?php // Anonymous traffic beacon — fire-and-forget, no personal data, no IP. ?>
+  <script src="<?= asset('js/analytics.js') ?>"
+          data-analytics-endpoint="/api/analytics"
+          data-analytics-enabled="1"
+          defer></script>
+<?php endif; ?>
 </body>
 </html>

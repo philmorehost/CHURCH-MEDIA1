@@ -1,7 +1,9 @@
 <?php
 declare(strict_types=1);
-$metaTitle = 'Find Your Parish';
-$metaDescription = 'Browse media by parish, area, zone, and province. Tap a church to see all its media.';
+$levels = Unit::levels();
+$leafLabel = Unit::labelFor(Unit::leafType());
+$metaTitle = 'Find Your ' . $leafLabel;
+$metaDescription = 'Browse media by ' . strtolower(implode(', ', array_map(static fn (array $l): string => $l['label'], array_reverse($levels)))) . '. Tap a church to see all its media.';
 
 $pdo = Database::getInstance()->getConnection();
 $tree = Unit::tree();
@@ -29,16 +31,17 @@ unset($node);
 <div class="units-page">
   <header class="units-hero">
     <p class="units-eyebrow"><?= e(setting('site_title')) ?></p>
-    <h1>Find Your Parish</h1>
+    <h1>Find Your <?= e($leafLabel) ?></h1>
     <p class="units-sub">Tap a church to see all its media — images and videos, mixed together.</p>
   </header>
 
   <?php if (!$tree): ?>
-    <p class="units-sub" style="text-align:center;padding:40px 0;">No parishes set up yet.</p>
+    <p class="units-sub" style="text-align:center;padding:40px 0;">No <?= e(strtolower(Unit::pluralFor(Unit::leafType()))) ?> set up yet.</p>
   <?php else: ?>
     <?php
-    $render = function (array $node, int $depth = 0) use (&$render): void {
-        $tag = $depth === 0 ? 'h2' : ($depth === 1 ? 'h3' : ($depth === 2 ? 'h4' : 'h5'));
+    $maxTag = 6;
+    $render = function (array $node, int $depth = 0) use (&$render, $maxTag): void {
+        $tag = 'h' . min($depth + 2, $maxTag);
         echo '<div class="unit-item depth-' . $depth . '">';
         echo '<' . $tag . ' class="unit-heading"><a href="/unit/' . e($node['slug']) . '">' . e($node['name']) . '</a>';
         if (!empty($node['count'])) {

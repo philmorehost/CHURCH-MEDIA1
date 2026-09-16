@@ -74,8 +74,17 @@ $stmt = $pdo->prepare("SELECT t.*, u.name AS unit_name FROM testimonies t LEFT J
 $stmt->execute($params);
 $testimonies = $stmt->fetchAll();
 
-// Fetch church units for dropdown
-$units = $pdo->query('SELECT id, name FROM org_units WHERE is_active = 1 ORDER BY name ASC')->fetchAll();
+// Fetch church units for dropdown.
+// NOTE: `org_units` has no `is_active` column (see the 2026_08_org_units
+// migration in core/Database.php), so it must not be filtered on. Doing so
+// raised "Unknown column 'is_active'" here and took this whole page down.
+$units = [];
+try {
+    // `Unit::all()` is scoped to the church being served (2026_39).
+    $units = Unit::all('name ASC');
+} catch (Throwable $e) {
+    $units = [];
+}
 
 $pageTitle = 'Testimonies Review & Approval';
 $activeNav = 'testimonies';
@@ -118,7 +127,7 @@ require __DIR__ . '/partials/layout-open.php';
         <tr>
           <th>Author & Contact</th>
           <th>Title & Content</th>
-          <th>Parish / Unit</th>
+          <th><?= e(Unit::labelFor(Unit::leafType())) ?> / Unit</th>
           <th>Status</th>
           <th>Submitted</th>
           <th style="text-align:right;">Actions</th>

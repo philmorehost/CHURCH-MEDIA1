@@ -27,7 +27,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $email = trim($_POST['email'] ?? '');
     $password = (string) ($_POST['password'] ?? '');
     $confirm = (string) ($_POST['password_confirm'] ?? '');
-    $siteTitle = trim($_POST['site_title'] ?? '') ?: 'Grace & Life Church';
+    $siteTitle = trim($_POST['site_title'] ?? '') ?: 'Church Media';
     $siteTagline = trim($_POST['site_tagline'] ?? '');
     $contactEmail = trim($_POST['contact_email'] ?? '');
     $timezone = trim($_POST['timezone'] ?? 'Africa/Lagos');
@@ -60,8 +60,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
 
-            $stmt = $pdo->prepare('INSERT INTO users (name, username, email, password, role, is_super_admin, notify_on_login) VALUES (?, ?, ?, ?, "admin", 1, 1)');
-            $stmt->execute([$name, $username, $email, password_hash($password, PASSWORD_ARGON2ID)]);
+            // The first admin is the platform's super admin, so which church it is stamped with only
+            // matters on an install that already has one (a re-run, or a recovery install). On a
+            // fresh install no tenant exists yet and this writes 0; the `2026_38_user_tenants`
+            // backfill stamps the account on the first request after setup finishes.
+            $installTenantId = (int) (Tenant::id() ?? 0);
+            $stmt = $pdo->prepare('INSERT INTO users (name, username, email, password, role, is_super_admin, tenant_id, notify_on_login) VALUES (?, ?, ?, ?, "admin", 1, ?, 1)');
+            $stmt->execute([$name, $username, $email, password_hash($password, PASSWORD_ARGON2ID), $installTenantId]);
 
             $exists = (int) $pdo->query('SELECT COUNT(*) FROM settings')->fetchColumn();
             if ($exists === 0) {
@@ -115,7 +120,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   </div>
 
   <label for="site_title" style="margin-top:8px;">Site / Church Name</label>
-  <input type="text" id="site_title" name="site_title" value="<?= old('site_title', 'Grace & Life Church') ?>" required>
+  <input type="text" id="site_title" name="site_title" value="<?= old('site_title', 'Church Media') ?>" required>
   <label for="site_tagline">Tagline</label>
   <input type="text" id="site_tagline" name="site_tagline" value="<?= old('site_tagline', 'A place to belong, believe, and become') ?>">
   <div class="row">

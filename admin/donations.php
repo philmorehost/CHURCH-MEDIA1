@@ -23,6 +23,9 @@ $q = trim((string) ($_GET['q'] ?? ''));
 $cat = trim((string) ($_GET['category'] ?? ''));
 $method = trim((string) ($_GET['method'] ?? ''));
 $statusFilter = trim((string) ($_GET['status'] ?? ''));
+// Filtering by campaign is how a treasurer answers "what has come in for the building" without
+// opening the campaign screen and reading a table row by row.
+$campaignFilter = (int) ($_GET['campaign'] ?? 0);
 
 $where = ['1=1'];
 $params = [];
@@ -44,12 +47,22 @@ if ($statusFilter !== '') {
     $where[] = 'payment_status = ?';
     $params[] = $statusFilter;
 }
+if ($campaignFilter > 0) {
+    $where[] = 'campaign_id = ?';
+    $params[] = $campaignFilter;
+}
 
 $whereSql = implode(' AND ', $where);
 
+// One lookup for the whole screen, so a row can name its campaign without a query per row.
+$campaignNames = array();
+foreach ($pdo->query('SELECT id, title FROM giving_campaigns') as $campaignRow) {
+    $campaignNames[(int) $campaignRow['id']] = (string) $campaignRow['title'];
+}
+
 // CSV Export
 if ($action === 'export_csv') {
-    $exportStmt = $pdo->prepare("SELECT id, donor_name, donor_email, donor_phone, category, amount, currency, description, payment_method, payment_status, payment_reference, created_at FROM donations WHERE {$whereSql} ORDER BY created_at DESC");
+    $exportStmt = $pdo->prepare("SELECT id, donor_name, donor_email, donor_phone, category, amount, currency, description, payment_method, payment_status, payment_reference, campaign_id, created_at FROM donations WHERE {$whereSql} ORDER BY created_at DESC");
     $exportStmt->execute($params);
     $rows = $exportStmt->fetchAll();
 
@@ -62,6 +75,8 @@ if ($action === 'export_csv') {
             'Phone' => $r['donor_phone'],
             'Category' => $r['category'],
             'Amount (NGN)' => $r['amount'],
+            'Currency' => $r['currency'],
+            'Campaign' => $r['campaign_id'] !== null ? ($campaignNames[(int) $r['campaign_id']] ?? '') : '',
             'Description / Note' => $r['description'],
             'Payment Method' => $r['payment_method'] === 'online' ? 'Online (Payhub)' : 'Manual Bank Transfer',
             'Payment Status' => strtoupper($r['payment_status']),
@@ -69,7 +84,7 @@ if ($action === 'export_csv') {
             'Date' => $r['created_at'],
         ];
     }
-    $headers = ['ID', 'Donor Name', 'Email', 'Phone', 'Category', 'Amount (NGN)', 'Description / Note', 'Payment Method', 'Payment Status', 'Reference', 'Date'];
+    $headers = ['ID', 'Donor Name', 'Email', 'Phone', 'Category', 'Amount (NGN)', 'Currency', 'Campaign', 'Description / Note', 'Payment Method', 'Payment Status', 'Reference', 'Date'];
     csvDownload('donations_report_' . date('Y-m-d') . '.csv', $headers, $data);
 }
 
@@ -131,6 +146,7 @@ require __DIR__ . '/partials/layout-open.php';
         <option value="Building Fund" <?= $cat === 'Building Fund' ? 'selected' : '' ?>>Building Fund</option>
         <option value="Special Seed" <?= $cat === 'Special Seed' ? 'selected' : '' ?>>Special Seed</option>
         <option value="Thanksgiving" <?= $cat === 'Thanksgiving' ? 'selected' : '' ?>>Thanksgiving</option>
+        <option value="Campaign" <?= $cat === 'Campaign' ? 'selected' : '' ?>>Campaign (pledge recorded)</option>
         <option value="Other" <?= $cat === 'Other' ? 'selected' : '' ?>>Other</option>
       </select>
     </div>
@@ -151,6 +167,22 @@ require __DIR__ . '/partials/layout-open.php';
         <option value="failed" <?= $statusFilter === 'failed' ? 'selected' : '' ?>>Failed / Rejected</option>
       </select>
     </div>
+    <?php
+    // Only shown once there is a campaign to filter by, so a church that does not use them does not
+    // get a control that can never do anything.
+    $campaignOptions = GivingCampaign::all($user, true);
+    ?>
+    <?php if ($campaignOptions): ?>
+      <div>
+        <label for="campaign">Campaign</label>
+        <select id="campaign" name="campaign">
+          <option value="0">All Campaigns</option>
+          <?php foreach ($campaignOptions as $option): ?>
+            <option value="<?= (int) $option['id'] ?>" <?= $campaignFilter === (int) $option['id'] ? 'selected' : '' ?>><?= e((string) $option['title']) ?></option>
+          <?php endforeach; ?>
+        </select>
+      </div>
+    <?php endif; ?>
     <div>
       <button type="submit" class="btn" style="width:100%;">Filter</button>
     </div>
@@ -190,6 +222,11 @@ require __DIR__ . '/partials/layout-open.php';
               </td>
               <td>
                 <span class="badge info" style="font-size:11px;"><?= e($r['category']) ?></span>
+                <?php if (!empty($r['campaign_id']) && isset($campaignNames[(int) $r['campaign_id']])): ?>
+                  <div style="font-size:12px;color:var(--gold-soft);margin-top:4px;">
+                    <a href="/admin/campaigns?action=view&id=<?= (int) $r['campaign_id'] ?>" style="color:inherit;"><?= e($campaignNames[(int) $r['campaign_id']]) ?></a>
+                  </div>
+                <?php endif; ?>
               </td>
               <td style="font-weight:700; font-size:15px; color:var(--gold-soft);">
                 ₦<?= number_format((float) $r['amount'], 2) ?>

@@ -2,12 +2,22 @@
 declare(strict_types=1);
 
 /**
- * Organizational hierarchy: Province → Zone → Area → Parish (RCCG-style).
+ * Organizational hierarchy for church units (RCCG-style by default:
+ * Province → Zone → Area → Parish — but the levels are configurable, see
+ * levels()).
  *
  * Stored in a single self-referencing `org_units` table. Leaves are parishes;
  * a parish uniquely determines its full ancestor chain, so posts only need to
  * be tagged with a parish (`media_posts.org_unit_id`) and every roll-up
  * (zone / area / province) is derived by walking up.
+ *
+ * Since 2026_39 a unit carries `tenant_id` and belongs to exactly one church, and every read here
+ * is scoped to the church being served. That matters because units are how admin scope is expressed
+ * (`scopeClause()`): while a unit belonged to nobody, every picker, count, tree and walk in the
+ * admin area — and the public home-cell finder and unit pages — spanned the whole platform.
+ *
+ * `unit_levels` (the level *definitions*) is deliberately still shared: it names the shape of the
+ * hierarchy, not the units in it, and it is edited only by the platform owner.
  */
 class Unit
 {
@@ -18,51 +28,392 @@ class Unit
         return self::$pdo ??= Database::getInstance()->getConnection();
     }
 
-    /** Level names in hierarchy order (root → leaf). */
-    public static function types(): array
+    /**
+     * The church whose units are being read. 0 when nothing resolves, which is how rows are stamped,
+     * so an unstamped unit is invisible rather than visible everywhere.
+     *
+     * A background worker has no host to resolve from and gets the default church; where a worker has
+     * a row of its own to go on it should name that church explicitly with `allForTenant()` instead.
+     */
+    private static function tenantId(): int
     {
-        return ['province', 'zone', 'area', 'parish'];
+        return (class_exists('Tenant') ? Tenant::id() : null) ?? 0;
     }
 
-    /** Valid parent type for a unit type (null = top level). */
+    /** Fallback hierarchy used when `unit_levels` is missing or empty. */
+    private const DEFAULT_LEVELS = [
+        ['type' => 'province', 'label' => 'Province', 'plural' => 'Provinces'],
+        ['type' => 'zone', 'label' => 'Zone', 'plural' => 'Zones'],
+        ['type' => 'area', 'label' => 'Area', 'plural' => 'Areas'],
+        ['type' => 'parish', 'label' => 'Parish', 'plural' => 'Parishes'],
+    ];
+
+    private static ?array $levelsCache = null;
+
+    /**
+     * Configured hierarchy levels, root → leaf. Read from `unit_levels` so the
+     * super admin can rename, reorder, add or remove levels; falls back to the
+     * classic Province → Zone → Area → Parish set when the table is unavailable.
+     *
+     * @return array<int, array{type:string,label:string,plural:string}>
+     */
+    public static function levels(): array
+    {
+        if (self::$levelsCache !== null) {
+            return self::$levelsCache;
+        }
+        try {
+            $rows = self::db()->query('SELECT type, label, plural FROM unit_levels ORDER BY sort_order ASC, id ASC')->fetchAll();
+            if ($rows) {
+                return self::$levelsCache = array_map(static fn (array $r): array => [
+                    'type' => (string) $r['type'],
+                    'label' => (string) $r['label'],
+                    'plural' => (string) $r['plural'],
+                ], $rows);
+            }
+        } catch (Throwable $e) {
+            // Not migrated yet — use the defaults.
+        }
+        return self::$levelsCache = self::DEFAULT_LEVELS;
+    }
+
+    /** Drops the cached levels (call after adding/renaming/reordering them). */
+    public static function forgetLevels(): void
+    {
+        self::$levelsCache = null;
+    }
+
+    /** Level keys in hierarchy order (root → leaf). */
+    public static function types(): array
+    {
+        return array_map(static fn (array $l): string => $l['type'], self::levels());
+    }
+
+    /** Number of configured levels. */
+    public static function levelCount(): int
+    {
+        return count(self::levels());
+    }
+
+    /** Position of a level (0 = top level), or null when the type is unknown. */
+    public static function levelIndex(string $type): ?int
+    {
+        $i = array_search($type, self::types(), true);
+        return $i === false ? null : (int) $i;
+    }
+
+    /** The level directly above $type (null when $type is the top level). */
     public static function parentType(?string $type): ?string
     {
-        switch ($type) {
-            case 'zone':
-                return 'province';
-            case 'area':
-                return 'zone';
-            case 'parish':
-                return 'area';
-            default:
-                return null;
+        if ($type === null) {
+            return null;
         }
+        $i = self::levelIndex($type);
+        return $i === null || $i === 0 ? null : self::types()[$i - 1];
+    }
+
+    /** The level directly below $type (null when $type is the deepest level). */
+    public static function childType(?string $type): ?string
+    {
+        if ($type === null) {
+            return null;
+        }
+        $i = self::levelIndex($type);
+        $types = self::types();
+        return $i === null || $i >= count($types) - 1 ? null : $types[$i + 1];
+    }
+
+    /** The deepest level — where churches actually live. */
+    public static function leafType(): string
+    {
+        $types = self::types();
+        return $types[count($types) - 1];
+    }
+
+    /** The shallowest level. */
+    public static function rootType(): string
+    {
+        return self::types()[0];
+    }
+
+    /** Singular display name for a level, e.g. "Province". */
+    public static function labelFor(string $type): string
+    {
+        foreach (self::levels() as $level) {
+            if ($level['type'] === $type) {
+                return $level['label'];
+            }
+        }
+        return ucfirst($type);
+    }
+
+    /** Plural display name for a level, e.g. "Provinces". */
+    public static function pluralFor(string $type): string
+    {
+        foreach (self::levels() as $level) {
+            if ($level['type'] === $type) {
+                return $level['plural'];
+            }
+        }
+        return self::labelFor($type) . 's';
+    }
+
+    /** "A Parish must belong to an Area." — using the configured level names. */
+    private static function parentError(string $type, string $parentType): string
+    {
+        $parentLabel = self::labelFor($parentType);
+        $article = preg_match('/^[aeiou]/i', $parentLabel) ? 'an' : 'a';
+        return 'A ' . self::labelFor($type) . ' must belong to ' . $article . ' ' . $parentLabel . '.';
+    }
+
+    /** Sorts units by hierarchy level (root → leaf), then by name. */
+    public static function sortByLevel(array $units): array
+    {
+        $order = array_flip(self::types());
+        usort($units, static function (array $a, array $b) use ($order): int {
+            $ai = $order[$a['type']] ?? 99;
+            $bi = $order[$b['type']] ?? 99;
+            return $ai === $bi ? strcasecmp((string) $a['name'], (string) $b['name']) : $ai <=> $bi;
+        });
+        return $units;
+    }
+
+    /**
+     * Validates an ordered list of unit ids as a root → depth chain. Returns the
+     * unit rows when every link checks out, otherwise an empty array. The
+     * registration form posts the chosen branch this way.
+     */
+    public static function validateChain(array $ids): array
+    {
+        $types = self::types();
+        $chain = [];
+        foreach (array_values($ids) as $depth => $rawId) {
+            $id = (int) $rawId;
+            if ($id <= 0 || !isset($types[$depth])) {
+                return [];
+            }
+            $unit = self::find($id);
+            if (!$unit || $unit['type'] !== $types[$depth]) {
+                return [];
+            }
+            $expectedParent = $depth === 0 ? null : (int) $ids[$depth - 1];
+            $actualParent = $unit['parent_id'] !== null ? (int) $unit['parent_id'] : null;
+            if ($actualParent !== $expectedParent) {
+                return [];
+            }
+            $chain[] = $unit;
+        }
+        return $chain;
+    }
+
+    /**
+     * Reads the posted branch of the tree as an ordered list of ids. Accepts the
+     * JSON array the registration form posts (`unit_path`) and falls back to the
+     * legacy province_id/zone_id/area_id trio so older pages still submit.
+     */
+    public static function decodePath($raw, ?int $legacyAreaId = null): array
+    {
+        $ids = [];
+        if (is_string($raw) && trim($raw) !== '') {
+            $decoded = json_decode(trim($raw), true);
+            if (is_array($decoded)) {
+                foreach ($decoded as $entry) {
+                    $ids[] = is_array($entry) ? (int) ($entry['id'] ?? 0) : (int) $entry;
+                }
+            }
+        }
+        $ids = array_values(array_filter($ids, static fn (int $i): bool => $i > 0));
+        if ($ids) {
+            return $ids;
+        }
+        if ($legacyAreaId !== null && $legacyAreaId > 0) {
+            return array_map(static fn (array $u): int => (int) $u['id'], self::path($legacyAreaId));
+        }
+        return [];
+    }
+
+    /** Level rows with their depth and how many units use them (Unit Levels admin). */
+    public static function levelsWithCounts(): array
+    {
+        // Counted across every church on purpose: this number answers "can I delete this level?", and
+        // `levelDelete()` refuses while ANY church still has a unit of that type. Counting only the
+        // church being served would show 0 and then refuse the delete. `unit_levels` is shared, not
+        // per-church, so both are the platform owner's business.
+        $counts = [];
+        foreach (self::db()->query('SELECT type, COUNT(*) AS n FROM org_units GROUP BY type')->fetchAll() as $r) {
+            $counts[(string) $r['type']] = (int) $r['n'];
+        }
+        $out = [];
+        foreach (self::levels() as $i => $level) {
+            $level['position'] = $i + 1;
+            $level['unit_count'] = $counts[$level['type']] ?? 0;
+            $out[] = $level;
+        }
+        return $out;
+    }
+
+    /** Appends a new level at the bottom of the hierarchy. */
+    public static function levelCreate(string $label, string $plural): array
+    {
+        $label = trim($label);
+        if ($label === '') {
+            return ['errors' => ['Please provide a level name.']];
+        }
+        $plural = trim($plural) !== '' ? trim($plural) : $label . 's';
+        $type = self::levelKey($label);
+        if ($type === '') {
+            return ['errors' => ['Please use at least one letter or number in the level name.']];
+        }
+        if (in_array($type, self::types(), true)) {
+            $type .= '_2';
+        }
+        $next = (int) self::db()->query('SELECT COALESCE(MAX(sort_order), 0) + 1 FROM unit_levels')->fetchColumn();
+        self::db()->prepare('INSERT INTO unit_levels (type, label, plural, sort_order) VALUES (?, ?, ?, ?)')
+            ->execute([$type, $label, $plural, $next]);
+        self::forgetLevels();
+        return ['id' => (int) self::db()->lastInsertId(), 'type' => $type];
+    }
+
+    /** Renames a level (singular + plural). */
+    public static function levelUpdate(string $type, string $label, string $plural): array
+    {
+        $label = trim($label);
+        if ($label === '') {
+            return ['errors' => ['Please provide a level name.']];
+        }
+        if (self::levelIndex($type) === null) {
+            return ['errors' => ['That level no longer exists.']];
+        }
+        $plural = trim($plural) !== '' ? trim($plural) : $label . 's';
+        self::db()->prepare('UPDATE unit_levels SET label = ?, plural = ? WHERE type = ?')->execute([$label, $plural, $type]);
+        self::forgetLevels();
+        return ['type' => $type];
+    }
+
+    /** Moves a level one step up or down the hierarchy. */
+    public static function levelMove(string $type, string $direction): array
+    {
+        $levels = self::levelsWithCounts();
+        $index = null;
+        foreach ($levels as $i => $l) {
+            if ($l['type'] === $type) {
+                $index = $i;
+                break;
+            }
+        }
+        if ($index === null) {
+            return ['errors' => ['That level no longer exists.']];
+        }
+        $swap = $direction === 'up' ? $index - 1 : $index + 1;
+        if ($swap < 0 || $swap >= count($levels)) {
+            return ['errors' => ['That level is already at the ' . ($direction === 'up' ? 'top' : 'bottom') . '.']];
+        }
+        // Rewrite every sort_order in one pass. sort_order is UNIQUE, so park all
+        // rows out of the target range first — otherwise assigning 5 to a level
+        // that is swapping with 4 collides with the row not yet moved.
+        $order = array_column($levels, 'type');
+        [$order[$index], $order[$swap]] = [$order[$swap], $order[$index]];
+        $pdo = self::db();
+        $pdo->beginTransaction();
+        try {
+            $pdo->exec('UPDATE unit_levels SET sort_order = sort_order + 1000');
+            $stmt = $pdo->prepare('UPDATE unit_levels SET sort_order = ? WHERE type = ?');
+            foreach ($order as $i => $t) {
+                $stmt->execute([$i + 1, $t]);
+            }
+            $pdo->commit();
+        } catch (Throwable $e) {
+            $pdo->rollBack();
+            return ['errors' => ['Could not reorder the levels.']];
+        }
+        self::forgetLevels();
+        return ['type' => $type];
+    }
+
+    /** Removes a level — refused while any unit still uses it. */
+    public static function levelDelete(string $type): array
+    {
+        if (self::levelCount() <= 1) {
+            return ['errors' => ['At least one level is required.']];
+        }
+        if (self::levelIndex($type) === null) {
+            return ['errors' => ['That level no longer exists.']];
+        }
+        $stmt = self::db()->prepare('SELECT COUNT(*) FROM org_units WHERE type = ?');
+        $stmt->execute([$type]);
+        $count = (int) $stmt->fetchColumn();
+        if ($count > 0) {
+            return ['errors' => ['Cannot remove ' . self::labelFor($type) . ' — ' . $count . ' unit(s) still use it. Move or delete them first.']];
+        }
+        self::db()->prepare('DELETE FROM unit_levels WHERE type = ?')->execute([$type]);
+        self::forgetLevels();
+        return ['type' => $type];
+    }
+
+    /** Stable key for a new level, e.g. "District Group" → "district_group". */
+    private static function levelKey(string $label): string
+    {
+        return strtolower(trim((string) preg_replace('/[^a-zA-Z0-9]+/', '_', $label), '_'));
     }
 
     public static function all(string $order = 'sort_order ASC, name ASC'): array
     {
-        return self::db()->query("SELECT * FROM org_units ORDER BY {$order}")->fetchAll();
+        return self::allForTenant(self::tenantId(), $order);
+    }
+
+    /**
+     * Every unit of ONE named church, ignoring the church this request is serving.
+     *
+     * For a background worker, which has no host to resolve from: a cron that is holding a campaign,
+     * a sender id or any other row should ask for that row's church rather than the default one.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function allForTenant(int $tenantId, string $order = 'sort_order ASC, name ASC'): array
+    {
+        $stmt = self::db()->prepare("SELECT * FROM org_units WHERE tenant_id = ? ORDER BY {$order}");
+        $stmt->execute([$tenantId]);
+        return $stmt->fetchAll();
     }
 
     public static function find(int $id): ?array
     {
-        $stmt = self::db()->prepare('SELECT * FROM org_units WHERE id = ?');
-        $stmt->execute([$id]);
+        $stmt = self::db()->prepare('SELECT * FROM org_units WHERE id = ? AND tenant_id = ?');
+        $stmt->execute([$id, self::tenantId()]);
         return $stmt->fetch() ?: null;
     }
 
     public static function byType(string $type): array
     {
-        $stmt = self::db()->prepare('SELECT * FROM org_units WHERE type = ? ORDER BY name ASC');
-        $stmt->execute([$type]);
+        $stmt = self::db()->prepare('SELECT * FROM org_units WHERE type = ? AND tenant_id = ? ORDER BY name ASC');
+        $stmt->execute([$type, self::tenantId()]);
         return $stmt->fetchAll();
+    }
+
+    /**
+     * Find a unit by its slug, within the church being served.
+     *
+     * A slug is not an identifier. `org_units.slug` carries a global UNIQUE key, so `?slug=grace-zone`
+     * identifies a row but says nothing about whose it is — five public and app routes took a slug
+     * straight from the query string, and every one of them could hand back another church's unit.
+     * They all come through here now, so the church filter cannot be left out of one of them.
+     */
+    public static function findBySlug(string $slug): ?array
+    {
+        $slug = trim($slug);
+        if ($slug === '') {
+            return null;
+        }
+        $stmt = self::db()->prepare('SELECT * FROM org_units WHERE slug = ? AND tenant_id = ? LIMIT 1');
+        $stmt->execute([$slug, self::tenantId()]);
+        return $stmt->fetch() ?: null;
     }
 
     /** Direct children of a unit, ordered. */
     public static function children(int $parentId): array
     {
-        $stmt = self::db()->prepare('SELECT * FROM org_units WHERE parent_id = ? ORDER BY name ASC');
-        $stmt->execute([$parentId]);
+        $stmt = self::db()->prepare('SELECT * FROM org_units WHERE parent_id = ? AND tenant_id = ? ORDER BY name ASC');
+        $stmt->execute([$parentId, self::tenantId()]);
         return $stmt->fetchAll();
     }
 
@@ -161,7 +512,7 @@ class Unit
     public static function assignableScope(?array $user): array
     {
         if ($user && !empty($user['is_super_admin'])) {
-            return self::all('type ASC, name ASC');
+            return self::sortByLevel(self::all('name ASC'));
         }
         $unitId = ($user && !empty($user['org_unit_id'])) ? (int) $user['org_unit_id'] : 0;
         if ($unitId <= 0) {
@@ -169,12 +520,12 @@ class Unit
         }
         $ids = array_flip(self::subtreeIds($unitId));
         $out = [];
-        foreach (self::all('type ASC, name ASC') as $u) {
+        foreach (self::all('name ASC') as $u) {
             if (isset($ids[(int) $u['id']])) {
                 $out[] = $u;
             }
         }
-        return $out;
+        return self::sortByLevel($out);
     }
 
     /** Whether a unit id is inside the user's assignable scope. */
@@ -186,6 +537,28 @@ class Unit
             }
         }
         return false;
+    }
+
+    /**
+     * The label for one unit in a `<select>`: "Name (type)".
+     *
+     * `assignableScope()` returns whole unit rows, not an `id => label` map. Reading it as a
+     * map is an easy mistake to make and a silent one: `foreach ($units as $id => $label)`
+     * yields the array *index* as the id and the row array as the label, so every option ends
+     * up posting 0, 1, 2 and reading "Array" — and nothing errors, so the picker simply
+     * assigns the wrong church. Writing the label in one place gives that mistake nowhere to
+     * hide, and gives every picker the same wording as the rest of the admin.
+     */
+    public static function optionLabel(array $unit): string
+    {
+        $name = trim((string) ($unit['name'] ?? ''));
+        $type = trim((string) ($unit['type'] ?? ''));
+
+        if ($name === '') {
+            return $type !== '' ? ucfirst($type) : 'Unit';
+        }
+
+        return $type !== '' ? $name . ' (' . $type . ')' : $name;
     }
 
     /** $id plus every descendant id — used for "all media in a unit" roll-ups. */
@@ -233,15 +606,17 @@ class Unit
         return mb_strtoupper(trim($name));
     }
 
-    /** Find a unit by (case-insensitive) name + type + parent. */
+    /** Find a unit by (case-insensitive) name + type + parent, within the church being served. */
     public static function findByName(string $type, string $name, ?int $parentId): ?array
     {
-        $sql = 'SELECT * FROM org_units WHERE type = ? AND UPPER(name) = UPPER(?) AND parent_id ' . ($parentId === null ? 'IS NULL' : '= ?') . ' ORDER BY id ASC LIMIT 1';
+        $sql = 'SELECT * FROM org_units WHERE type = ? AND UPPER(name) = UPPER(?) AND parent_id '
+            . ($parentId === null ? 'IS NULL' : '= ?') . ' AND tenant_id = ? ORDER BY id ASC LIMIT 1';
         $stmt = self::db()->prepare($sql);
         $params = [$type, $name];
         if ($parentId !== null) {
             $params[] = $parentId;
         }
+        $params[] = self::tenantId();
         $stmt->execute($params);
         return $stmt->fetch() ?: null;
     }
@@ -249,8 +624,8 @@ class Unit
     /** Find a unit with this name anywhere in the hierarchy (used for correction flags). */
     public static function findByNameAnywhere(string $name): ?array
     {
-        $stmt = self::db()->prepare('SELECT * FROM org_units WHERE UPPER(name) = UPPER(?) ORDER BY type ASC, id ASC LIMIT 1');
-        $stmt->execute([$name]);
+        $stmt = self::db()->prepare('SELECT * FROM org_units WHERE UPPER(name) = UPPER(?) AND tenant_id = ? ORDER BY id ASC LIMIT 1');
+        $stmt->execute([$name, self::tenantId()]);
         return $stmt->fetch() ?: null;
     }
 
@@ -289,7 +664,7 @@ class Unit
     /** Create a unit; returns ['id'=>..] or ['errors'=>[..]]. */
     public static function create(string $type, ?int $parentId, string $name): array
     {
-        $type = in_array($type, self::types(), true) ? $type : 'province';
+        $type = in_array($type, self::types(), true) ? $type : self::rootType();
         $expectedParent = self::parentType($type);
 
         if ($expectedParent === null) {
@@ -297,10 +672,10 @@ class Unit
         } elseif ($parentId !== null) {
             $parent = self::find($parentId);
             if (!$parent || $parent['type'] !== $expectedParent) {
-                return ['errors' => ['A ' . $type . ' must belong to a ' . $expectedParent . '.']];
+                return ['errors' => [self::parentError($type, $expectedParent)]];
             }
         } else {
-            return ['errors' => ['A ' . $type . ' must belong to a ' . $expectedParent . '.']];
+            return ['errors' => [self::parentError($type, $expectedParent)]];
         }
 
         $name = self::nameFor($name);
@@ -309,8 +684,8 @@ class Unit
         }
 
         $slug = self::uniqueSlug($name);
-        $stmt = self::db()->prepare('INSERT INTO org_units (parent_id, type, name, slug) VALUES (?, ?, ?, ?)');
-        $stmt->execute([$parentId, $type, $name, $slug]);
+        $stmt = self::db()->prepare('INSERT INTO org_units (parent_id, tenant_id, type, name, slug) VALUES (?, ?, ?, ?, ?)');
+        $stmt->execute([$parentId, self::tenantId(), $type, $name, $slug]);
         return ['id' => (int) self::db()->lastInsertId()];
     }
 
@@ -324,7 +699,12 @@ class Unit
         $type = in_array($type, self::types(), true) ? $type : $existing['type'];
         $expectedParent = self::parentType($type);
 
-        if ($parentId !== null && in_array($id, self::subtreeIds($parentId), true)) {
+        // The new parent must not be this unit or one of its own descendants — that is a cycle.
+        // The check used to read the other way round (`$id` inside `subtreeIds($parentId)`), which
+        // is true for every ordinary edit, because a unit is always a descendant of the parent it
+        // already has. So keeping a church under its existing parent was refused with "a unit cannot
+        // be nested inside itself", and renaming one was impossible unless the parent changed too.
+        if ($parentId !== null && in_array($parentId, self::subtreeIds($id), true)) {
             return ['errors' => ['A unit cannot be nested inside itself or one of its own children.']];
         }
         if ($expectedParent === null) {
@@ -332,10 +712,10 @@ class Unit
         } elseif ($parentId !== null) {
             $parent = self::find($parentId);
             if (!$parent || $parent['type'] !== $expectedParent) {
-                return ['errors' => ['A ' . $type . ' must belong to a ' . $expectedParent . '.']];
+                return ['errors' => [self::parentError($type, $expectedParent)]];
             }
         } else {
-            return ['errors' => ['A ' . $type . ' must belong to a ' . $expectedParent . '.']];
+            return ['errors' => [self::parentError($type, $expectedParent)]];
         }
 
         $name = self::nameFor($name);
@@ -344,19 +724,27 @@ class Unit
         }
 
         $slug = self::uniqueSlug($name, $id);
-        $stmt = self::db()->prepare('UPDATE org_units SET parent_id = ?, type = ?, name = ?, slug = ? WHERE id = ?');
-        $stmt->execute([$parentId, $type, $name, $slug, $id]);
+        // The church is on the statement, not only on the `find()` above it: the caller posts a bare
+        // id, and a where-clause is the one place a scope cannot be forgotten or raced past.
+        $stmt = self::db()->prepare('UPDATE org_units SET parent_id = ?, type = ?, name = ?, slug = ? WHERE id = ? AND tenant_id = ?');
+        $stmt->execute([$parentId, $type, $name, $slug, $id, self::tenantId()]);
         return ['id' => $id];
     }
 
     /** Delete a unit (children cascade; posts/users under it are set to NULL). */
     public static function delete(int $id): void
     {
-        self::db()->prepare('DELETE FROM org_units WHERE id = ?')->execute([$id]);
+        // Scoped for the same reason as update(): the id arrives straight from a form, and the
+        // children cascade, so an unscoped delete reaches two levels further than it looks.
+        self::db()->prepare('DELETE FROM org_units WHERE id = ? AND tenant_id = ?')->execute([$id, self::tenantId()]);
     }
 
     private static function uniqueSlug(string $name, ?int $ignoreId = null): string
     {
+        // Deliberately NOT scoped to the church: `org_units.slug` carries a global UNIQUE key, so a
+        // per-church check would hand two churches the same slug and the INSERT would then fail on a
+        // duplicate key. Two churches wanting the same parish name is normal, so the second one gets
+        // the "-2" suffix. Making slugs per-church means changing that key, which is its own job.
         $base = strtolower(trim((string) preg_replace('/[^a-zA-Z0-9]+/', '-', $name), '-')) ?: 'unit';
         $slug = $base;
         $i = 2;

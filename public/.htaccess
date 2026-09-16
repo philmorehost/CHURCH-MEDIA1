@@ -14,7 +14,10 @@ DirectoryIndex index.php
     RewriteCond %{THE_REQUEST} ^[A-Z]{3,9}\s/([^?\s]*)\.php[\s?] [NC]
     RewriteRule ^ /%1 [R=301,L]
 
-    # Real files/directories (uploads, assets, favicon.ico) are served as-is
+    # Real files/directories (uploads, assets) are served as-is.
+    # There is deliberately NO public/favicon.ico: the icon is served by the
+    # /favicon.ico route from the favicon saved in admin settings, and a real file
+    # here would be served first and win, showing the same icon on every site.
     RewriteCond %{REQUEST_FILENAME} -f [OR]
     RewriteCond %{REQUEST_FILENAME} -d
     RewriteRule ^ - [L]

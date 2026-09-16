@@ -3,26 +3,83 @@ declare(strict_types=1);
 /** @var string $metaTitle */
 /** @var string $metaDescription */
 /** @var string|null $metaRobots */
+/** @var string|null $metaCanonical */
+/** @var string|null $metaOgType */
+/** @var string|null $metaImage */
+/** @var int|null $metaImageWidth */
+/** @var int|null $metaImageHeight */
+/** @var string|null $metaPublishedTime */
 $s = settings();
 $path = rtrim((string) parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH), '/') ?: '/';
 $metaTitle ??= $s['site_title'];
 $metaDescription ??= $s['meta_description'] ?? $s['site_tagline'] ?? '';
 $isLive = !empty($s['livestream_is_live']);
 
+/*
+ * Top-level navigation.
+ *
+ * The site has 13 public pages. Listed side by side they wrapped onto a second
+ * row on laptop screens, so they are grouped into four dropdowns — Media, The
+ * Word, Community and Connect — leaving a five-item bar. Every route that was
+ * reachable before is still one click away inside a group.
+ *
+ * A parent's `href` is its landing page (also what a keyboard or no-JS visitor
+ * can still click). Add entries to a group's `children`, or append a new
+ * top-level array with `'children' => []` to put an item back on the bar itself.
+ *
+ * Every label goes through `t()`, because the navigation is the one part of the
+ * site a visitor in the wrong language has to be able to read before they can
+ * find the switcher. The single exception is the unit link below, which is the
+ * church's own word for its own structure — see lang/en.php.
+ */
 $navTree = [
-    ['href' => '/', 'label' => 'Home', 'children' => []],
-    ['href' => '/feed', 'label' => 'Feed', 'children' => []],
-    ['href' => '/media', 'label' => 'Media', 'children' => []],
-    ['href' => '/events', 'label' => 'Events', 'children' => []],
-    ['href' => '/sermons', 'label' => 'Sermons', 'children' => []],
-    ['href' => '/units', 'label' => 'Parishes', 'children' => []],
-    ['href' => '/bible', 'label' => 'Bible', 'children' => []],
-    ['href' => '/live', 'label' => 'Live', 'children' => []],
-    ['href' => '/testimonies', 'label' => 'Testimonies', 'children' => []],
-    ['href' => '/about', 'label' => 'About', 'children' => []],
-    ['href' => '/contact', 'label' => 'Contact', 'children' => []],
-    ['href' => '/advertise', 'label' => 'Advertise', 'children' => []],
-    ['href' => '/register', 'label' => 'Register', 'children' => []],
+    ['href' => '/', 'label' => t('nav.home'), 'children' => []],
+    // News sits on the bar itself rather than inside a dropdown. It is the one part of the site that
+    // arrives with a URL somebody typed, a link somebody shared, and a search result somebody tapped,
+    // so it has to be reachable from the front page in one click rather than two.
+    ['href' => '/news', 'label' => t('nav.news'), 'children' => []],
+    [
+        'href' => '/feed',
+        'label' => t('nav.media'),
+        'children' => [
+            ['href' => '/feed', 'label' => t('nav.video_feed')],
+            ['href' => '/media', 'label' => t('nav.media_gallery')],
+            ['href' => '/live', 'label' => t('nav.watch_live')],
+        ],
+    ],
+    [
+        'href' => '/sermons',
+        'label' => t('nav.word'),
+        'children' => [
+            ['href' => '/sermons', 'label' => t('nav.sermons')],
+            ['href' => '/bible', 'label' => t('nav.bible')],
+            ['href' => '/devotional', 'label' => t('nav.devotional')],
+        ],
+    ],
+    [
+        'href' => '/events',
+        'label' => t('nav.community'),
+        'children' => [
+            ['href' => '/events', 'label' => t('nav.events')],
+            ['href' => '/units', 'label' => Unit::pluralFor(Unit::leafType())],
+            ['href' => '/testimonies', 'label' => t('nav.testimonies')],
+            ['href' => '/prayer', 'label' => t('nav.prayer_wall')],
+        ],
+    ],
+    [
+        'href' => '/about',
+        'label' => t('nav.connect'),
+        'children' => [
+            ['href' => '/about', 'label' => t('nav.about')],
+            ['href' => '/contact', 'label' => t('nav.contact')],
+            ['href' => '/advertise', 'label' => t('nav.advertise')],
+            ['href' => '/register', 'label' => t('nav.register')],
+            // One link for both states on purpose: /member/login redirects a signed-in
+            // member straight to /member, so this never says "Sign In" to somebody who
+            // already is — and the partial never has to touch the session to know.
+            ['href' => '/member/login', 'label' => t('nav.sign_in')],
+        ],
+    ],
 ];
 try {
     $navPages = Database::getInstance()->getConnection()
@@ -69,21 +126,97 @@ try {
     error_log('CMS nav skipped: ' . $e->getMessage());
 }
 ?><!doctype html>
-<html lang="en">
+<html lang="<?= e(Lang::current()) ?>">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title><?= e($metaTitle) ?><?= $metaTitle !== $s['site_title'] ? ' · ' . e($s['site_title']) : '' ?></title>
 <meta name="description" content="<?= e($metaDescription) ?>">
 <?php if (!empty($metaRobots)): ?><meta name="robots" content="<?= e($metaRobots) ?>"><?php endif; ?>
-<link rel="canonical" href="<?= e(baseUrl($path === '/' ? '' : ltrim($path, '/'))) ?>">
-<link rel="icon" href="/favicon.ico">
+<?php
+/*
+ * The canonical URL, derived from the path unless a view overrides it.
+ *
+ * The news archive is the reason `$metaCanonical` exists. Page 2 of `/news` is the same path with
+ * `?page=2`, and a canonical that dropped the query string would tell a search engine that every page
+ * of the archive is one page — which is how the second page of a story list ends up never indexed.
+ * A single canonical is still right for every other view, because nothing else here paginates.
+ */
+$canonical = $metaCanonical ?? baseUrl($path === '/' ? '' : ltrim($path, '/'));
+?>
+<link rel="canonical" href="<?= e($canonical) ?>">
+<?php
+// The icon is served by the /favicon.ico *route*, which reads the favicon saved in
+// Settings — there is deliberately no public/favicon.ico on disk, because the web
+// server serves existing files ahead of the front controller and that file used to
+// win, showing the same icon on every site built from this code.
+//
+// The query string changes with the file's timestamp: browsers hang on to a favicon
+// far more stubbornly than any other asset, so a bare /favicon.ico keeps showing the
+// old icon long after a new one is saved.
+$faviconFile = (string) ($s['favicon_path'] ?? '');
+$faviconVersion = $faviconFile !== '' && is_file(UPLOADS_PATH . '/' . $faviconFile)
+    ? (string) filemtime(UPLOADS_PATH . '/' . $faviconFile)
+    : 'default';
+?>
+<link rel="icon" href="/favicon.ico?v=<?= e($faviconVersion) ?>">
+<meta property="og:site_name" content="<?= e($s['site_title']) ?>">
 <meta property="og:title" content="<?= e($metaTitle) ?>">
 <meta property="og:description" content="<?= e($metaDescription) ?>">
-<meta property="og:type" content="website">
-<meta property="og:url" content="<?= e(baseUrl($path)) ?>">
-<?php if ($s['logo_path'] ?? null): ?><meta property="og:image" content="<?= e(uploadUrl($s['logo_path'])) ?>"><?php endif; ?>
+<?php /* A story says it is a story. `article` is what lets a shared link render as a piece of writing
+         rather than a generic site card, and it is the only type that makes the published time below
+         meaningful to a crawler at all. */ ?>
+<meta property="og:type" content="<?= e($metaOgType ?? 'website') ?>">
+<meta property="og:url" content="<?= e($canonical) ?>">
+<?php if (!empty($metaPublishedTime)): ?>
+  <meta property="article:published_time" content="<?= e($metaPublishedTime) ?>">
+<?php endif; ?>
+<?php
+// og:image prefers a generated share card (views set $metaImage for that), then
+// the church logo. The generated card is what makes a WhatsApp share show a
+// proper preview instead of a bare link.
+$ogImage = $metaImage ?? null;
+if (!$ogImage && ($s['logo_path'] ?? null)) {
+    $ogImage = uploadUrl($s['logo_path']);
+}
+
+// A view that knows the image's real size passes it in. A news photo is 1280px wide, not 1200 —
+// declaring the wrong pair of numbers is a claim about an image the crawler is about to measure.
+$ogWidth = (int) ($metaImageWidth ?? 0);
+$ogHeight = (int) ($metaImageHeight ?? 0);
+if ($ogWidth < 1) { $ogWidth = 1200; }
+if ($ogHeight < 1) { $ogHeight = 630; }
+?>
+<?php if ($ogImage): ?>
+  <meta property="og:image" content="<?= e($ogImage) ?>">
+  <meta property="og:image:width" content="<?= $ogWidth ?>">
+  <meta property="og:image:height" content="<?= $ogHeight ?>">
+  <meta property="og:image:alt" content="<?= e($metaTitle) ?>">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="<?= e($ogImage) ?>">
+<?php else: ?>
+  <?php /* Without an image a large card renders as a blank box. */ ?>
+  <meta name="twitter:card" content="summary">
+<?php endif; ?>
 <meta name="theme-color" content="#0a0912">
+<?php /*
+         The manifest is generated per church (views/manifest.php) rather than being a static file, so
+         the name under the icon on a home screen is this church's name. `apple-touch-icon` is the same
+         image for iOS, which ignores `manifest` icons entirely when a site is added to the home screen.
+       */ ?>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/assets/logo.png">
+<?php /*
+         iOS ignores the manifest for the name under a home-screen icon and uses this instead, so the
+         church's name has to be here too or the icon is captioned with whatever the page title happens
+         to be. Same helper as the manifest's `short_name`, so the two cannot drift apart. The manifest's
+         `display: standalone` covers the full-screen launch on iOS 16.4 and later.
+       */ ?>
+<meta name="apple-mobile-web-app-title" content="<?= e(appShortName()) ?>">
+<?php /* Lets a podcast app find the feed from any page, which is how a listener who lands on the
+         website ends up subscribing instead of having to be sent the address. */ ?>
+<link rel="alternate" type="application/rss+xml" title="Podcast" href="<?= e(baseUrl('/podcast.xml')) ?>">
+<link rel="alternate" type="application/rss+xml" title="News" href="<?= e(baseUrl('/news.xml')) ?>">
 <link rel="stylesheet" href="<?= asset('css/site.css') ?>">
 <script type="application/ld+json"><?= json_encode([
     '@context' => 'https://schema.org',
@@ -104,7 +237,11 @@ $goMode = ($s['go_declaration_mode'] ?? 'marquee') === 'static' ? 'static' : 'ma
 <?php if ($goEnabled): ?>
   <div class="go-declaration-bar go-declaration-<?= $goMode ?>">
     <div class="go-declaration-badge">
-      <span class="go-icon">✨</span>
+      <svg class="go-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+        <path d="M11 5 6 9H3v6h3l5 4V5z"/>
+        <path d="M15.5 8.5a5 5 0 0 1 0 7"/>
+        <path d="M18.5 5.5a9 9 0 0 1 0 13"/>
+      </svg>
       <strong><?= e($goTitle) ?>:</strong>
     </div>
     <?php if ($goMode === 'marquee'): ?>
@@ -133,39 +270,48 @@ $goMode = ($s['go_declaration_mode'] ?? 'marquee') === 'static' ? 'static' : 'ma
       <?= e($s['site_title']) ?>
     </a>
     <nav data-nav-links class="nav-links">
-      <?php foreach ($navTree as $item): ?>
+      <?php foreach ($navTree as $navIndex => $item): ?>
         <?php
-          $href = $item['href'];
-          $label = $item['label'];
+          $href = (string) ($item['href'] ?? '');
+          $label = (string) ($item['label'] ?? '');
           $children = $item['children'] ?? [];
-          $isActive = ($path === $href);
+          $isActive = ($href !== '' && $path === $href);
           if (!$isActive && $children) {
               foreach ($children as $c) {
-                  if ($path === $c['href']) { $isActive = true; break; }
+                  if ($path === ($c['href'] ?? '')) { $isActive = true; break; }
               }
           }
+          /* The id comes from the item's position, not from its label. It used to be slugged from the
+             label, and slugging a translated label is lossy: every accented character in `[^a-z0-9]+`
+             becomes a hyphen, so a Yorùbá "Ìwé" and "Ìwò" both slug to "-w-" and the page then carries
+             duplicate ids with two `aria-controls` pointing at the same element. A position cannot
+             collide. */
+          $menuId = 'nav-menu-' . (int) $navIndex;
         ?>
         <?php if ($children): ?>
           <div class="nav-dropdown-wrap">
-            <a href="<?= e($href) ?>" class="nav-item-link <?= $isActive ? 'active' : '' ?>">
-              <?= e($label) ?> <span class="nav-caret">▾</span>
+            <a href="<?= e($href !== '' ? $href : '#') ?>" class="nav-item-link <?= $isActive ? 'active' : '' ?>" aria-haspopup="true">
+              <?= e($label) ?><span class="nav-caret" aria-hidden="true">▾</span>
             </a>
-            <div class="nav-dropdown-menu">
+            <button type="button" class="nav-dropdown-toggle" data-nav-dropdown-toggle
+                    aria-expanded="false" aria-controls="<?= e($menuId) ?>"
+                    aria-label="<?= e(t('nav.show_menu', [':label' => $label])) ?>"><span aria-hidden="true">▾</span></button>
+            <div class="nav-dropdown-menu" id="<?= e($menuId) ?>">
               <?php foreach ($children as $child): ?>
                 <a href="<?= e($child['href']) ?>" class="<?= $path === $child['href'] ? 'active' : '' ?>">
-                  <?= e($child['label']) ?>
+                  <?= e($child['label']) ?><?php if (($child['href'] ?? '') === '/live' && $isLive): ?> <span class="nav-live"><span class="dot"></span><?= e(t('nav.live')) ?></span><?php endif; ?>
                 </a>
               <?php endforeach; ?>
             </div>
           </div>
         <?php else: ?>
           <a href="<?= e($href) ?>" class="<?= $isActive ? 'active' : '' ?>">
-            <?= e($label) ?><?php if ($href === '/live' && $isLive): ?> <span class="nav-live"><span class="dot"></span>LIVE</span><?php endif; ?>
+            <?= e($label) ?><?php if ($href === '/live' && $isLive): ?> <span class="nav-live"><span class="dot"></span><?= e(t('nav.live')) ?></span><?php endif; ?>
           </a>
         <?php endif; ?>
       <?php endforeach; ?>
     </nav>
-    <button class="nav-toggle" data-nav-toggle aria-label="Menu">☰</button>
+    <button class="nav-toggle" data-nav-toggle aria-label="<?= e(t('nav.menu')) ?>">☰</button>
   </div>
 </header>
 

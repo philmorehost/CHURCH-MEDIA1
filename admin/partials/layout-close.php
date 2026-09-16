@@ -21,5 +21,6 @@
   sidebar.querySelectorAll('a').forEach(function (a) { a.addEventListener('click', close); });
 })();
 </script>
+<script src="<?= asset('js/admin.js') ?>"></script>
 </body>
 </html>

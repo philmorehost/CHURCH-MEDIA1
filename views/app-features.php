@@ -148,7 +148,7 @@ $mark = e(mb_substr((string) $s['site_title'], 0, 1));
         <ul>
           <li>Upcoming events with details and RSVP links</li>
           <li>Sermon archive with audio, video, speaker &amp; scripture</li>
-          <li>Fresh content from every parish in your network</li>
+          <li>Fresh content from every church in your network</li>
         </ul>
       </div>
 
@@ -184,9 +184,9 @@ $mark = e(mb_substr((string) $s['site_title'], 0, 1));
 
       <div class="appf-card">
         <div class="ic">📍</div>
-        <h3>Parishes &amp; Online Giving</h3>
+        <h3>Churches &amp; Online Giving</h3>
         <ul>
-          <li>Browse the Province → Zone → Area → Parish network</li>
+          <li>Browse the whole church network — every level, down to each church</li>
           <li>Online Tithes, Offerings &amp; Pledges via Payhub or Bank Transfer</li>
           <li>Live streaming, contact links, and instant search</li>
         </ul>
@@ -197,7 +197,7 @@ $mark = e(mb_substr((string) $s['site_title'], 0, 1));
       <div class="appf-fact"><b>2+</b><span>Offline Bible versions</span></div>
       <div class="appf-fact"><b>Instant</b><span>Reels &amp; notifications</span></div>
       <div class="appf-fact"><b>100%</b><span>Free to download</span></div>
-      <div class="appf-fact"><b>Multi</b><span>Parish &amp; province network</span></div>
+      <div class="appf-fact"><b>Multi</b><span>Church &amp; group network</span></div>
     </div>
   </div>
 </section>
