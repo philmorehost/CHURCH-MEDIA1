@@ -68,6 +68,9 @@
     var row = document.createElement('div');
     row.className = 'form-field-row';
     row.draggable = true;
+    // Carried so a save can update this field in place. Answers are stored against the field id, so
+    // renumbering the fields on every save would orphan every response already collected.
+    if (field.id) { row.dataset.fieldId = String(field.id); }
 
     var grip = document.createElement('div');
     grip.className = 'drag-grip';
@@ -244,6 +247,7 @@
     var fields = [];
     container.querySelectorAll('.form-field-row').forEach(function (row) {
       fields.push({
+        id: row.dataset.fieldId || '',
         label: row.querySelector('.ff-label').value.trim(),
         type: row.querySelector('.ff-type').value,
         placeholder: row.querySelector('.ff-placeholder').value.trim(),

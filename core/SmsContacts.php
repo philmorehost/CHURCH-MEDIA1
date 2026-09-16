@@ -645,19 +645,28 @@ final class SmsContacts
         // different pass: find the phone-type fields, then read those keys out.
         $report['form'] = ['label' => 'Form submissions', 'found' => 0, 'added' => 0, 'updated' => 0, 'skipped' => 0];
         try {
-            $phoneFields = $pdo->query("SELECT id, form_id FROM form_fields WHERE field_type = 'phone'")->fetchAll();
-            if ($phoneFields) {
+            $allFields = $pdo->query('SELECT id, form_id, field_type FROM form_fields ORDER BY form_id, sort_order, id')->fetchAll();
+            if ($allFields) {
                 $byForm = [];
-                foreach ($phoneFields as $field) {
-                    $byForm[(int) $field['form_id']][] = (int) $field['id'];
+                $fieldsByForm = [];
+                foreach ($allFields as $field) {
+                    $fieldsByForm[(int) $field['form_id']][] = $field;
+                    if ($field['field_type'] === 'phone') {
+                        $byForm[(int) $field['form_id']][] = (int) $field['id'];
+                    }
                 }
                 foreach ($pdo->query('SELECT id, form_id, data FROM form_submissions ORDER BY id ASC')->fetchAll() as $submission) {
-                    $data = json_decode((string) $submission['data'], true);
-                    if (!is_array($data)) {
+                    $formId = (int) $submission['form_id'];
+                    $raw = json_decode((string) $submission['data'], true);
+                    if (!is_array($raw)) {
                         continue;
                     }
-                    foreach ($byForm[(int) $submission['form_id']] ?? [] as $fieldId) {
-                        $value = $data[$fieldId] ?? $data[(string) $fieldId] ?? null;
+                    // An answer is stored against its field id, and formSubmissionValues maps those keys
+                    // onto the current ids — without it a submission taken before the form was re-saved
+                    // contributes no phone numbers at all, silently.
+                    $data = formSubmissionValues($fieldsByForm[$formId] ?? [], $raw);
+                    foreach ($byForm[$formId] ?? [] as $fieldId) {
+                        $value = $data[(string) $fieldId] ?? null;
                         if (!is_scalar($value) || trim((string) $value) === '') {
                             continue;
                         }

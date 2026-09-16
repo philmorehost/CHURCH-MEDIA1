@@ -718,6 +718,48 @@ function formUnlocked(array $form): bool
     return $user !== null && Unit::inScope($user, (int) ($form['org_unit_id'] ?? 0));
 }
 
+/**
+ * A submission's answers, keyed by the CURRENT field ids.
+ *
+ * `form_submissions.data` is a JSON map of form_fields.id => value, so an answer is only findable
+ * while its field keeps that id. Saving a form used to DELETE every field and re-insert it, which
+ * handed them all brand-new auto-increment ids and left every earlier submission addressing ids
+ * that no longer existed: the response kept its timestamp and IP address but every answer read as
+ * blank, and the CSV export came out with empty answer columns. Saving is id-stable now, and this
+ * maps the old keys back onto the current fields so answers stored before that fix are readable.
+ *
+ * The recovery is deliberately narrow - it runs only when NOT ONE stored key matches a current
+ * field id, and only when the submission has exactly one value per field. The map was written in
+ * field order, so pairing the keys with the current fields in order restores those rows; anything
+ * looser risks printing one question's answer under another question's label, which is worse than
+ * showing nothing at all.
+ */
+function formSubmissionValues(array $fields, array $data): array
+{
+    $values = [];
+    foreach ($fields as $field) {
+        $values[(string) $field['id']] = $data[(string) $field['id']] ?? '';
+    }
+
+    $matched = 0;
+    foreach ($fields as $field) {
+        if (array_key_exists((string) $field['id'], $data)) {
+            $matched++;
+        }
+    }
+    if ($matched > 0 || count($data) !== count($fields)) {
+        return $values; // A normal row, or nothing that can be paired up safely.
+    }
+
+    $stored = array_values($data);
+    $i = 0;
+    foreach ($fields as $field) {
+        $values[(string) $field['id']] = $stored[$i] ?? '';
+        $i++;
+    }
+    return $values;
+}
+
 /** Stashes the raw POST payload so the public form can repopulate inputs after a validation error. */
 function keepFormOld(array $input): void
 {

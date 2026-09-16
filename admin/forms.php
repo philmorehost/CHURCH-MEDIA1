@@ -59,7 +59,7 @@ function formExportData(array $form, array $subFields, array $rows): array
     }
     $out = [];
     foreach ($rows as $row) {
-        $data = json_decode((string) $row['data'], true) ?: [];
+        $data = formSubmissionValues($subFields, json_decode((string) $row['data'], true) ?: []);
         $line = [$row['created_at'], $row['ip_address'] ?? ''];
         foreach ($subFields as $f) {
             $value = $data[(string) $f['id']] ?? '';
@@ -118,6 +118,7 @@ function validateFieldPayload(array $fields): array
             continue;
         }
         $clean[] = [
+            'id' => (int) ($field['id'] ?? 0),
             'label' => mb_substr($label, 0, 255),
             'field_type' => $type,
             'placeholder' => mb_substr(trim((string) ($field['placeholder'] ?? '')), 0, 255),
@@ -201,13 +202,32 @@ if (in_array($action, ['create', 'edit'], true) && $_SERVER['REQUEST_METHOD'] ==
             $pdo->prepare('UPDATE forms SET title = ?, slug = ?, description = ?, submit_label = ?, end_at = ?, is_active = ?, visibility = ?, password_hash = ? WHERE id = ?')
                 ->execute([$title, $slug, $description, $submitLabelValue, $endAtValue, $isActive, $visibility, $passHash, $id]);
             $formId = $id;
-            $pdo->prepare('DELETE FROM form_fields WHERE form_id = ?')->execute([$formId]);
             flash('success', 'Form updated.');
         }
 
+        // The field ids are preserved across a save, and this is load-bearing: a submission's answers
+        // are a JSON map of field id => value, so re-inserting every field with a fresh id orphaned
+        // every response already collected - the row kept its timestamp and IP address while every
+        // answer read as blank. Existing rows are updated in place, new ones inserted, and only the
+        // fields that are genuinely gone get deleted (their old answers stay in the payload).
+        $keptIds = [];
+        $existingIds = array_map('intval', array_column(formFieldsFor($pdo, $formId), 'id'));
         $insert = $pdo->prepare('INSERT INTO form_fields (form_id, label, field_type, placeholder, options, required, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)');
+        $update = $pdo->prepare('UPDATE form_fields SET label = ?, field_type = ?, placeholder = ?, options = ?, required = ?, sort_order = ? WHERE id = ? AND form_id = ?');
         foreach ($fields as $f) {
-            $insert->execute([$formId, $f['label'], $f['field_type'], $f['placeholder'] ?: null, $f['options'] ?: null, $f['required'], $f['sort_order']]);
+            $values = [$f['label'], $f['field_type'], $f['placeholder'] ?: null, $f['options'] ?: null, $f['required'], $f['sort_order']];
+            if ($f['id'] > 0 && in_array($f['id'], $existingIds, true)) {
+                $update->execute(array_merge($values, [$f['id'], $formId]));
+                $keptIds[] = $f['id'];
+            } else {
+                $insert->execute(array_merge([$formId], $values));
+                $keptIds[] = (int) $pdo->lastInsertId();
+            }
+        }
+        if ($keptIds) {
+            $pdo->prepare('DELETE FROM form_fields WHERE form_id = ? AND id NOT IN (' . implode(',', array_fill(0, count($keptIds), '?')) . ')')->execute(array_merge([$formId], $keptIds));
+        } else {
+            $pdo->prepare('DELETE FROM form_fields WHERE form_id = ?')->execute([$formId]);
         }
         redirect('/admin/forms?action=edit&id=' . $formId . ($action === 'create' ? '&created=1' : ''));
     }
@@ -513,7 +533,7 @@ require __DIR__ . '/partials/layout-open.php';
     <?php else: ?>
       <table>
         <tr><th>#</th><th>Submitted</th><th>IP</th><th>Answers</th><th></th></tr>
-        <?php foreach ($submissions as $i => $sub): $data = json_decode((string) $sub['data'], true) ?: []; ?>
+        <?php foreach ($submissions as $i => $sub): $data = formSubmissionValues($subFields, json_decode((string) $sub['data'], true) ?: []); ?>
         <tr>
           <td><?= count($submissions) - $i ?></td>
           <td><?= e(date('M j, Y g:i A', strtotime($sub['created_at']))) ?></td>
