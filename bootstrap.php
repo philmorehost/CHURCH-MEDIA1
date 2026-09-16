@@ -29,7 +29,7 @@ spl_autoload_register(function (string $class): void {
 
 require_once CORE_PATH . '/helpers.php';
 
-define('ASSET_VERSION', $isLocal ? (string) time() : '1.0.9');
+define('ASSET_VERSION', $isLocal ? (string) time() : '1.0.10');
 
 if (PHP_SAPI !== 'cli') {
     header('X-Content-Type-Options: nosniff');

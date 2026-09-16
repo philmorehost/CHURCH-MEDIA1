@@ -21,8 +21,10 @@ h1,h2,h3,h4{font-family:var(--serif); font-weight:700; line-height:1.15; margin:
 p{margin:0 0 1em;}
 .container{max-width:var(--container); margin:0 auto; padding:0 24px;}
 .eyebrow{text-transform:uppercase; letter-spacing:.14em; font-size:12px; font-weight:700; color:var(--gold-soft);}
-.section{padding:88px 0;}
-@media (max-width:768px){.section{padding:56px 0;}}
+/* Section rhythm. Two stacked sections leave padding-bottom + padding-top between them, so 56px here
+   is 112px of air. It was 88px (176px between sections), which read as a hole in the page. */
+.section{padding:56px 0;}
+@media (max-width:768px){.section{padding:40px 0;}}
 .section-head{max-width:640px; margin:0 auto 44px; text-align:center;}
 .section-head h2{font-size:clamp(28px,4vw,40px);}
 .section-head p{color:var(--ink-dim);}
@@ -537,7 +539,7 @@ select option:disabled{color:var(--ink-faint);}
   .container{padding:0 16px;}
   .nav-brand{font-size:15px;}
   .nav-links{inset:60px 0 0 0; padding:12px;}
-  .section{padding:48px 0;}
+  .section{padding:36px 0;}
   .grid{gap:16px;}
   .hero-content h1{font-size:clamp(32px,9vw,40px);}
   .btn{padding:13px 22px;}
