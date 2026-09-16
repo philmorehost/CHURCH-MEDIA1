@@ -37,17 +37,6 @@ class Auth
             return false;
         }
 
-        // The credentials are good — but are they good *here*? An admin belongs to one church,
-        // and the site being served is whichever church the hostname resolves to, so the two
-        // have to match. The refusal is deliberately the same generic one as a wrong password:
-        // a different message would let somebody learn that a username exists on another site.
-        // Counted as a failed attempt as well, because valid credentials for the wrong church
-        // are exactly the thing worth seeing in the security log.
-        if (!self::allowedOnTenant($user)) {
-            $guard->handleFailedLogin(clientIp(), $username);
-            return false;
-        }
-
         if ($needsRehash) {
             $newHash = password_hash($password, PASSWORD_ARGON2ID);
             $pdo->prepare('UPDATE users SET password = ? WHERE id = ?')->execute([$newHash, (int) $user['id']]);
@@ -87,14 +76,6 @@ class Auth
         if (!self::check()) {
             redirect('/admin/login');
         }
-        // A session outlives a change of church: an account moved to another church — or left
-        // unassigned — must not keep browsing the one it signed in on. Every admin page calls
-        // this at the top, before anything is written, so the redirect is clean.
-        $user = self::user();
-        if ($user !== null && !self::allowedOnTenant($user)) {
-            self::logout();
-            redirect('/admin/login');
-        }
     }
 
     public static function requireRole(string ...$roles): void
@@ -105,33 +86,6 @@ class Auth
             http_response_code(403);
             exit('You do not have permission to view this page.');
         }
-    }
-
-    /**
-     * Whether this account may sign in on the church currently being served.
-     *
-     * Super admins are platform-wide. They own the install and choose which church to work on
-     * with the switcher from inside the panel, so gating them by church would lock the only
-     * account that can set a second church up out of it.
-     *
-     * Everybody else belongs to exactly one church — `users.tenant_id` — and may only sign in
-     * where that church is the one being served. 0 means "no church assigned", which no tenant
-     * resolves to, so such an account is refused rather than quietly let in everywhere.
-     *
-     * The `array_key_exists` branch is a safety net rather than a state that should occur: if the
-     * column is missing then `2026_38_user_tenants` has not run against this database, and
-     * behaving as the code did before that migration is better than locking every admin out.
-     */
-    public static function allowedOnTenant(array $user): bool
-    {
-        if (!empty($user['is_super_admin'])) {
-            return true;
-        }
-        if (!array_key_exists('tenant_id', $user)) {
-            return true;
-        }
-        $tenantId = class_exists('Tenant') ? Tenant::id() : null;
-        return (int) $user['tenant_id'] === (int) ($tenantId ?? 0);
     }
 
     /** Whether the current user is the flagged super-admin (owner) account. */

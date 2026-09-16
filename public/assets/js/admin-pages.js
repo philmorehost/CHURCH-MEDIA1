@@ -114,9 +114,6 @@
         var img = el('img');
         img.src = path.indexOf('http') === 0 ? path : '/uploads/' + path;
         img.alt = '';
-        // The picker's buttons and rows are draggable, and an image is natively draggable,
-        // so grabbing the preview would start an image drag and hijack reordering.
-        img.draggable = false;
         preview.appendChild(img);
         clearBtn.hidden = false;
       } else {
@@ -161,122 +158,30 @@
     return wrap;
   }
 
-  function buildColumnsEditor(data) {
-    var wrap = el('div', 'cms-cols-editor');
-    var colsCount = Math.min(4, Math.max(1, parseInt(data.layout_columns || (Array.isArray(data.columns) ? data.columns.length : 3), 10) || 3));
-
-    var topRow = el('div', 'cms-cols-ctrls', { style: 'display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; gap:12px; flex-wrap:wrap;' });
-    var layoutLabel = el('label', 'cms-label', { style: 'margin:0;' });
-    layoutLabel.textContent = 'Columns Per Row (Max 4): ';
-    var colSelect = selectInput(colsCount, [[1, '1 Column (Full Width)'], [2, '2 Columns'], [3, '3 Columns'], [4, '4 Columns']]);
-    colSelect.style.width = 'auto';
-    colSelect.style.marginBottom = '0';
-    layoutLabel.appendChild(colSelect);
-
-    var addCardBtn = el('button', 'btn secondary sm', { type: 'button' });
-    addCardBtn.textContent = '+ Add Card Item';
-
-    topRow.appendChild(layoutLabel);
-    topRow.appendChild(addCardBtn);
-
-    var grid = el('div', 'cms-cols-grid cols-' + colsCount, { style: 'display:grid; gap:12px; margin-bottom:12px;' });
-    grid.dataset.layoutColumns = colsCount;
-
-    colSelect.addEventListener('change', function () {
-      var n = parseInt(colSelect.value, 10);
-      grid.className = 'cms-cols-grid cols-' + n;
-      grid.dataset.layoutColumns = n;
-    });
-
-    function createCardNode(colData) {
-      colData = colData || { heading: '', body: '', link: '', image: '', alt: '' };
-      var card = el('div', 'cms-col-card', { draggable: 'true', style: 'border:1px solid var(--border); border-radius:10px; padding:12px; background:#0f0d1f; cursor:grab;' });
-
-      var cardGrip = el('div', 'card-grip', { style: 'display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid #1f1b3a;' });
-      var gripTitle = el('span', null, { style: 'font-size:11px; font-weight:700; color:var(--gold-soft); text-transform:uppercase;' });
-      gripTitle.textContent = '⠿ Card Item';
-      var delBtn = el('button', 'btn sm danger', { type: 'button', style: 'padding:2px 8px; font-size:11px;' });
-      delBtn.textContent = '✕ Remove';
-      delBtn.addEventListener('click', function () { card.remove(); });
-      cardGrip.appendChild(gripTitle);
-      cardGrip.appendChild(delBtn);
-
-      var h = textInput(colData.heading, 'Card heading');
+  function buildColumnsEditor(cols) {
+    var wrap = el('div', 'cms-cols');
+    var list = el('div', 'cms-cols-list');
+    function addColumn(col) {
+      col = col || { heading: '', body: '' };
+      var card = el('div', 'cms-col');
+      var h = textInput(col.heading, 'Card heading');
       h.className += ' col-heading';
-      var b = areaInput(colData.body);
+      var b = areaInput(col.body);
       b.className += ' col-body';
-      var l = textInput(colData.link, 'Optional button link (e.g. /contact)');
-      l.className += ' col-link';
-      var a = textInput(colData.alt, 'Describe the image for screen readers');
-      a.className += ' col-alt';
-      // Reuse the same uploader the hero and image blocks use, so cards get the identical
-      // compression, the same 8MB guard and the same cms/ folder (which the page delete
-      // already sweeps for orphaned files).
-      var img = imageField(colData.image);
-      img.classList.add('col-image');
-
-      card.appendChild(cardGrip);
-      card.appendChild(fieldLabel('Card Image (Optional)', img, ''));
-      card.appendChild(fieldLabel('Card Heading', h, ''));
-      card.appendChild(fieldLabel('Card Text / Description', b, ''));
-      card.appendChild(fieldLabel('Card Link (Optional)', l, ''));
-      card.appendChild(fieldLabel('Image Description (Optional, for screen readers)', a, ''));
-
-      card.addEventListener('dragstart', function (e) {
-        e.stopPropagation();
-        card.classList.add('dragging-card');
-        try { e.dataTransfer.setData('text/plain', 'card'); } catch (err) {}
-      });
-      card.addEventListener('dragend', function (e) {
-        e.stopPropagation();
-        card.classList.remove('dragging-card');
-      });
-
-      return card;
+      var del = el('button', 'btn sm danger', { type: 'button' });
+      del.textContent = 'Remove card';
+      del.addEventListener('click', function () { card.remove(); });
+      card.appendChild(fieldLabel('Card heading', h, ''));
+      card.appendChild(fieldLabel('Card text', b, ''));
+      card.appendChild(del);
+      list.appendChild(card);
     }
-
-    grid.addEventListener('dragover', function (e) {
-      var draggingCard = grid.querySelector('.dragging-card');
-      if (!draggingCard) return;
-      e.preventDefault();
-      var afterElement = getDragAfterElement(grid, e.clientY);
-      if (afterElement == null) {
-        grid.appendChild(draggingCard);
-      } else {
-        grid.insertBefore(draggingCard, afterElement);
-      }
-    });
-
-    function getDragAfterElement(container, y) {
-      var draggableElements = Array.prototype.slice.call(container.querySelectorAll('.cms-col-card:not(.dragging-card)'));
-      return draggableElements.reduce(function (closest, child) {
-        var box = child.getBoundingClientRect();
-        var offset = y - box.top - box.height / 2;
-        if (offset < 0 && offset > closest.offset) {
-          return { offset: offset, element: child };
-        } else {
-          return closest;
-        }
-      }, { offset: Number.NEGATIVE_INFINITY }).element;
-    }
-
-    addCardBtn.addEventListener('click', function () {
-      grid.appendChild(createCardNode());
-    });
-
-    var initialCols = Array.isArray(data.columns) ? data.columns : [];
-    if (initialCols.length === 0) {
-      grid.appendChild(createCardNode({ heading: 'Feature 1', body: 'Description details...', link: '' }));
-      grid.appendChild(createCardNode({ heading: 'Feature 2', body: 'Description details...', link: '' }));
-      grid.appendChild(createCardNode({ heading: 'Feature 3', body: 'Description details...', link: '' }));
-    } else {
-      initialCols.forEach(function (c) {
-        grid.appendChild(createCardNode(c));
-      });
-    }
-
-    wrap.appendChild(topRow);
-    wrap.appendChild(grid);
+    (Array.isArray(cols) ? cols : []).forEach(addColumn);
+    var addBtn = el('button', 'btn secondary sm', { type: 'button' });
+    addBtn.textContent = '+ Add card';
+    addBtn.addEventListener('click', function () { addColumn(); });
+    wrap.appendChild(list);
+    wrap.appendChild(addBtn);
     return wrap;
   }
 
@@ -333,7 +238,7 @@
       body.appendChild(imageField(data.image));
     }
     if (type === 'columns') {
-      body.appendChild(buildColumnsEditor(data));
+      body.appendChild(buildColumnsEditor(data.columns));
     }
 
     row.appendChild(head);
@@ -354,20 +259,10 @@
     }
     if (type === 'columns') {
       out.columns = [];
-      var grid = row.querySelector('.cms-cols-grid');
-      out.layout_columns = grid ? parseInt(grid.dataset.layoutColumns || '3', 10) : 3;
-      row.querySelectorAll('.cms-col-card').forEach(function (col) {
+      row.querySelectorAll('.cms-col').forEach(function (col) {
         var h = (col.querySelector('.col-heading') || {}).value || '';
         var b = (col.querySelector('.col-body') || {}).value || '';
-        var l = (col.querySelector('.col-link') || {}).value || '';
-        var a = (col.querySelector('.col-alt') || {}).value || '';
-        var imgNode = col.querySelector('.col-image .img-path');
-        var img = imgNode ? imgNode.value : '';
-        // A card carrying only a photo is still a card, so the image counts here too -
-        // otherwise a photo-only card would be thrown away on save.
-        if (h.trim() || b.trim() || l.trim() || img) {
-          out.columns.push({ heading: h, body: b, link: l, image: img, alt: a });
-        }
+        if (h.trim() || b.trim()) { out.columns.push({ heading: h, body: b }); }
       });
     }
     return out;
