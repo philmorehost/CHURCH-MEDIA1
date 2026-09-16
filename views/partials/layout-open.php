@@ -73,11 +73,15 @@ $navTree = [
             ['href' => '/about', 'label' => t('nav.about')],
             ['href' => '/contact', 'label' => t('nav.contact')],
             ['href' => '/advertise', 'label' => t('nav.advertise')],
-            ['href' => '/register', 'label' => t('nav.register')],
+            // The two member links sit together and the church registration sits apart from
+            // them. A bare "Register" read as a member sign-up and sent church admins to the
+            // wrong form, and members had no route to their own sign-up from the menu at all.
+            ['href' => '/member/register', 'label' => t('nav.member_register')],
             // One link for both states on purpose: /member/login redirects a signed-in
-            // member straight to /member, so this never says "Sign In" to somebody who
+            // member straight to /member, so this never says "Member Signin" to somebody who
             // already is — and the partial never has to touch the session to know.
             ['href' => '/member/login', 'label' => t('nav.sign_in')],
+            ['href' => '/register', 'label' => t('nav.register')],
         ],
     ],
 ];

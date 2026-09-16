@@ -2149,7 +2149,7 @@ $router->get('/member/login', function () {
         redirect('/member');
     }
     render('member/login', [
-        'metaTitle' => 'Sign in',
+        'metaTitle' => 'Member Signin',
         'metaRobots' => 'noindex, nofollow',
     ]);
 });

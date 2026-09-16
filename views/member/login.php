@@ -13,7 +13,7 @@ $old = $_SESSION['_form_old'] ?? [];
       <div class="form-mark"><?= e(mb_substr(setting('site_title'), 0, 1)) ?></div>
       <div>
         <div class="form-eyebrow"><?= e(setting('site_title')) ?></div>
-        <h1 class="form-title">Sign in</h1>
+        <h1 class="form-title">Member Signin</h1>
       </div>
     </div>
 

@@ -54,8 +54,11 @@ return [
     'nav.about'              => 'About Us',
     'nav.contact'            => 'Contact',
     'nav.advertise'          => 'Advertise With Us',
-    'nav.register'           => 'Register',
-    'nav.sign_in'            => 'Sign In',
+    // Two different registrations, and the labels have to say which is which. /register creates
+    // a church's own admin account; /member/register is a plain reader account on this site.
+    'nav.register'           => 'Register Church',
+    'nav.member_register'    => 'Member Register',
+    'nav.sign_in'            => 'Member Signin',
     'nav.live'               => 'LIVE',
     'nav.menu'               => 'Menu',
     'nav.show_menu'          => 'Show :label menu',
