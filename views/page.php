@@ -40,21 +40,24 @@ if ($slug === 'about') {
         }
     }
     if (!$hasTeamSection) {
-        // Insert team section before the CTA block if present, or append
-        $ctaIndex = null;
-        foreach ($sections as $idx => $sec) {
-            if (($sec['type'] ?? '') === 'cta') {
-                $ctaIndex = $idx;
-                break;
-            }
-        }
+        // "Our People" leads the page, above the mission and vision block — "Why We Exist", which is
+        // the first 'columns' block. Anchoring on the first of 'columns' or 'cta' keeps it there while
+        // still falling back to the old position (just above the call to action, else the end) on a
+        // page that has no columns block to sit above.
         $teamBlock = [
             'type' => 'team',
             'heading' => 'Leadership & Ministry Team',
             'eyebrow' => 'Our People',
         ];
-        if ($ctaIndex !== null) {
-            array_splice($sections, $ctaIndex, 0, [$teamBlock]);
+        $anchor = null;
+        foreach ($sections as $idx => $sec) {
+            if (in_array($sec['type'] ?? '', ['columns', 'cta'], true)) {
+                $anchor = $idx;
+                break;
+            }
+        }
+        if ($anchor !== null) {
+            array_splice($sections, $anchor, 0, [$teamBlock]);
         } else {
             $sections[] = $teamBlock;
         }
