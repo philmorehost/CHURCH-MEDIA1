@@ -9,35 +9,8 @@ if (!Auth::isSuperAdmin()) {
 $pdo = Database::getInstance()->getConnection();
 $errors = [];
 
-/**
- * The values this site actually uses.
- *
- * `settings()` resolves config defaults → the shared `settings` row (tenant_id IS NULL) → this
- * church's own row, and that resolution is the whole point of the settings table. Reading "the first
- * row" instead — which is what this screen used to do — shows the *platform defaults* to every
- * church, so a church that had set its own name would see somebody else's in the form, and saving
- * would write to the shared row and change every other church's site.
- *
- * Any column the resolution never supplied is filled with null so a field that is empty everywhere
- * renders as an empty box rather than an undefined-index notice.
- */
-$settingsRow = static function (): array {
-    $resolved = settings();
-    try {
-        $stmt = Database::getInstance()->getConnection()->query('SHOW COLUMNS FROM settings');
-        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $column) {
-            if (!array_key_exists($column, $resolved)) {
-                $resolved[$column] = null;
-            }
-        }
-    } catch (Throwable $e) {
-        // A pre-install database has no settings table; the form will render from config alone.
-    }
-    return $resolved;
-};
-
-$row = $settingsRow();
-$serviceTimes = $row['service_times'] ? (json_decode((string) $row['service_times'], true) ?: []) : [];
+$row = $pdo->query('SELECT * FROM settings ORDER BY id ASC LIMIT 1')->fetch();
+$serviceTimes = $row && $row['service_times'] ? (json_decode($row['service_times'], true) ?: []) : [];
 
 // Run media worker on demand
 if (($_GET['action'] ?? '') === 'run_worker' && $_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -80,11 +53,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'hero_tagline' => trim($_POST['hero_tagline'] ?? ''),
         'hero_scripture' => trim($_POST['hero_scripture'] ?? ''),
         'hero_eyebrow' => trim($_POST['hero_eyebrow'] ?? ''),
-        // The `?? 'gradient'` fallback is itself a member of the list, so a form posted without
-        // this field takes the TRUE branch — which used to read $_POST['hero_type'] bare and log
-        // "Undefined array key" on every such save. Reading it the same way in both places is the
-        // fix; the value is identical either way.
-        'hero_type' => in_array($_POST['hero_type'] ?? 'gradient', ['gradient', 'image', 'video_upload', 'youtube'], true) ? ($_POST['hero_type'] ?? 'gradient') : 'gradient',
+        'hero_type' => in_array($_POST['hero_type'] ?? 'gradient', ['gradient', 'image', 'video_upload', 'youtube'], true) ? $_POST['hero_type'] : 'gradient',
         'hero_youtube_url' => trim($_POST['hero_youtube_url'] ?? ''),
         'hero_cta_primary_label' => trim($_POST['hero_cta_primary_label'] ?? ''),
         'hero_cta_primary_url' => trim($_POST['hero_cta_primary_url'] ?? ''),
@@ -101,21 +70,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'go_declaration_enabled' => isset($_POST['go_declaration_enabled']) ? 1 : 0,
         'go_declaration_title' => trim($_POST['go_declaration_title'] ?? "G.O. Declaration"),
         'go_declaration_text' => trim($_POST['go_declaration_text'] ?? ''),
-        'go_declaration_mode' => in_array($_POST['go_declaration_mode'] ?? 'marquee', ['marquee', 'static'], true) ? ($_POST['go_declaration_mode'] ?? 'marquee') : 'marquee',
+        'go_declaration_mode' => in_array($_POST['go_declaration_mode'] ?? 'marquee', ['marquee', 'static'], true) ? $_POST['go_declaration_mode'] : 'marquee',
         'livestream_embed_url' => trim($_POST['livestream_embed_url'] ?? ''),
         'livestream_is_live' => isset($_POST['livestream_is_live']) ? 1 : 0,
         'giving_url' => trim($_POST['giving_url'] ?? ''),
         'app_download_enabled' => isset($_POST['app_download_enabled']) ? 1 : 0,
         'app_download_url' => trim($_POST['app_download_url'] ?? ''),
         'app_download_pages' => trim($_POST['app_download_pages'] ?? ''),
-        'app_redirect_mode' => in_array($_POST['app_redirect_mode'] ?? 'off', ['off', 'banner', 'interstitial', 'force'], true) ? ($_POST['app_redirect_mode'] ?? 'off') : 'off',
+        'app_redirect_mode' => in_array($_POST['app_redirect_mode'] ?? 'off', ['off', 'banner', 'interstitial', 'force'], true) ? $_POST['app_redirect_mode'] : 'off',
         'footer_about_text' => trim($_POST['footer_about_text'] ?? ''),
         'meta_description' => trim($_POST['meta_description'] ?? ''),
         'bible_source' => trim($_POST['bible_source'] ?? 'keyless'),
         'bible_api_key' => trim($_POST['bible_api_key'] ?? ''),
         'smtp_host' => trim($_POST['smtp_host'] ?? ''),
         'smtp_port' => (int) ($_POST['smtp_port'] ?? 587),
-        'smtp_secure' => in_array($_POST['smtp_secure'] ?? 'tls', ['ssl', 'tls', ''], true) ? ($_POST['smtp_secure'] ?? 'tls') : 'tls',
+        'smtp_secure' => in_array($_POST['smtp_secure'] ?? 'tls', ['ssl', 'tls', ''], true) ? $_POST['smtp_secure'] : 'tls',
         'smtp_username' => trim($_POST['smtp_username'] ?? ''),
         'smtp_password' => (string) ($_POST['smtp_password'] ?? ''),
         'smtp_from' => trim($_POST['smtp_from'] ?? ''),
@@ -125,8 +94,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'email_cpanel_token' => trim((string) ($_POST['email_cpanel_token'] ?? '')),
         'email_domain' => trim($_POST['email_domain'] ?? ''),
         'email_default_quota' => (int) ($_POST['email_default_quota'] ?? 500),
-        'backup_retention_days' => max(0, (int) ($_POST['backup_retention_days'] ?? 14)),
-        'backup_offsite_path' => trim($_POST['backup_offsite_path'] ?? ''),
     ];
 
     $labels = $_POST['service_label'] ?? [];
@@ -199,10 +166,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-        // Through settingSave(), which writes the current church's own row (creating it on first save)
-        // and leaves the shared defaults — and every other church — untouched. Column names come from
-        // our own code, never from request input.
-        settingSave($fields);
+        $setSql = implode(', ', array_map(fn ($k) => "$k = :$k", array_keys($fields)));
+        $executeParams = array_merge($fields, ['id' => $row['id']]);
+        $pdo->prepare("UPDATE settings SET $setSql WHERE id = :id")->execute($executeParams);
         if ($imageErrors) {
             flash('error', implode(' ', $imageErrors) . ' Other settings were still saved.');
         } else {
@@ -212,8 +178,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$row = $settingsRow();
-$serviceTimes = $row['service_times'] ? (json_decode((string) $row['service_times'], true) ?: []) : [];
+$row = $pdo->query('SELECT * FROM settings ORDER BY id ASC LIMIT 1')->fetch();
+$serviceTimes = $row['service_times'] ? (json_decode($row['service_times'], true) ?: []) : [];
 while (count($serviceTimes) < 4) {
     $serviceTimes[] = ['label' => '', 'time' => ''];
 }
@@ -224,27 +190,6 @@ require __DIR__ . '/partials/layout-open.php';
 ?>
 
 <?php foreach ($errors as $error): ?><div class="alert error"><?= e($error) ?></div><?php endforeach; ?>
-
-<?php
-// Say whose settings these are. On a single-church install this reads as reassurance; on an
-// installation serving several churches it is the difference between believing you changed your own
-// site and having actually changed everybody's.
-$currentTenant = class_exists('Tenant') ? Tenant::current() : null;
-?>
-<div class="card" style="margin-bottom:18px;">
-  <p style="margin:0;font-size:13.5px;">
-    <?php if ($currentTenant !== null): ?>
-      These are the settings for <strong><?= e((string) $currentTenant['name']) ?></strong>.
-      Saving changes this church only — other churches on this installation keep their own.
-    <?php else: ?>
-      These are the default settings for this installation, used by every church until a church saves its own.
-    <?php endif; ?>
-  </p>
-  <p class="sub" style="margin:8px 0 0;font-size:12.5px;">
-    Values fall back in order: the shipped defaults, then the installation defaults, then anything set
-    here. A field left empty is inherited rather than blanked.
-  </p>
-</div>
 
 <form method="post" enctype="multipart/form-data">
   <?= Csrf::field() ?>
@@ -457,23 +402,6 @@ $currentTenant = class_exists('Tenant') ? Tenant::current() : null;
     <div id="bible-api-key-wrap" style="<?= ($row['bible_source'] ?? 'keyless') === 'api_bible' ? '' : 'display:none;' ?>">
       <label for="bible_api_key">API.Bible API Key</label>
       <input type="text" id="bible_api_key" name="bible_api_key" value="<?= e((string) ($row['bible_api_key'] ?? '')) ?>" placeholder="Paste your api.bible access token" autocomplete="off">
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>Backups</h2>
-    <p class="sub">Scheduled database backups live in <code>storage/backups</code>. Take one, download it, and restore it from the <a href="/admin/backup" style="color:var(--gold-soft);">Backups</a> page — these two settings control how many are kept and whether a copy is sent somewhere else.</p>
-    <div class="row two">
-      <div>
-        <label for="backup_retention_days">Backups to keep</label>
-        <input type="number" id="backup_retention_days" name="backup_retention_days" value="<?= e((string) ($row['backup_retention_days'] ?? 14)) ?>" min="0" max="365">
-        <small style="color:var(--ink-faint);font-size:12px;">Oldest are pruned after each run. <strong>0</strong> keeps every backup and turns pruning off.</small>
-      </div>
-      <div>
-        <label for="backup_offsite_path">Off-site copy folder</label>
-        <input type="text" id="backup_offsite_path" name="backup_offsite_path" value="<?= e((string) ($row['backup_offsite_path'] ?? '')) ?>" placeholder="e.g. /home/you/backups or a mounted drive">
-        <small style="color:var(--ink-faint);font-size:12px;">A plain directory copy after each backup. Leave empty for none. A backup on the same server will not survive that server.</small>
-      </div>
     </div>
   </div>
 

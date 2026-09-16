@@ -7,9 +7,8 @@ declare(strict_types=1);
  * this file only matters before install and as a fallback if the DB is down.
  */
 return [
-    'site_title'           => 'Church Media',
+    'site_title'           => 'Grace & Life Church',
     'site_tagline'         => 'A place to belong, believe, and become',
-    'default_locale'       => 'en', // a catalogue code from lang/; en is the source catalogue
     'logo_path'            => null,
     'favicon_path'         => null,
     'hero_tagline'         => 'Where Faith Comes Alive',
@@ -40,7 +39,7 @@ return [
     'livestream_is_live'   => 0,
     'giving_url'           => null,
     'footer_about_text'    => 'A place to belong, believe, and become — join us in person or online every week.',
-    'meta_description'     => 'Church Media — sermons, events, and media from our community.',
+    'meta_description'     => 'Grace & Life Church — sermons, events, and media from our community.',
     'bible_source'           => 'keyless', // 'keyless' or 'api_bible'
     'bible_api_key'         => null,
     'license_key'          => null,

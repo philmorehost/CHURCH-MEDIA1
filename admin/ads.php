@@ -9,34 +9,6 @@ $action = $_GET['action'] ?? 'list';
 $id = (int) ($_GET['id'] ?? 0);
 $errors = [];
 
-/*
- * The reviewer's preview.
- *
- * It renders the site's own feed with this one advert in it, rather than drawing a card on this screen.
- * Two reasons, and the second is the important one: a preview drawn in the dashboard is a preview of the
- * dashboard, not of the site; and a reviewer who cannot see that an advert's destination link is broken or
- * that its media is the wrong shape will approve it anyway. What is previewed here is served by the same
- * `AdFeed` shaping the live feed uses, so the two cannot disagree.
- */
-if ($action === 'preview' && $id > 0) {
-    [$tenantClause, $tenantParams] = tenantScope();
-    $stmt = $pdo->prepare('SELECT * FROM ads WHERE id = ? AND ' . $tenantClause . ' LIMIT 1');
-    $stmt->execute(array_merge([$id], $tenantParams));
-    $previewAd = $stmt->fetch();
-
-    if (!$previewAd) {
-        flash('error', 'That advert could not be found.');
-        redirect('/admin/ads');
-    }
-
-    render('feed', [
-        'previewAd' => $previewAd,
-        'metaTitle' => 'Preview: ' . $previewAd['title'],
-        'metaDescription' => 'An admin preview of an advert before it is approved.',
-    ]);
-    return;
-}
-
 // Manage Settings & Durations (Super Admin)
 if ($action === 'settings' || $action === 'durations') {
     if (!Auth::isSuperAdmin()) {
@@ -52,16 +24,8 @@ if ($action === 'settings' || $action === 'durations') {
         $manualEnabled = isset($_POST['manual_payment_enabled']) ? 1 : 0;
         $manualInstructions = trim((string) ($_POST['manual_payment_instructions'] ?? ''));
 
-        // Written through settingSave() so the keys land on the church they were entered for. The old
-        // UPDATE targeted "the first settings row", which is the shared defaults row — so one church
-        // entering its Payhub keys would have replaced every other church's.
-        settingSave([
-            'payhub_enabled' => $payhubEnabled,
-            'payhub_public_key' => $payhubPub,
-            'payhub_secret_key' => $payhubSec,
-            'manual_payment_enabled' => $manualEnabled,
-            'manual_payment_instructions' => $manualInstructions,
-        ]);
+        $pdo->prepare('UPDATE settings SET payhub_enabled = ?, payhub_public_key = ?, payhub_secret_key = ?, manual_payment_enabled = ?, manual_payment_instructions = ? WHERE id = (SELECT id FROM (SELECT id FROM settings LIMIT 1) t)')
+            ->execute([$payhubEnabled, $payhubPub, $payhubSec, $manualEnabled, $manualInstructions]);
 
         flash('success', 'Ad settings updated successfully.');
         redirect('/admin/ads?action=settings');
@@ -141,33 +105,12 @@ if ($action === 'approve' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $ad = $stmt->fetch();
 
     if ($ad) {
-        /*
-         * Approving is a review decision. It is not a payment, and this handler used to make it one.
-         *
-         * The UPDATE below read `status = "approved", payment_status = "paid"` — so an advert whose bank
-         * transfer nobody had checked, or one whose advertiser abandoned the gateway and left it "unpaid",
-         * went live AND was recorded as paid the instant a reviewer pressed Approve. The one screen that
-         * would have shown somebody the money was missing was the one that declared the money had arrived.
-         *
-         * Now the two are recorded separately: the gateway credits a payment when it verifies one, a
-         * reviewer records a bank transfer with "Mark payment as paid", and approval only decides whether
-         * something already settled may run. An unsettled advert is refused with a message saying which
-         * button to press first, because the alternative — approving it silently — is how the fault above
-         * stayed invisible.
-         */
-        $settled = (string) $ad['payment_status'] === 'paid' || (int) $ad['is_free'] === 1;
-
-        if (!$settled) {
-            flash('error', 'This advert has not been paid for, so it has not been approved. If the money has arrived and you have checked it, use "Mark Paid" first — the payment and the review are recorded separately on purpose.');
-            redirect('/admin/ads?status=' . urlencode((string) $ad['status']));
-        }
-
         $days = (int) $ad['duration_days'];
         $startAt = date('Y-m-d H:i:s');
         $expiresAt = date('Y-m-d H:i:s', strtotime("+{$days} days"));
 
-        // No `payment_status` here, deliberately — see above.
-        $pdo->prepare('UPDATE ads SET status = "approved", start_at = ?, expires_at = ? WHERE id = ?')
+        // If manual/unpaid, approving also sets payment_status to paid if not rejected
+        $pdo->prepare('UPDATE ads SET status = "approved", payment_status = "paid", start_at = ?, expires_at = ? WHERE id = ?')
             ->execute([$startAt, $expiresAt, $id]);
 
         $managerUrl = baseUrl('ad-manager?token=' . rawurlencode($ad['pub_token']));
@@ -197,60 +140,8 @@ if ($action === 'approve' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 // Reject Ad
 if ($action === 'reject' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     Csrf::requireValid();
-
-    /*
-     * A rejection has to say why.
-     *
-     * "Rejected." with no reason is what makes an advertiser telephone the church to ask what they did
-     * wrong, and it makes the resubmission this screen offers a guess — the advertiser cannot fix a problem
-     * nobody described. The reason is required HERE and not only in the form, because the form is not the
-     * only way to reach this handler.
-     */
-    $reason = trim((string) ($_POST['rejection_reason'] ?? ''));
-
-    $stmt = $pdo->prepare('SELECT a.*, p.name AS pub_name, p.email AS pub_email, p.token AS pub_token FROM ads a JOIN ad_publishers p ON a.publisher_id = p.id WHERE a.id = ?');
-    $stmt->execute([$id]);
-    $ad = $stmt->fetch();
-
-    if (!$ad) {
-        flash('error', 'That advert no longer exists.');
-        redirect('/admin/ads');
-    }
-
-    if ($reason === '') {
-        flash('error', 'A rejection has to say why. The advertiser is shown the reason and has to act on it, so an empty one leaves them with nothing to fix.');
-        redirect('/admin/ads?status=' . urlencode((string) $ad['status']));
-    }
-
-    // The column is VARCHAR(500). Cut it here rather than let MySQL cut it mid-word.
-    $reason = mb_substr($reason, 0, 500);
-
-    /*
-     * `status`, the reason and the date — and nothing else.
-     *
-     * Rejection is a review outcome, not a refund. An advertiser who has already paid for a package keeps
-     * that payment, and the resubmission path must not charge them a second time, so nothing here may
-     * touch `payment_status`, `payment_reference`, `payment_attempts` or `ad_payments`.
-     */
-    $pdo->prepare('UPDATE ads SET status = "rejected", rejection_reason = ?, rejected_at = NOW() WHERE id = ?')
-        ->execute([$reason, $id]);
-
-    try {
-        Mailer::send(
-            $ad['pub_email'],
-            'Your advert needs a change · ' . setting('site_title'),
-            "Hi {$ad['pub_name']},\n\n" .
-            "We could not run your advert \"{$ad['title']}\" as it stands.\n\n" .
-            "Reason:\n{$reason}\n\n" .
-            "You can edit the advert and send it back for review, at no extra cost — anything you have already paid still stands.\n" .
-            baseUrl('ad-manager?token=' . rawurlencode($ad['pub_token'])) . "\n\n" .
-            "Best regards,\n" . setting('site_title')
-        );
-    } catch (Throwable $e) {
-        // A mail failure is not a reason to leave the advert unrejected.
-    }
-
-    flash('success', 'Advert rejected. The advertiser has been told why and can edit and resubmit it without paying again.');
+    $pdo->prepare('UPDATE ads SET status = "rejected" WHERE id = ?')->execute([$id]);
+    flash('success', 'Ad rejected.');
     redirect('/admin/ads');
 }
 
@@ -275,22 +166,10 @@ if ($action === 'delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // List Ads
 $statusFilter = $_GET['status'] ?? 'all';
-
-/*
- * Scoped to the church being served, like every other admin listing in this codebase.
- *
- * This query had no tenant clause at all, so a church admin opening Ads Management saw EVERY church's
- * adverts — each with the advertiser's name, email address and phone number printed beside it, plus a
- * working link to that advertiser's management portal. `Auth::requireRole('admin')` admits ordinary church
- * admins, not only the platform operator, so this was a cross-church disclosure of contact data and of
- * the credentials link that opens somebody else's campaigns.
- */
-[$tenantClause, $tenantParams] = tenantScope(null, 'a.tenant_id');
 $sql = 'SELECT a.*, p.name AS pub_name, p.email AS pub_email, p.phone AS pub_phone, p.token AS pub_token FROM ads a JOIN ad_publishers p ON a.publisher_id = p.id';
-$params = $tenantParams;
-$sql .= ' WHERE ' . $tenantClause;
+$params = [];
 if (in_array($statusFilter, ['pending', 'approved', 'rejected'], true)) {
-    $sql .= ' AND a.status = ?';
+    $sql .= ' WHERE a.status = ?';
     $params[] = $statusFilter;
 }
 $sql .= ' ORDER BY a.created_at DESC';
@@ -300,9 +179,7 @@ $stmt->execute($params);
 $adsList = $stmt->fetchAll();
 
 $pageTitle = 'Ads Management';
-// The payments screen carries its own nav key. Sharing 'ads' would open Content — where Ads
-// Management lives — while the reader is actually on a System screen, and highlight the wrong item.
-$activeNav = ($action === 'settings' || $action === 'durations') ? 'ads-settings' : 'ads';
+$activeNav = 'ads';
 require __DIR__ . '/partials/layout-open.php';
 ?>
 
@@ -331,24 +208,13 @@ require __DIR__ . '/partials/layout-open.php';
         <div class="row two">
           <div>
             <label for="payhub_public_key">Payhub Public Key</label>
-            <input type="text" id="payhub_public_key" name="payhub_public_key" value="<?= e((string) setting('payhub_public_key')) ?>" placeholder="pk_test_xxxx or pk_live_xxxx">
+            <input type="text" id="payhub_public_key" name="payhub_public_key" value="<?= e((string) setting('payhub_public_key')) ?>" placeholder="YOUR_PUBLIC_KEY">
           </div>
           <div>
             <label for="payhub_secret_key">Payhub Secret Key</label>
-            <input type="password" id="payhub_secret_key" name="payhub_secret_key" value="<?= e((string) setting('payhub_secret_key')) ?>" placeholder="sk_test_xxxx or sk_live_xxxx">
+            <input type="password" id="payhub_secret_key" name="payhub_secret_key" value="<?= e((string) setting('payhub_secret_key')) ?>" placeholder="sk_live_xxxx">
           </div>
         </div>
-        <?php if (Payhub::configured()): ?>
-          <div style="margin-top:10px; font-size:13px;">
-            <?php if (Payhub::isTestMode()): ?>
-              <span class="badge" style="background:#f59e0b; color:#fff; padding:3px 8px; border-radius:4px; font-weight:700;">⚡ Test Mode Active</span>
-              <span style="color:var(--ink-dim); margin-left:6px;">Your API keys are in test mode. Payments will be simulated.</span>
-            <?php else: ?>
-              <span class="badge" style="background:#10b981; color:#fff; padding:3px 8px; border-radius:4px; font-weight:700;">🟢 Live Mode Active</span>
-              <span style="color:var(--ink-dim); margin-left:6px;">Real transactions will be processed.</span>
-            <?php endif; ?>
-          </div>
-        <?php endif; ?>
 
         <h3 style="margin-top:20px;">🏦 Manual Bank Transfer</h3>
         <p class="sub">Allow advertisers to pay via bank transfer and upload proof of payment for review.</p>
@@ -357,7 +223,7 @@ require __DIR__ . '/partials/layout-open.php';
           <label for="manual_payment_enabled" style="margin:0;">Enable Manual Payment Method</label>
         </div>
         <label for="manual_payment_instructions">Bank Account Details &amp; Payment Instructions</label>
-        <textarea id="manual_payment_instructions" name="manual_payment_instructions" rows="3" placeholder="Bank Name: GTBank&#10;Account Name: Your Church Name&#10;Account Number: 0123456789"><?= e((string) setting('manual_payment_instructions')) ?></textarea>
+        <textarea id="manual_payment_instructions" name="manual_payment_instructions" rows="3" placeholder="Bank Name: GTBank&#10;Account Name: Grace & Life Church&#10;Account Number: 0123456789"><?= e((string) setting('manual_payment_instructions')) ?></textarea>
 
         <button type="submit" class="btn" style="margin-top:16px;">Save Gateway Settings</button>
       </form>
@@ -627,20 +493,6 @@ require __DIR__ . '/partials/layout-open.php';
             <td>
               <?php if ($ad['status'] === 'pending'): ?>
                 <span class="badge warn">pending</span>
-                <?php
-                /*
-                 * A resubmission is not a new advert, and a reviewer who cannot see that it has already
-                 * been round once will read it as a first submission and approve the same problem again.
-                 * The previous reason is kept on the row through the resubmission precisely so it can be
-                 * shown here — it is the reviewer's memory of the first decision.
-                 */
-                ?>
-                <?php if ((int) ($ad['revision_count'] ?? 0) > 0): ?>
-                  <br><span class="badge info" style="font-size:10px;">↻ Resubmitted (revision <?= (int) $ad['revision_count'] ?>)</span>
-                  <?php if (!empty($ad['rejection_reason'])): ?>
-                    <br><span style="font-size:11px; color:var(--ink-faint);">Previously: <?= e($ad['rejection_reason']) ?></span>
-                  <?php endif; ?>
-                <?php endif; ?>
               <?php elseif ($ad['status'] === 'approved'): ?>
                 <?php if (strtotime($ad['expires_at']) <= time()): ?>
                   <span class="badge fail">expired</span>
@@ -649,9 +501,6 @@ require __DIR__ . '/partials/layout-open.php';
                 <?php endif; ?>
               <?php else: ?>
                 <span class="badge fail">rejected</span>
-                <?php if (!empty($ad['rejection_reason'])): ?>
-                  <br><span style="font-size:11px; color:var(--ink-faint);"><?= e($ad['rejection_reason']) ?></span>
-                <?php endif; ?>
               <?php endif; ?>
             </td>
 
@@ -664,29 +513,13 @@ require __DIR__ . '/partials/layout-open.php';
               <?php endif; ?>
 
               <?php if ($ad['status'] === 'pending'): ?>
-                <?php
-                /*
-                 * The preview comes first, before Approve and Reject, because it is the step a reviewer
-                 * should take first. Everywhere else in this screen the decision is the prominent action.
-                 */
-                ?>
-                <a class="btn sm secondary" href="/admin/ads?action=preview&id=<?= (int) $ad['id'] ?>" target="_blank" rel="noopener">Preview</a>
                 <form method="post" action="/admin/ads?action=approve&id=<?= (int) $ad['id'] ?>" style="display:inline;">
                   <?= Csrf::field() ?>
                   <button type="submit" class="btn sm" onclick="return confirm('Approve this advert? It will go live immediately.');">Approve</button>
                 </form>
-                <?php
-                /*
-                 * The reason is a field in the same form rather than a prompt or a second screen, so it
-                 * is impossible to submit a rejection without having been shown where to write it.
-                 */
-                ?>
-                <form method="post" action="/admin/ads?action=reject&id=<?= (int) $ad['id'] ?>" style="display:inline; margin-top:4px;">
+                <form method="post" action="/admin/ads?action=reject&id=<?= (int) $ad['id'] ?>" style="display:inline;">
                   <?= Csrf::field() ?>
-                  <input type="text" name="rejection_reason" maxlength="500" required
-                         placeholder="Why is it being rejected?" aria-label="Reason for rejecting this advert"
-                         style="width:190px; display:block; margin-bottom:4px; font-size:12px;">
-                  <button type="submit" class="btn sm danger" onclick="return confirm('Reject this advert? The advertiser is emailed the reason and can resubmit it free of charge.');">Reject</button>
+                  <button type="submit" class="btn sm danger">Reject</button>
                 </form>
               <?php endif; ?>
               <form method="post" action="/admin/ads?action=delete&id=<?= (int) $ad['id'] ?>" style="display:inline;" onsubmit="return confirm('Permanently delete this advert?');">

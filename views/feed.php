@@ -1,21 +1,6 @@
 <?php
 declare(strict_types=1);
-
-/*
- * The reviewer's preview.
- *
- * `/admin/ads?action=preview&id=N` renders THIS view with `$previewAd` set, so the reviewer sees the site's
- * own feed, its own stylesheet, its own JavaScript and — through `AdFeed::feedItem()` — its own shaping,
- * with one advert in it. A preview built as a separate card would be a picture of the advert rather than
- * the advert, and the two can disagree about exactly the things worth checking: the destination link, the
- * media shape, the label that says it is sponsored.
- *
- * The advert itself is fetched from the API rather than printed here, so what is on screen is what would
- * actually be served. The bar above it is the only thing a visitor would not see, and it says so.
- */
-$previewAd ??= null;
-
-$metaTitle = $previewAd !== null ? 'Preview: ' . ($previewAd['title'] ?? '') : 'Reels';
+$metaTitle = 'Reels';
 $metaDescription = 'Watch the latest reels from ' . e(setting('site_title')) . ' — worship, sermon clips, and moments from the community.';
 $categories = Database::getInstance()->getConnection()
     ->query('SELECT c.slug, c.name FROM media_categories c WHERE EXISTS (SELECT 1 FROM media_post_categories mpc WHERE mpc.media_category_id = c.id) ORDER BY c.name ASC')
@@ -23,18 +8,7 @@ $categories = Database::getInstance()->getConnection()
 ?>
 <link rel="stylesheet" href="<?= asset('css/feed.css') ?>">
 
-<?php if ($previewAd !== null): ?>
-  <div class="ad-preview-bar" role="status">
-    <strong class="ad-preview-tag">Preview</strong>
-    <span>
-      “<?= e($previewAd['title']) ?>” — this is the card a visitor sees. It is
-      <strong>not live</strong> (status: <?= e((string) $previewAd['status']) ?>).
-    </span>
-    <a href="/admin/ads">← Back to Ads</a>
-  </div>
-<?php endif; ?>
-
-<div class="reels-page<?= $previewAd !== null ? ' ad-preview' : '' ?>">
+<div class="reels-page">
   <header class="reels-top">
     <a href="/" class="reels-brand"><span class="mark">R</span> Reels</a>
     <nav class="reels-tabs">
@@ -53,16 +27,7 @@ $categories = Database::getInstance()->getConnection()
 
   <button type="button" id="newPostsPill" hidden>⬆ New posts — tap to refresh</button>
 
-  <?php
-  /*
-   * A preview is pointed at the preview payload, not at the ordinary feed. Without this the reviewer would
-   * be shown the live feed — which, for an advert that has not been approved, does not contain it at all,
-   * so the page would quietly prove nothing.
-   *
-   * feed.js appends its own query arguments, so it chooses the separator: see loadPage().
-   */
-  ?>
-  <div class="reels-scroller" id="feedScroller" data-endpoint="<?= e($previewAd !== null ? '/api/feed?preview_ad=' . (int) $previewAd['id'] : '/api/feed') ?>">
+  <div class="reels-scroller" id="feedScroller" data-endpoint="/api/feed">
     <div class="feed-loading" id="feedLoading">Loading reels…</div>
   </div>
 </div>

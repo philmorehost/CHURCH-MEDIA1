@@ -35,20 +35,7 @@ class Pusher
         return (string) (self::config()['project_id'] ?? '');
     }
 
-    /**
-     * Where the service-account key actually is.
-     *
-     * The configured path wins, but when it is not a file we fall back to
-     * `storage/service-account.json` — the exact place the admin panel's upload form
-     * writes to. Without that fallback, a config still pointing at another server's path
-     * (which is what every second-church deployment inherits from git) reports "key
-     * missing" while the key that was just uploaded sits there unused.
-     *
-     * Public on purpose: admin/firebase.php used to re-derive this rule and got it
-     * wrong, so the status page could contradict what sending would do. One source of
-     * truth now.
-     */
-    public static function serviceAccountPath(): string
+    private static function serviceAccountPath(): string
     {
         $path = (string) (self::config()['service_account'] ?? '');
         if ($path === '' || !is_file($path)) {
@@ -58,22 +45,6 @@ class Pusher
             }
         }
         return $path;
-    }
-
-    /**
-     * Whether a push could actually be delivered right now.
-     *
-     * A cron worker has to tell "there was nothing to send" apart from "sending is not
-     * configured" — the second one needs an admin, and reporting it as the first is how a
-     * notification silently stops. Same one-source-of-truth rule as serviceAccountPath().
-     */
-    public static function configured(): bool
-    {
-        if (self::projectId() === '') {
-            return false;
-        }
-        $path = self::serviceAccountPath();
-        return $path !== '' && is_file($path);
     }
 
     public static function base64Url(string $data): string
@@ -195,13 +166,7 @@ class Pusher
 
     /**
      * Send to every device subscribed to a unit's topic (topic 'unit-{id}').
-     *
-     * The app subscribes to this topic when the user browses that church
-     * (PushService::followUnit keeps the ten most recently opened churches).
-     * This is the *only* delivery path for a notification an admin aims at one
-     * church — admin/notifications.php and core/Notifier.php both push here and
-     * never broadcast, which is why per-church notifications used to reach
-     * nobody at all.
+     * The app subscribes to this topic when the user browses that church.
      */
     public static function sendToUnit(int $unitId, string $title, string $body, ?string $imageUrl = null, array $data = []): bool
     {
@@ -238,30 +203,13 @@ class Pusher
         self::notifyContent($orgUnitId, 'New sermon', mb_strimwidth($title, 0, 100, '…'), null, ['type' => 'sermon', 'sermon_id' => (string) $sermonId]);
     }
 
-    /**
-     * Shared: announce new content to everyone, tagged with its church.
-     *
-     * This used to send twice — once to the church's topic and once to the
-     * broadcast — which was harmless only because no device had ever subscribed
-     * to a church topic. Now that the app follows the churches it browses,
-     * keeping both sends would deliver every new reel, event and sermon twice to
-     * anyone who had opened that church.
-     *
-     * Content goes out once, on the broadcast topic, because that is the only
-     * topic every device is on from its first launch — a device that has not
-     * opened any church yet would otherwise hear nothing at all. Targeting stays
-     * where it belongs: notices an admin aims at one church, which are sent with
-     * sendToUnit() and deliberately not broadcast.
-     *
-     * The church name moves into the title so the origin is still visible.
-     */
+    /** Shared: send to the church's topic (with church name) + broadcast. */
     private static function notifyContent(?int $orgUnitId, string $title, string $body, ?string $imageUrl = null, array $data = []): void
     {
         if ($orgUnitId !== null && $orgUnitId > 0) {
             $unit = Unit::find($orgUnitId);
-            if ($unit) {
-                $title = $unit['name'] . ' — ' . $title;
-            }
+            $unitTitle = $unit ? $unit['name'] . ' — ' . $title : $title;
+            self::sendToUnit($orgUnitId, $unitTitle, $body, $imageUrl, $data);
         }
         self::broadcast($title, $body, $imageUrl, $data);
     }

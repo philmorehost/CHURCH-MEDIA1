@@ -22,16 +22,8 @@ if ($method === 'POST' || str_contains($pathInfo, '/event')) {
         jsonResponse(['ok' => false, 'error' => 'Invalid ad ID'], 400);
     }
 
-    /*
-     * Scoped to the church being served, like every other read of this table.
-     *
-     * Without the clause, an impression or a click could be credited against any church's advert by id —
-     * and an advert's counters are what the advertiser's performance report is built from, so a wrong
-     * number here is a number sent to a paying customer in an email.
-     */
-    [$tenantClause, $tenantParams] = tenantScope();
-    $stmt = $pdo->prepare('SELECT id, status, expires_at FROM ads WHERE id = ? AND ' . $tenantClause);
-    $stmt->execute(array_merge([$adId], $tenantParams));
+    $stmt = $pdo->prepare('SELECT id, status, expires_at FROM ads WHERE id = ?');
+    $stmt->execute([$adId]);
     $ad = $stmt->fetch();
 
     if (!$ad || $ad['status'] !== 'approved' || ($ad['expires_at'] && strtotime($ad['expires_at']) <= time())) {
@@ -58,6 +50,27 @@ if ($method === 'POST' || str_contains($pathInfo, '/event')) {
 // GET request: fetch active ads for specified platform
 $platform = in_array($_GET['platform'] ?? '', ['web', 'app'], true) ? $_GET['platform'] : 'web';
 
-// One query, one church, one shape — shared with the feed and with the reviewer's preview, so the three
-// cannot drift apart. This used to hold its own unscoped query and its own inline array.
-jsonResponse(['ok' => true, 'ads' => array_map([AdFeed::class, 'card'], AdFeed::activeFor($platform, 10))]);
+$stmt = $pdo->prepare("SELECT id, title, media_type, file_path, thumbnail_path, destination_url, target_platform, start_at, expires_at
+    FROM ads
+    WHERE status = 'approved'
+      AND (target_platform = 'both' OR target_platform = ?)
+      AND start_at <= NOW()
+      AND (expires_at IS NULL OR expires_at > NOW())
+    ORDER BY RAND()
+    LIMIT 10");
+$stmt->execute([$platform]);
+$ads = $stmt->fetchAll();
+
+$out = array_map(function ($ad) {
+    return [
+        'id' => (int) $ad['id'],
+        'title' => $ad['title'],
+        'media_type' => $ad['media_type'],
+        'file_url' => uploadUrl($ad['file_path']),
+        'thumbnail_url' => uploadUrl($ad['thumbnail_path']),
+        'destination_url' => $ad['destination_url'],
+        'is_ad' => true,
+    ];
+}, $ads);
+
+jsonResponse(['ok' => true, 'ads' => $out]);

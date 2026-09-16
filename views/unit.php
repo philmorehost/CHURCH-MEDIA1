@@ -3,8 +3,10 @@ declare(strict_types=1);
 /** @var string $slug */
 
 $pdo = Database::getInstance()->getConnection();
-$unit = Unit::findBySlug((string) $slug);
-if ($unit === null) {
+$stmt = $pdo->prepare('SELECT * FROM org_units WHERE slug = ? LIMIT 1');
+$stmt->execute([$slug]);
+$unit = $stmt->fetch();
+if (!$unit) {
     http_response_code(404);
     render('404', [], false);
     return;

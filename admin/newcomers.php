@@ -23,12 +23,6 @@ if (in_array($action, ['create', 'edit'], true) && $_SERVER['REQUEST_METHOD'] ==
     }
     $name = trim($_POST['name'] ?? '');
     $whatsapp = trim($_POST['whatsapp_phone'] ?? '');
-    $email = trim($_POST['email'] ?? '');
-    // A malformed address is worse than none: the sequence would look like it was working while every
-    // message bounced. Refusing it here puts the mistake in front of the person who can fix it.
-    if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        $errors[] = 'That email address does not look right. Leave it blank if you do not have one.';
-    }
     $address = trim($_POST['address'] ?? '');
     $gender = in_array($_POST['gender'] ?? '', ['male', 'female'], true) ? $_POST['gender'] : null;
     // Target is the Youth church, so age group is no longer collected on the
@@ -41,29 +35,14 @@ if (in_array($action, ['create', 'edit'], true) && $_SERVER['REQUEST_METHOD'] ==
 
     if ($name === '') {
         $errors[] = 'Name is required.';
-    }
-
-    // Any error at all stops the write, not just a missing name. The email check above used to set
-    // `$errors` and then fall straight through to the INSERT, so a malformed address was reported and
-    // saved anyway — leaving a follow-up sequence that looked like it was running while every message
-    // bounced. An error shown and ignored is worse than no check at all.
-    if (!$errors) {
+    } else {
         if ($action === 'create') {
-            $pdo->prepare('INSERT INTO newcomers (org_unit_id, name, whatsapp_phone, email, address, gender, age_group, attendance_id, visit_date, follow_up_status, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-                ->execute([$user['org_unit_id'] ?? null, $name, $whatsapp, $email !== '' ? $email : null, $address, $gender, $ageGroup, $attendanceId > 0 ? $attendanceId : null, $visitDate, $status, $notes, $user['id'] ?? null]);
+            $pdo->prepare('INSERT INTO newcomers (org_unit_id, name, whatsapp_phone, address, gender, age_group, attendance_id, visit_date, follow_up_status, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+                ->execute([$user['org_unit_id'] ?? null, $name, $whatsapp, $address, $gender, $ageGroup, $attendanceId > 0 ? $attendanceId : null, $visitDate, $status, $notes, $user['id'] ?? null]);
             flash('success', 'Newcomer added.');
         } else {
-            $pdo->prepare('UPDATE newcomers SET name=?, whatsapp_phone=?, email=?, address=?, gender=?, age_group=?, attendance_id=?, visit_date=?, follow_up_status=?, notes=? WHERE id=?')
-                ->execute([$name, $whatsapp, $email !== '' ? $email : null, $address, $gender, $ageGroup, $attendanceId > 0 ? $attendanceId : null, $visitDate, $status, $notes, $id]);
-            // Marking somebody inactive is how a church says "stop". Doing it here rather than leaving
-            // it to the next worker run is what makes the promise real — the tasks come off the list
-            // now, not in an hour.
-            if ($status === 'inactive') {
-                $stopped = FollowUp::stopAllFor($id, 'Marked inactive');
-                if ($stopped > 0) {
-                    flash('success', 'Follow-up stopped for this newcomer.');
-                }
-            }
+            $pdo->prepare('UPDATE newcomers SET name=?, whatsapp_phone=?, address=?, gender=?, age_group=?, attendance_id=?, visit_date=?, follow_up_status=?, notes=? WHERE id=?')
+                ->execute([$name, $whatsapp, $address, $gender, $ageGroup, $attendanceId > 0 ? $attendanceId : null, $visitDate, $status, $notes, $id]);
             flash('success', 'Newcomer updated.');
         }
         redirect('/admin/newcomers');
@@ -96,13 +75,6 @@ if ($action === 'update_status' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('/admin/newcomers');
     }
     $pdo->prepare('UPDATE newcomers SET follow_up_status = ? WHERE id = ?')->execute([$newStatus, $targetId]);
-    // "Somebody who opts out mid-sequence stops immediately" is a promise, and the moment to keep it
-    // is now — not whenever the worker next happens to run.
-    if ($newStatus === 'inactive' && FollowUp::stopAllFor($targetId, 'Marked inactive') > 0) {
-        $statusLabel = 'Inactive';
-        flash('success', 'Follow-up status updated to ' . $statusLabel . ' — their follow-up was stopped too.');
-        redirect('/admin/newcomers' . ($statusFilter !== '' ? '?status=' . rawurlencode($statusFilter) : ''));
-    }
     switch ($newStatus) {
         case 'contacted':
             $statusLabel = 'Contacted';
@@ -235,13 +207,6 @@ require __DIR__ . '/partials/layout-open.php';
           <input type="tel" id="whatsapp_phone" name="whatsapp_phone" value="<?= e($editing['whatsapp_phone'] ?? '') ?>" placeholder="+234 812 345 6789">
         </div>
         <div>
-          <label for="email">Email Address</label>
-          <input type="email" id="email" name="email" value="<?= e($editing['email'] ?? '') ?>" placeholder="sarah@example.com">
-          <p class="sub" style="margin-top:4px;">Only needed if you want the follow-up emails to reach them. Without it the sequence still sets tasks for you.</p>
-        </div>
-      </div>
-      <div class="row two">
-        <div>
           <label for="gender">Gender</label>
           <select id="gender" name="gender">
             <option value="">— Select —</option>
@@ -249,11 +214,9 @@ require __DIR__ . '/partials/layout-open.php';
             <option value="female" <?= ($editing['gender'] ?? '') === 'female' ? 'selected' : '' ?>>Female</option>
           </select>
         </div>
-        <div>
-          <label for="visit_date">Visit Date</label>
-          <input type="date" id="visit_date" name="visit_date" value="<?= e($editing['visit_date'] ?? ($prefillVisitDate ?? date('Y-m-d'))) ?>">
-        </div>
       </div>
+      <label for="visit_date">Visit Date</label>
+      <input type="date" id="visit_date" name="visit_date" value="<?= e($editing['visit_date'] ?? ($prefillVisitDate ?? date('Y-m-d'))) ?>">
       <label for="address">Address</label>
       <input type="text" id="address" name="address" value="<?= e($editing['address'] ?? '') ?>" placeholder="Street, City">
       <label for="attendance_id">Attended Service</label>
@@ -315,13 +278,7 @@ require __DIR__ . '/partials/layout-open.php';
     </tr>
     <?php foreach ($newcomers as $n): ?>
       <tr>
-        <td>
-          <strong><?= e($n['name']) ?></strong>
-          <?php if (trim((string) ($n['email'] ?? '')) !== ''): ?>
-            <br><small style="color:var(--ink-faint);"><?= e((string) $n['email']) ?></small>
-          <?php endif; ?>
-          <?= $n['notes'] ? '<br><small style="color:var(--ink-faint);">' . e((string) $n['notes']) . '</small>' : '' ?>
-        </td>
+        <td><strong><?= e($n['name']) ?></strong><?= $n['notes'] ? '<br><small style="color:var(--ink-faint);">' . e((string) $n['notes']) . '</small>' : '' ?></td>
         <td>
           <?php if ($n['whatsapp_phone']): ?>
             <a href="https://wa.me/<?= e(preg_replace('/[^0-9]/', '', (string) $n['whatsapp_phone'])) ?>" target="_blank" rel="noopener" style="color:var(--gold);"><?= e($n['whatsapp_phone']) ?> ↗</a>
@@ -347,7 +304,6 @@ require __DIR__ . '/partials/layout-open.php';
           </form>
         </td>
         <td class="actions">
-          <a class="btn sm" href="/admin/follow-up?action=person&id=<?= (int) $n['id'] ?>">Follow-up</a>
           <a class="btn sm secondary" href="/admin/newcomers?action=edit&id=<?= (int) $n['id'] ?>">Edit</a>
           <form method="post" action="/admin/newcomers?action=delete" style="display:inline;" onsubmit="return confirm('Remove this newcomer?');">
             <?= Csrf::field() ?>

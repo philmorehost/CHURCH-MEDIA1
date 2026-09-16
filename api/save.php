@@ -25,32 +25,17 @@ if (!$exists->fetchColumn()) {
     jsonResponse(['status' => 'error', 'message' => 'Post not found.'], 404);
 }
 
-// A signed-in member's bookmark is matched by account as well as by browser, so saving
-// on a laptop and unsaving on a phone works. Anonymous visitors keep the previous
-// fingerprint-only behaviour, because `member_id = NULL` never matches anything.
-$memberId = MemberAuth::check() ? MemberAuth::id() : null;
-
-$where = 'media_post_id = ? AND (fingerprint_hash = ?' . ($memberId !== null ? ' OR member_id = ?' : '') . ')';
-$params = $memberId !== null ? [$postId, $fingerprint, $memberId] : [$postId, $fingerprint];
-
 $pdo->beginTransaction();
 try {
-    $savedStmt = $pdo->prepare('SELECT id FROM post_saves WHERE ' . $where);
-    $savedStmt->execute($params);
-    $existingIds = $savedStmt->fetchAll(PDO::FETCH_COLUMN);
+    $savedStmt = $pdo->prepare('SELECT id FROM post_saves WHERE media_post_id = ? AND fingerprint_hash = ?');
+    $savedStmt->execute([$postId, $fingerprint]);
 
-    if ($existingIds) {
-        // Deleting every match and decrementing by that count keeps saves_count honest
-        // when the same post was bookmarked from more than one device — deleting one and
-        // decrementing by one would leave the post looking saved when it is not.
-        $placeholders = implode(',', array_fill(0, count($existingIds), '?'));
-        $pdo->prepare('DELETE FROM post_saves WHERE id IN (' . $placeholders . ')')->execute($existingIds);
-        $pdo->prepare('UPDATE media_posts SET saves_count = GREATEST(0, saves_count - ?) WHERE id = ?')
-            ->execute([count($existingIds), $postId]);
+    if ($saveId = $savedStmt->fetchColumn()) {
+        $pdo->prepare('DELETE FROM post_saves WHERE id = ?')->execute([$saveId]);
+        $pdo->prepare('UPDATE media_posts SET saves_count = GREATEST(0, saves_count - 1) WHERE id = ?')->execute([$postId]);
         $saved = false;
     } else {
-        $pdo->prepare('INSERT INTO post_saves (media_post_id, fingerprint_hash, member_id) VALUES (?, ?, ?)')
-            ->execute([$postId, $fingerprint, $memberId]);
+        $pdo->prepare('INSERT INTO post_saves (media_post_id, fingerprint_hash) VALUES (?, ?)')->execute([$postId, $fingerprint]);
         $pdo->prepare('UPDATE media_posts SET saves_count = saves_count + 1 WHERE id = ?')->execute([$postId]);
         $saved = true;
     }

@@ -7,14 +7,7 @@ declare(strict_types=1);
  *   token     — the FCM registration token from the app
  *   platform  — 'android' | 'ios' | 'web'
  *   unit_slug — optional slug of the church the user cares about
- *
- * When the caller is a signed-in member the device is bound to them, which is what lets a
- * notification honour their own settings. A device that has never signed in stays anonymous and
- * receives everything, which is what most devices are.
- *
- * POST /api/devices {action:'remove', token} — forget a token entirely.
- * POST /api/devices {action:'unbind', token} — signing out: keep receiving announcements, but
- *   stop applying this member's settings to the device.
+ * POST /api/devices {action:'remove', token} — forget a token.
  */
 
 $pdo = Database::getInstance()->getConnection();
@@ -29,16 +22,6 @@ if (($input['action'] ?? '') === 'remove') {
     jsonResponse(['status' => 'success']);
 }
 
-// Signing out. Without this the device keeps the previous member's notification settings, so
-// the next person to use the phone is subject to choices they never made.
-if (($input['action'] ?? '') === 'unbind') {
-    if ($token === '') {
-        jsonResponse(['status' => 'error', 'message' => 'token is required.'], 400);
-    }
-    $pdo->prepare('UPDATE device_tokens SET member_id = NULL WHERE token = ?')->execute([$token]);
-    jsonResponse(['status' => 'success']);
-}
-
 if ($token === '' || strlen($token) > 512) {
     jsonResponse(['status' => 'error', 'message' => 'A valid token is required.'], 400);
 }
@@ -48,9 +31,11 @@ $platform = in_array(trim((string) ($input['platform'] ?? '')), ['android', 'ios
 $unitId = null;
 $unitSlug = trim((string) ($input['unit_slug'] ?? ''));
 if ($unitSlug !== '') {
-    $found = Unit::findBySlug($unitSlug);
-    if ($found !== null) {
-        $unitId = (int) $found['id'];
+    $stmt = $pdo->prepare('SELECT id FROM org_units WHERE slug = ? LIMIT 1');
+    $stmt->execute([$unitSlug]);
+    $oid = $stmt->fetchColumn();
+    if ($oid !== false) {
+        $unitId = (int) $oid;
     }
 }
 
@@ -59,32 +44,12 @@ $ua = mb_substr((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 250);
 $stmt = $pdo->prepare('SELECT id FROM device_tokens WHERE token = ? LIMIT 1');
 $stmt->execute([$token]);
 $existing = $stmt->fetchColumn();
-
-// Null unless a member is signed in on this request. COALESCE below, not a plain assignment:
-// the app re-registers its token on every launch, including before anyone has signed in, and a
-// plain assignment would unbind a device every time it was opened by a signed-out user.
-$memberId = MemberAuth::check() ? MemberAuth::id() : null;
-
-// Which church this device belongs to (2026_40). The signed-in member's own church when there is one,
-// because that is a fact the app cannot get wrong; otherwise the church whose host this request
-// reached, which is the church the app was built for. A device that has never signed in is the
-// majority case and is answered by the host alone.
-$tenantId = (int) (Tenant::id() ?? 0);
-if ($memberId !== null) {
-    $ownTenant = $pdo->prepare('SELECT tenant_id FROM members WHERE id = ? LIMIT 1');
-    $ownTenant->execute([(int) $memberId]);
-    $own = (int) $ownTenant->fetchColumn();
-    if ($own > 0) {
-        $tenantId = $own;
-    }
-}
-
 if ($existing) {
-    $pdo->prepare('UPDATE device_tokens SET platform = ?, org_unit_id = ?, user_agent = ?, member_id = COALESCE(?, member_id), tenant_id = ? WHERE id = ?')
-        ->execute([$platform, $unitId, $ua, $memberId, $tenantId, (int) $existing]);
+    $pdo->prepare('UPDATE device_tokens SET platform = ?, org_unit_id = ?, user_agent = ? WHERE id = ?')
+        ->execute([$platform, $unitId, $ua, (int) $existing]);
 } else {
-    $pdo->prepare('INSERT INTO device_tokens (token, platform, org_unit_id, tenant_id, user_agent, member_id) VALUES (?, ?, ?, ?, ?, ?)')
-        ->execute([$token, $platform, $unitId, $tenantId, $ua, $memberId]);
+    $pdo->prepare('INSERT INTO device_tokens (token, platform, org_unit_id, user_agent) VALUES (?, ?, ?, ?)')
+        ->execute([$token, $platform, $unitId, $ua]);
 }
 
-jsonResponse(['status' => 'success', 'member_bound' => $memberId !== null]);
+jsonResponse(['status' => 'success']);

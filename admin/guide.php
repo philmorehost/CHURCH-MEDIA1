@@ -25,41 +25,26 @@ require __DIR__ . '/partials/layout-open.php';
 <div class="card" style="margin-bottom:18px;">
   <h2 style="margin:0 0 6px;">📖 Admin Guide</h2>
   <p class="sub">Everything you can do in the admin panel — how to manage your church's content, your account, and the site. Use the links below to jump to a section.</p>
-  <p class="sub">The sidebar is grouped, so only one group is open at a time — click a group heading to open it and close the one you were in. Each screen below also carries a badge showing the lowest role that can open it, and <span class="pill super">SUPER</span> means super admin only.</p>
   <div class="guide-toc">
     <a href="#roles">Roles &amp; Permissions</a>
     <a href="#dashboard">Dashboard</a>
-    <a href="#analytics">Analytics</a>
     <a href="#ads">Ads Management</a>
     <a href="#donations">Donations &amp; Giving</a>
-    <a href="#campaigns">Giving Campaigns</a>
     <a href="#media">Media &amp; Reels</a>
     <a href="#pinned">Pinned Reels</a>
     <a href="#comments">Comments</a>
     <a href="#events">Events</a>
-    <a href="#roster">Duty Roster</a>
     <a href="#sermons">Sermons</a>
-    <a href="#series">Series &amp; Podcast</a>
-    <a href="#devotionals">Daily Devotionals</a>
-    <a href="#reading-plans">Reading Plans</a>
     <a href="#team">Team</a>
     <a href="#prayer">Prayer Wall</a>
-    <a href="#testimonies">Testimonies</a>
     <a href="#newsletter">Newsletter</a>
-    <a href="#sms">SMS Messaging</a>
-    <a href="#whatsapp">WhatsApp</a>
     <a href="#forms">Forms</a>
     <a href="#notifications">Notifications</a>
     <a href="#attendance">Attendance</a>
     <a href="#newcomers">Newcomers</a>
-    <a href="#followup">Follow-up</a>
     <a href="#pages">Pages</a>
     <a href="#units">Units</a>
-    <a href="#home-cells">Home Cells</a>
-    <a href="#unit-levels">Unit Levels</a>
-    <a href="#registrations">Registrations</a>
     <a href="#security">Security</a>
-    <a href="#backup">Backups</a>
     <a href="#settings">Settings</a>
     <a href="#users">Users</a>
     <a href="#firebase">Push (Firebase)</a>
@@ -73,39 +58,18 @@ require __DIR__ . '/partials/layout-open.php';
     <p>Every account has a role that controls what they can see and do. You'll usually only see <strong>your own church's</strong> content — each parish is fully isolated from every other parish.</p>
     <table>
       <tr><th>Role</th><th>What they can do</th></tr>
-      <tr><td><strong>Admin</strong></td><td>Full content management for their church (media, events, sermons, team, prayer, newsletter, forms), manage their church's users, use Notifications, and send <strong>SMS</strong> to their own church.</td></tr>
-      <tr><td><strong>Editor</strong></td><td>Create and edit content (media, events, sermons, team, forms, prayer) but cannot manage users or site settings. May also compose and send <strong>SMS</strong> for their church.</td></tr>
-      <tr><td><strong>Media Team</strong></td><td>Post and manage media &amp; reels only, plus <strong>SMS</strong> for their church.</td></tr>
-      <tr><td><strong>Super Admin</strong></td><td>Everything above across the whole organisation — plus Units, Site Settings, Pages, Users, Firebase push, and the <strong>SMS gateway settings</strong> (the API token, sending hours and caps). Marked with a <span class="pill super">SUPER</span> badge in this guide.</td></tr>
+      <tr><td><strong>Admin</strong></td><td>Full content management for their church (media, events, sermons, team, prayer, newsletter, forms), manage their church's users, and use Notifications.</td></tr>
+      <tr><td><strong>Editor</strong></td><td>Create and edit content (media, events, sermons, team, forms, prayer) but cannot manage users or site settings.</td></tr>
+      <tr><td><strong>Media Team</strong></td><td>Post and manage media &amp; reels only.</td></tr>
+      <tr><td><strong>Super Admin</strong></td><td>Everything above across the whole organisation — plus Units, Site Settings, Pages, Users, and Firebase push. Marked with a <span class="pill super">SUPER</span> badge in this guide.</td></tr>
     </table>
-    <p><strong>Isolation:</strong> a parish admin only sees their own parish's posts, events, sermons, team, forms, prayer requests, newsletter subscribers and <strong>SMS contacts</strong> — even if they log in at the organisation level. Unassigned records (e.g. visitor prayer requests) are only visible to the super admin, who can assign them to the right church.</p>
-    <p>Within SMS specifically, a contact, group, sender ID or campaign with <strong>no church attached is treated as shared</strong> — head office records — so every parish admin can see them. Anything attached to another parish is invisible, and opening it by its id is refused as well as hidden.</p>
+    <p><strong>Isolation:</strong> a parish admin only sees their own parish's posts, events, sermons, team, forms, prayer requests, and newsletter subscribers — even if they log in at the organisation level. Unassigned records (e.g. visitor prayer requests) are only visible to the super admin, who can assign them to the right church.</p>
   </div>
 
   <div class="card" style="margin-bottom:18px;">
     <h2 id="dashboard">Dashboard (<code>/admin</code>)</h2>
     <p>Your landing page. It shows your church's key numbers (media posts, upcoming events, sermons, new prayer requests, newsletter subscribers, blocked IPs) and your latest posts. It also shows <strong>📍 My Unit</strong> so you always know which church you're managing, plus any <strong>🔔 Notifications</strong> sent to your church.</p>
     <p>With the growth tools enabled you'll also see a <strong>Newcomers (7 days)</strong> stat and a <strong>Recent Newcomers</strong> card with tap-to-chat WhatsApp links and follow-up status badges — so the follow-up queue is visible the moment you log in.</p>
-  </div>
-
-  <div class="card" style="margin-bottom:18px;">
-    <h2 id="analytics">Analytics (<code>/admin/analytics</code>) <span class="pill role">ADMIN/EDITOR</span></h2>
-    <p>How many people are reading and watching, where they came from, and what they searched for. Pick a range — <strong>Last 7 / 30 / 90 days</strong>, or a custom window — and everything on the page follows it.</p>
-    <ul>
-      <li><strong>Overview</strong> — page views, app opens and the rest of the headline counts, each with its share of traffic.</li>
-      <li><strong>Daily page views</strong> — the shape of the period, so you can see which days actually landed.</li>
-      <li><strong>Top sermons, reels, events and testimonies</strong> — what is being opened, ranked.</li>
-      <li><strong>Most visited pages</strong> — which pages people land on.</li>
-      <li><strong>What people searched for</strong> — the clearest signal of content you do not have yet. A search that returned nothing is a request.</li>
-      <li><strong>Where visitors come from</strong> — the referring site, host only, never the full link.</li>
-      <li><strong>Web vs app</strong> — how much of your audience is in the mobile app rather than the website.</li>
-      <li><strong>Per church</strong> — the same numbers broken down across your churches.</li>
-      <li><strong>Meanwhile, in this period</strong> and <strong>All time</strong> — giving, newcomers and other activity shown alongside the traffic.</li>
-    </ul>
-    <p><strong>What is deliberately not counted.</strong> Search engine crawlers, link-preview fetchers (whatever builds a WhatsApp or Telegram preview) and uptime monitors are filtered out, so the numbers are people. <strong>No IP address is stored</strong> — visitors are told apart by the same rotating one-way device hash the rest of the site uses, which cannot be traced back to a person. Browsers that ask not to be tracked are honoured and simply do not report at all.</p>
-    <p><strong>Settings</strong> at the foot of the page switch collection on or off and set how long raw events are kept (7–3650 days). Turning collection off stops recording immediately; the numbers you already have stay. The daily roll-ups behind <strong>All time</strong> are kept indefinitely, so shortening the retention window never loses long-range trends.</p>
-    <p><strong>Run the nightly roll-up</strong> (<code>php cli/analytics_rollup.php</code> from cron) so long-range history is preserved.</p>
-    <p><em>The app reports separately from the website.</em> Expect the "App opens" figure and the web-vs-app split to stay low until people are running a recent build of the app — the website's own traffic will always dominate it.</p>
   </div>
 
   <div class="card" style="margin-bottom:18px;">
@@ -117,29 +81,13 @@ require __DIR__ . '/partials/layout-open.php';
       <li><strong>Bank Transfer Receipt Verification:</strong> Review uploaded bank transfer receipt images/PDFs and verify or mark transfers as completed or failed.</li>
       <li><strong>CSV Export:</strong> Download full CSV reports of all giving transactions for financial auditing.</li>
     </ul>
-    <p>A gift given on a campaign page carries a <strong>Campaign</strong> column in this list, so you can filter by project and see exactly what has come in for it.</p>
-  </div>
-
-  <div class="card" style="margin-bottom:18px;">
-    <h2 id="campaigns">Giving Campaigns (<code>/admin/campaigns</code>) <span class="pill admin">ADMIN</span></h2>
-    <p>A campaign is a project with a target — a new roof, a vehicle, a mission fund — and the gifts that count towards it. Each one gets its own public page at <code>/give/c/&lt;name&gt;</code>, and the open ones are listed on <code>/give</code>.</p>
-    <p><strong>Pledges are not money, and the two are never added together.</strong> A pledge is a promise to give later, shown beside the progress bar and clearly labelled. It appears in the total <em>only</em> when somebody has actually received the gift — at which point <strong>Mark received</strong> records it as a real donation and the bar moves. That is deliberate: a church that reports promises as income is reporting money it does not have.</p>
-    <ul>
-      <li><strong>The bar moves on confirmed gifts only.</strong> A bank transfer whose receipt is still waiting to be verified is reported separately as <em>awaiting verification</em>, because somebody has claimed the money but the church has not confirmed it arrived.</li>
-      <li><strong>A closing date closes the campaign.</strong> Once <em>Closes on</em> has passed it stops taking gifts by itself — a gift offered to a finished campaign is refused with a message rather than quietly recorded as general giving. The list shows a campaign that has ended but is still switched on, so you can see it needs attention.</li>
-      <li><strong>Two currencies are never added together.</strong> The target is in the campaign's own currency; anything received in another is reported on its own line.</li>
-      <li><strong>A campaign that has received gifts cannot be deleted</strong>, nor can a pledge that has been turned into a gift. Switch the campaign off instead — that stops the appeal and keeps the record.</li>
-      <li><strong>A pledge can only be recorded once.</strong> Pressing <em>Mark received</em> twice does not double the total; the second press is refused.</li>
-      <li><strong>Record a pledge</strong> is for a promise made in person or on the phone — which is how most pledges actually arrive. Donors can also pledge themselves from the campaign page.</li>
-    </ul>
-    <p>If a church runs several branches on one installation, campaigns belong to a branch for editing but appear on the one public giving page: the website belongs to the whole church.</p>
   </div>
 
   <div class="card" style="margin-bottom:18px;">
     <h2 id="ads">Ads Management (<code>/admin/ads</code>) <span class="pill super">SUPER</span></h2>
-    <p>Monetize and manage vertical 9:16 display advertisements for the website and Mobile App. The gateway keys live on a separate screen, reached from <strong>System → Payment Gateway</strong> in the sidebar (or <code>/admin/ads?action=settings</code>).</p>
+    <p>Monetize and manage vertical 9:16 display advertisements for the website and Mobile App.</p>
     <ul>
-      <li><strong>Ad Gateway Settings</strong> (<strong>System → Payment Gateway</strong> <span class="pill super">SUPER</span>): Configure Payhub Online Gateway keys (`payhub_public_key`, `payhub_secret_key`) and Manual Bank Transfer details for advertiser checkout.</li>
+      <li><strong>Ad Gateway Settings:</strong> Configure Payhub Online Gateway keys (`payhub_public_key`, `payhub_secret_key`) and Manual Bank Transfer details for advertiser checkout.</li>
       <li><strong>Packages &amp; Pricing:</strong> Create and edit ad duration packages with custom pricing and display frequencies (every 5m, 10m, 15m, 30m, once daily). Free packages default to once daily.</li>
       <li><strong>Review &amp; Approval:</strong> Review advertiser submissions, view uploaded bank transfer receipts, and approve/reject campaigns.</li>
       <li><strong>Publisher Ad Manager Portal:</strong> Approved publishers receive a secure link via email to track their ad impressions, clicks, CTR, and create additional ads.</li>
@@ -191,46 +139,8 @@ require __DIR__ . '/partials/layout-open.php';
   </div>
 
   <div class="card" style="margin-bottom:18px;">
-    <h2 id="sermons">Sermons (<code>/admin/sermons</code>) <span class="pill role">ADMIN/EDITOR</span></h2>
-    <p>Upload sermon audio, attach a YouTube video, add speaker/series/scripture reference, and publish. Sermons appear on the site and app's Sermons tab. Attaching a sermon to a <strong>series</strong> and giving it an <strong>episode number</strong> also puts it in your podcast feed — see the next section.</p>
-  </div>
-
-  <div class="card" style="margin-bottom:18px;">
-    <h2 id="series">Sermon Series &amp; Podcast (<code>/admin/series</code>) <span class="pill role">ADMIN/EDITOR</span></h2>
-    <p>A <strong>series</strong> is a named run of messages — "Walking in Grace, parts 1–8". Grouping sermons into one does two things: listeners get the next message without hunting for it, and the series becomes a <strong>podcast feed</strong> people can subscribe to.</p>
-    <ul>
-      <li><strong>Create a series</strong> with a name, description and cover image. The name becomes the <strong>podcast title</strong>, so keep it recognisable — this is what listeners see in Spotify and Apple Podcasts.</li>
-      <li><strong>Cover art should be square.</strong> Podcast directories require it, and a wide image gets cropped.</li>
-      <li><strong>Attach sermons</strong> to the series and give each one an <strong>episode number</strong>. The episode count on the series list is worked out from the sermons themselves, so it can never drift out of step with reality.</li>
-      <li><strong>A sermon with no episode number is flagged</strong>, and the series list shows how many. That matters because a missing number is exactly what makes a feed list episodes by date instead of in the order you meant.</li>
-      <li><strong>Unpublished series</strong> are hidden from the website and left out of the feed, but their sermons are not touched — you can take a series down without losing anything.</li>
-      <li><strong>+ Episode</strong> on any series jumps straight to the sermon form with that series already selected.</li>
-    </ul>
-    <p><strong>Subscribing:</strong> your feed lives at <code>/podcast.xml</code>. Paste that address into Spotify for Podcasters, Apple Podcasts or any other directory <strong>once</strong> — after that every new sermon published into a series appears there on its own. There is also a friendly <code>/podcast</code> page to share with people who are not podcast apps.</p>
-    <p><strong>Two things to know before you submit:</strong> a feed with no episodes is <em>rejected</em> by the directories, so <strong>publish at least one sermon with audio first</strong>; and only sermons that have an audio file are listed, because a video-only sermon has nothing for a podcast app to play.</p>
-  </div>
-
-  <div class="card" style="margin-bottom:18px;">
-    <h2 id="devotionals">Daily Devotionals (<code>/admin/devotionals</code>) <span class="pill role">ADMIN/EDITOR</span></h2>
-    <p>One entry per day, written on a <strong>month grid</strong> so you can see what is going out and when. A list ordered by title cannot answer "what is going out on Sunday?", which is the question this screen exists for.</p>
-    <p><strong>A church can write its own.</strong> Head office writes the church-wide entry; a scoped admin writes for their own church. When a church has written its own for a day, its people are shown <em>that one</em> instead of the church-wide entry — not both.</p>
-    <p><strong>Where members read it:</strong> <code>/devotional</code> for today, and each day has its own link (<code>/devotional/2026-09-14</code>) that can be shared on WhatsApp. Writing the same day twice updates the entry rather than creating a second one.</p>
-    <p><strong>The daily notification</strong> is the card at the bottom of the screen: whether it is switched on, how many devices are registered, and whether today's has gone out. Sending needs a <strong>cron entry</strong> — the exact line is on that card. Nothing goes out on its own, and a devotional left as <em>hidden</em> is never sent.</p>
-    <p><strong>Who is skipped.</strong> A member who switched devotionals off on their own dashboard is not notified. That is only possible because their device is linked to their account, so a phone that has never signed in is treated as having expressed no preference and receives. Sending also obeys the same sending window as SMS and WhatsApp, so a mis-set cron cannot wake anyone at 3am.</p>
-    <p><strong>Running it twice is harmless.</strong> The day is claimed before the first notification goes out, so a duplicate cron entry, or a run that overlaps the previous one, cannot notify the church twice.</p>
-  </div>
-
-  <div class="card" style="margin-bottom:18px;">
-    <h2 id="reading-plans">Reading Plans (<code>/admin/reading-plans</code>) <span class="pill super">SUPER</span></h2>
-    <p>Give the church a Bible-reading plan — a chapter a day, a year through the Bible, whatever suits. Members choose one from their own account and tick off the days as they read.</p>
-    <p><strong>Writing a plan.</strong> The editor is a text box with <strong>one line per day</strong>, because that is how a plan is written on paper and the only form that stays readable at 365 lines. Write a passage as <code>Genesis 1</code>, <code>Genesis 1-3</code>, <code>Genesis 1:1-5</code> or <code>John 3:16</code>, and put more than one reading on a day by separating them with a semicolon: <code>Psalm 23; John 10</code>.</p>
-    <p><strong>Leave a line blank for a rest day</strong> — the days after it keep their numbers. A plan that rests on Sundays depends on that, and a plan nobody has to renumber is one nobody mistypes.</p>
-    <p><strong>Mistakes are caught as you type them, not later.</strong> Book names are checked against the Bible the app carries, and a chapter that does not exist — <em>Genesis 51</em> — is refused with the reason. An ambiguous name such as <em>Jud</em> is refused rather than guessed at, because it could be Judges or Jude and putting people in the wrong book is worse than asking. A misspelling suggests what you probably meant.</p>
-    <p><strong>Plans are shared by every church</strong> in this installation, which is why only a super admin can create or change one. A scoped admin can read the list, so they know what their people have been offered.</p>
-    <p><strong>Members see it on their own account</strong> at <code>/member</code>: their place, how far through they are, and the reading they are up to. Progress survives switching plans, so leaving one and coming back finds the place still marked.</p>
-    <p><strong>The daily reminder.</strong> Members who have not read yet get a nudge in the evening, if they have not switched reading reminders off in their own notification choices. It needs a <strong>cron entry</strong> — nothing is sent on its own:</p>
-    <pre style="background:#0f0d1f;border:1px solid var(--border);border-radius:10px;padding:12px;overflow:auto;font-size:12.5px;">30 18 * * * php <?= e(ROOT_PATH) ?>/cli/reading_worker.php</pre>
-    <p>Run it as often as you like — the day is claimed per member before anything is sent, so an hourly cron still nudges anybody at most once. It obeys the same sending window as SMS and WhatsApp, so a mis-set cron cannot wake anyone at 3am.</p>
+    <h2 id="sermons">Sermons (<code>/admin/sermons</code>)</h2>
+    <p>Upload sermon audio, attach a YouTube video, add speaker/series/scripture reference, and publish. Sermons appear on the site and app's Sermons tab.</p>
   </div>
 
   <div class="card" style="margin-bottom:18px;">
@@ -244,57 +154,8 @@ require __DIR__ . '/partials/layout-open.php';
   </div>
 
   <div class="card" style="margin-bottom:18px;">
-    <h2 id="testimonies">Testimonies &amp; Praise Reports (<code>/admin/testimonies</code>) <span class="pill role">ADMIN/EDITOR</span></h2>
-    <p>Members submit testimonies from the public site and they arrive here as <strong>Pending</strong> — nothing is published until you approve it.</p>
-    <ul>
-      <li><strong>Approve</strong> publishes it to the website and records when it was approved. <strong>Reject</strong> takes it out of the queue without deleting it, and <strong>Delete</strong> removes it for good (it asks first).</li>
-      <li><strong>Filter buttons</strong> show live counts for Pending, Approved and Rejected, so the size of the queue is visible the moment you open the page.</li>
-      <li><strong>Edit anything</strong> before publishing — name, email, phone, church, title and the testimony text itself. Correcting a spelling is usually better than rejecting somebody's testimony.</li>
-    </ul>
-    <p>Approved testimonies appear on the public site and are counted in Analytics, so you can see which ones people actually open.</p>
-  </div>
-
-  <div class="card" style="margin-bottom:18px;">
     <h2 id="newsletter">Newsletter (<code>/admin/newsletter</code>)</h2>
     <p>View email subscribers (from the site footer signup), export them as CSV, and remove subscribers. Subscribers are scoped to your church; unassigned ones can be assigned by the super admin.</p>
-  </div>
-
-  <div class="card" style="margin-bottom:18px;">
-    <h2 id="sms">SMS Messaging (<code>/admin/sms</code>) <span class="pill role">ADMIN/EDITOR/MEDIA</span></h2>
-    <p>Text messages to your members, newcomers and team. The screen is split into nine tabs:</p>
-    <ul>
-      <li><strong>Dashboard</strong> — wallet balance, units used this month, how many messages the gateway accepted, and anything the queue is still working through. Press <em>Check balance now</em> to read it live.</li>
-      <li><strong>Compose</strong> — write a message, choose who gets it, and send. <strong>Nothing is charged until the second screen.</strong> “Check and continue” resolves the audience for real, tells you exactly how many people were left out and why, and works out the true cost — person by person, because a name with an accent in it can cost a second unit where everyone else costs one. Use <em>Send a test to myself</em> first; it costs one unit.</li>
-      <li><strong>Contacts</strong> — the address book. <em>Sync from church data</em> pulls in every phone number the site already holds (team, newcomers, RSVPs, testimonies, registrations, app installs) in one click; newsletter subscribers are only included where the subscriber explicitly agreed to text messages. You can also import a CSV — the importer shows a dry run and every rejected row <em>before</em> it writes anything — or add people one at a time.</li>
-      <li><strong>Groups &amp; Segments</strong> — a <em>group</em> is a list you keep (the choir, this term's workers). A <em>segment</em> is a rule that recalculates itself every time you send, so “joined in the last 30 days” is never stale.</li>
-      <li><strong>Sender IDs</strong> — the name your messages arrive from. Up to <strong>11 letters and numbers</strong>, no spaces. Your provider reviews it; the status updates itself and you are told the moment it is approved. <strong>Nothing can be sent until one is approved.</strong></li>
-      <li><strong>Templates</strong> — saved wording you can reuse, with placeholders like <code>{first_name}</code>.</li>
-      <li><strong>Campaigns</strong> — the full history. Open one to see every recipient and what happened to each; resend only to the failures, resume a paused campaign, or cancel one that has not finished.</li>
-      <li><strong>Settings</strong> <span class="pill super">SUPER</span> — the API token (encrypted, and never shown again), the sending window, daily unit caps, and the opt-out footer. <strong>Leave the token field blank to keep the one already stored.</strong></li>
-      <li><strong>Guide</strong> — the same walkthrough in more detail, which also knows which steps you have already finished.</li>
-    </ul>
-    <p><strong>What “sent” means.</strong> It means your SMS provider accepted the message for delivery — not that a particular handset received it. The gateway answers once per batch rather than once per number, so the failure list is the closest thing to the truth for an individual person. A campaign that runs out of credit <em>pauses</em> rather than failing silently, and resumes once you top up.</p>
-    <p><strong>Honouring STOP.</strong> Anyone who replies STOP is marked as opted out and is skipped by every campaign from then on, even if you select them directly or they are in a group you choose. This is not optional — it protects your sender ID from being blocked by the networks.</p>
-    <p><strong>Sending needs the cron worker.</strong> Nothing goes out on its own. If a campaign sits on <em>queued</em> and does not move, the cron entry is the first thing to check; the exact lines to add are shown under the Settings tab.</p>
-  </div>
-
-  <div class="card" style="margin-bottom:18px;">
-    <h2 id="whatsapp">WhatsApp (<code>/admin/whatsapp</code>) <span class="pill role">ADMIN/EDITOR/MEDIA</span></h2>
-    <p>Message your members on WhatsApp through <strong>Meta's official Business API</strong> — the channel WhatsApp itself provides, on your own verified business number. Nothing here uses a personal WhatsApp account or an unofficial sender, so your number cannot be banned for using it.</p>
-    <p>The screen is split into six tabs:</p>
-    <ul>
-      <li><strong>Dashboard</strong> — whether the channel is connected and what still needs doing, plus the webhook address to give Meta.</li>
-      <li><strong>Inbox</strong> — every conversation in one place, so a message from a member gets an answer. Anyone who can use the messaging screens can read and reply here, because a member's message that nobody answers is worse than no inbox at all.</li>
-      <li><strong>Broadcast</strong> — send one approved template to a set of people, using the same audiences as SMS (everyone, a group, a church, or a saved segment).</li>
-      <li><strong>Templates</strong> — the wording of the messages you are allowed to send. Meta reviews each one before it can be used.</li>
-      <li><strong>Settings</strong> <span class="pill super">SUPER</span> — your Phone number ID, access token, app secret and verify token. The token and secret are encrypted and never shown again; <strong>leave a field blank to keep the value already stored</strong>.</li>
-      <li><strong>Guide</strong> — the same walkthrough with the Meta setup steps in order.</li>
-    </ul>
-    <h3>The 24-hour rule — the thing that confuses everyone</h3>
-    <p>WhatsApp allows a free-form reply <strong>only within 24 hours</strong> of that person's last message to you. Inside that window you can type anything back from the Inbox. <strong>Outside it, only an approved template can be sent</strong> — which is why Broadcast offers templates and nothing else. This is WhatsApp's rule, not a limitation of your site, and it exists to stop businesses messaging people who never asked.</p>
-    <p><strong>A broadcast only reaches people who opted in.</strong> Someone counts as opted in if they are on the opt-in list, or if they have messaged you at all. Anyone who has opted out is skipped permanently, and everyone skipped is counted as skipped rather than messaged anyway.</p>
-    <p><strong>How to switch it on</strong> <span class="pill super">SUPER</span>: create a Meta app and a WhatsApp Business account, verify your business, register the number, then paste the credentials into the Settings tab and give Meta the webhook address it shows. Until the credentials are saved the channel is <strong>off</strong>, and every tab says so at the top rather than failing silently. The Guide tab lists the steps in order.</p>
-    <p><em>Broadcasts are sent by their own cron worker</em> (<code>php cli/wa_worker.php</code>), separate from SMS. If a broadcast sits on <em>queued</em> and does not move, the cron entry is the first thing to check. Sending is paced and capped per day so a large list cannot get your number rate-limited.</p>
   </div>
 
   <div class="card" style="margin-bottom:18px;">
@@ -312,26 +173,6 @@ require __DIR__ . '/partials/layout-open.php';
   <div class="card" style="margin-bottom:18px;">
     <h2 id="notifications">Notifications (<code>/admin/notifications</code>)</h2>
     <p>Provinces can broadcast announcements to <strong>all churches, one church, or selected churches</strong>. Recipients see them on their admin dashboard and receive an email (via the SMTP configured in Settings). <span class="pill super">SUPER</span> admins can reach the whole organisation; other admins can only notify within their own unit.</p>
-  </div>
-
-  <div class="card" style="margin-bottom:18px;">
-    <h2 id="roster">Duty Roster (<code>/admin/roster</code>) <span class="pill role">ADMIN/EDITOR</span></h2>
-    <p>Who is serving, and <strong>what still needs filling</strong>. Add a service, add the roles it needs, then put people in them.</p>
-    <ul>
-      <li><strong>A service is not an event.</strong> A Sunday service is an operational occasion — somebody has to be on the door — while an event is something you publicise. They are kept apart so you can arrange a rota without publishing anything.</li>
-      <li><strong>Roles carry the count</strong> — “Ushering ×4”, “Choir ×2” — because that is how you would say it out loud. The people go in separately.</li>
-      <li><strong>Add anybody, member or not.</strong> Pick from your member list, or just type a name and number. Ushers and choir members are frequently not registered members, and making them sign up before they can be rostered would stop you using this at all.</li>
-      <li><strong>Record the answer.</strong> Each person is <em>Invited</em>, <em>Accepted</em> or <em>Declined</em>. Nothing advances on its own — a decline is kept on the page in red so you can see who said no and go and ask somebody else.</li>
-    </ul>
-    <p><strong>An invitation is not counted as covered.</strong> “Still to find” counts people who have accepted, and anyone still to reply is shown separately. A number that treated <em>invited</em> as <em>filled</em> would let you stop looking before anyone had actually agreed — and discover it on the morning.</p>
-    <p><strong>Members answer their own invitations.</strong> If the person is a registered member the invitation appears on their own account, under <em>You’re serving</em>, where they can accept, decline, and change their mind later — so you do not have to ring round. Somebody typed in by name cannot answer; ring them, which is why their number is on the roster. A member can only ever answer their own slot, and that is enforced in the database query rather than on the page, so no screen can get it wrong.</p>
-    <p><strong>People are emailed automatically.</strong> A member added to a service gets one message telling them, and everyone still on the rota gets a reminder the day before — worded differently if they have not answered yet, because that one is asking for an answer rather than reminding them. Somebody who has already declined is not reminded: a message that ignores a “no” is how people stop reading the ones that matter. Anyone typed in by name is not emailed, because there is no address to use.</p>
-    <p>This needs one line on the server, alongside the other workers:</p>
-    <p><code>5 * * * * php /path/to/cli/roster_worker.php --quiet</code></p>
-    <p>Run it by hand with <code>--status</code> to see who is due, or <code>--dry-run</code> to see what it would send without sending it. The whole thing can be switched off at the foot of the Roster page without touching cron, and the page warns you when no SMTP host is set — in which case the mail is handed to the server's own mail function and may be quietly dropped or filed as spam.</p>
-    <p><strong>Text messages are deliberately not sent.</strong> An automatic SMS spends your SMS wallet per message, so that is a decision with a price on it rather than something that should ride along with free email.</p>
-    <p>A role with somebody still on it cannot be deleted; you are asked to move those people first, because removing the role would drop them silently. Tick <strong>This service is cancelled</strong> to keep the record but take it off the serving view.</p>
-    <p>Church Admins and Editors can use this. A church admin only ever sees their own church's rosters, and that is enforced on every change, not just on what is displayed.</p>
   </div>
 
   <div class="card" style="margin-bottom:18px;">
@@ -357,29 +198,7 @@ require __DIR__ . '/partials/layout-open.php';
       <li><strong>⬇ Export CSV</strong> exports the current filtered list (or everyone), or <strong>🔗 Save &amp; Share Link</strong> saves it on the server and gives you a shareable link.</li>
       <li>Add newcomers straight from an attendance row via the <strong>+ Newcomer</strong> shortcut.</li>
     </ul>
-    <p>Newcomers are private too — only your church's admins/editors can see them. Add an <strong>email address</strong> if you want the automatic follow-up emails to reach them; without one the sequence still sets tasks for you, and the Follow-up page lists who is affected.</p>
-  </div>
-
-  <div class="card" style="margin-bottom:18px;">
-    <h2 id="followup">Follow-up (<code>/admin/follow-up</code>) <span class="pill role">ADMIN/EDITOR</span></h2>
-    <p>What happens after somebody visits for the first time — and whether it is actually happening. A <strong>sequence</strong> is a list of <strong>steps</strong>, and a step is one of two things:</p>
-    <ul>
-      <li>an <strong>email</strong>, which goes out on its own and costs nothing; or</li>
-      <li>a <strong>task</strong>, which appears on this page for a person to do — ring them, visit them, introduce them to a home cell.</li>
-    </ul>
-    <p>Both kinds show up in the same place, so “what is outstanding for this visitor” is one list rather than two.</p>
-    <p><strong>Days are counted from the day you enrol them</strong>, not from the calendar, so one sequence works for a visitor who arrives on any day of the year. There is a <strong>four-step starting plan</strong> you can drop into an empty sequence and then reword: a thank-you the same day, a phone call on day 3, an invitation on day 7, and a home cell invitation on day 14.</p>
-    <p>Use <code>{{first_name}}</code>, <code>{{name}}</code> or <code>{{church}}</code> anywhere in an email and it is filled in for each person. A misspelled placeholder is left visible on purpose, so it is obvious and gets fixed rather than quietly turning into “Dear ,”.</p>
-    <p><strong>The hub leads with the two things that go wrong quietly.</strong> <em>Needing attention</em> lists visitors nobody has managed to move — never contacted within <?= FollowUp::STALL_NEW_DAYS ?> days of arriving, or nothing done for <?= FollowUp::STALL_CONTACTED_DAYS ?> days after first contact. <em>Emails the mail server refused</em> lists sends that bounced; they are retried after an hour, up to <?= FollowUpRunner::MAX_ATTEMPTS ?> times, and a wrong address sits there rather than failing in silence.</p>
-    <p><strong>Nothing is sent until the worker runs.</strong> Add this to cron — hourly is plenty, and safe at any hour, because an email does not ring in somebody's bedroom the way a text message does:</p>
-    <pre style="background:#0f0d1f;border:1px solid var(--border);border-radius:10px;padding:12px;overflow:auto;font-size:12.5px;">20 * * * * php <?= e(ROOT_PATH) ?>/cli/followup_worker.php --quiet</pre>
-    <p>At most <strong>one email per person per run</strong>. If you enrol somebody against last month's visits, the steps that are already due catch up over the next few runs instead of arriving as one burst.</p>
-    <ul>
-      <li><strong>Stopping is immediate.</strong> Mark a newcomer <em>Inactive</em> and their sequence stops there and then — not whenever the worker next runs — and the tasks come off the list.</li>
-      <li><strong>Enrolling twice does nothing.</strong> Somebody is in a sequence once, however many times the button is pressed.</li>
-      <li><strong>A sequence people are already in cannot be deleted</strong>, and neither can a step that has already reached somebody. Switch either off instead: that stops the work and keeps the record of what was sent.</li>
-      <li><strong>Text messages are deliberately not sent.</strong> An automatic SMS spends your SMS wallet per message, so that is a decision with a price on it rather than something that should ride along with free email.</li>
-    </ul>
+    <p>Newcomers are private too — only your church's admins/editors can see them.</p>
   </div>
 
   <div class="card" style="margin-bottom:18px;">
@@ -389,45 +208,19 @@ require __DIR__ . '/partials/layout-open.php';
 
   <div class="card" style="margin-bottom:18px;">
     <h2 id="units">Units (<code>/admin/units</code>) <span class="pill super">SUPER</span></h2>
-    <p>Manage your <strong>church hierarchy</strong> — by default <strong>Province → Zone → Area → Parish</strong>, but every level name is yours to change on the <strong>Unit Levels</strong> screen below. Each unit gets its own public directory page and media roll-up. Super-admin only.</p>
-    <p><strong>These units belong to one church.</strong> On an installation serving several churches, each has its own hierarchy, and this screen shows only the church you are working on — use the <strong>switcher</strong> in the sidebar to change which. A unit cannot be renamed, moved or deleted across that boundary, which also means the unit pickers on Users, Media, Events and the rest offer only this church's units. The <strong>level names</strong> themselves are shared by every church, since they describe the shape of a hierarchy rather than the churches in it.</p>
+    <p>Manage the <strong>Province → Zone → Area → Parish</strong> hierarchy. Create parishes/zones/areas/provinces, and each one gets its own public directory page and media roll-up. Super-admin only.</p>
     <ul>
-      <li><strong>⬆ Import Churches (CSV)</strong> — bulk-add the whole hierarchy from a CSV with one column per level, named after your levels (e.g. <code>Provinces, Zones, Areas, Parishes</code>; one row per church). Everything above the deepest level is required; the deepest level (the church itself) is optional. Use <strong>⬇ Download sample CSV</strong> so you get the exact column format, then fill it in. Names are stored in <strong>CAPS</strong> and existing units are matched automatically, so there are no duplicates.</li>
-      <li><strong>⬇ Export Units (CSV)</strong> — download a complete CSV with one column per level plus ID, Level, Name, Slug, Full Hierarchy and Created At. The level columns match the import format, so an export can be edited and imported straight back (available to Super Admin, and to Church Admins scoped to their own units).</li>
+      <li><strong>⬆ Import Churches (CSV)</strong> — bulk-add the whole hierarchy from a CSV with columns <code>Province, Zone, Area, Parish</code> (one church per row; Parish optional). Use the <strong>⬇ Download sample CSV</strong> template so you get the exact format, then fill it in. Names are stored in <strong>CAPS</strong> and existing units are matched automatically, so there are no duplicates.</li>
+      <li><strong>⬇ Export Units (CSV)</strong> — download a complete CSV list of all church units, hierarchies, and parent links (available to Super Admin and Church Admins scoped to their units).</li>
       <li><strong>🏷 Name Corrections</strong> — review church name corrections flagged from the registration page. <em>Approve</em> automatically renames the church to the suggested spelling; <em>Reject</em> makes no changes.</li>
     </ul>
   </div>
 
   <div class="card" style="margin-bottom:18px;">
-    <h2 id="home-cells">Home Cells (<code>/admin/home-cells</code>) <span class="pill role">ADMIN</span></h2>
-    <p>The <strong>midweek gatherings</strong> — where your people meet during the week. Everything here feeds the public <a href="/find-a-cell" target="_blank" rel="noopener"><code>/find-a-cell</code></a> page and the app's cell list.</p>
-    <ul>
-      <li><strong>The list</strong> shows every unit at your <em>deepest</em> level (a Parish by default) with what is known about its meeting, and whether it is showing to the public. Search by cell name, leader or area.</li>
-      <li><strong>Meeting day</strong> is what puts a cell on the public page. A unit with no day is simply a church, not a cell — so a hierarchy of 200 parishes with 12 real cells shows 12 cards, not 200 blank ones.</li>
-      <li><strong>Meeting time</strong> is typed the way people say it — <em>6:30 PM</em> stays 6:30 PM. It is a label, not a clock value, so nobody has to convert to 24-hour time.</li>
-      <li><strong>List this cell</strong> — untick while a cell is between leaders. Nothing is deleted, it just stops appearing.</li>
-    </ul>
-    <p><strong>A leader's number is private until you say otherwise.</strong> It is stored the moment you type it, but the public page <em>and</em> the app both hide it unless <strong>Show this number on the public finder</strong> is ticked for that cell. A personal number on a public page gets copied and called by people the leader never agreed to hear from, and the person filling in this form is not the leader — so publishing is a decision rather than a side effect of saving. Once ticked, the number appears with tap-to-call and a WhatsApp link.</p>
-    <p>Cells are <strong>not</strong> sorted by distance and there is no “near me” button. Doing that needs a latitude and longitude for every meeting place, and asking every cell leader for coordinates is a burden most churches will not carry — a button that returns nothing useful is worse than a plain, reliable filter. Adding a map later is an addition, not a rework.</p>
-    <p>Editing is limited to <strong>Church Admins</strong>, and a scoped admin only ever sees cells inside their own part of the hierarchy. The list, the public finder and the app all show one church's cells — never another church's, even if you guess a link to one.</p>
-  </div>
-
-  <div class="card" style="margin-bottom:18px;">
-    <h2 id="unit-levels">Unit Levels (<code>/admin/unit-levels</code>) <span class="pill super">SUPER</span></h2>
-    <p>Define the <strong>depth and naming</strong> of your church hierarchy — the one place that shapes how churches are organised everywhere on the site and in the app.</p>
-    <ul>
-      <li><strong>Rename a level</strong> — change <em>Province</em> to <em>Region</em>, or <em>Parish</em> to <em>Branch</em>. The new name is used immediately in the Units admin, the CSV template, the registration form, notifications, the public directory, and the mobile app. Existing units keep their data — only the label changes.</li>
-      <li><strong>Add a level</strong> — new levels are appended at the bottom; move them with <strong>↑</strong> / <strong>↓</strong> to place them. Use this if your structure needs more than four depths.</li>
-      <li><strong>Remove a level</strong> — only possible while no unit uses it, so you can never lose churches by mistake.</li>
-    </ul>
-    <p><strong>Depth 1</strong> is the top of the tree and the <strong>deepest</strong> depth is where the churches themselves live — that deepest level is the one typed in by name on the registration form, and the level used for “Find Your …”, notification targeting and per-church isolation.</p>
-  </div>
-
-  <div class="card" style="margin-bottom:18px;">
     <h2 id="registrations">Registrations (<code>/admin/registrations</code>) <span class="pill super">SUPER</span></h2>
-    <p>Churches register their admin at the public <strong>/register</strong> page. They pick their location from the cascading dropdowns — one per level above the church — then <strong>type their church name</strong> (auto-CAPS; existing churches appear as suggestions as they type). Because the dropdowns are built from your configured levels, the form always matches the hierarchy you have set up.</p>
-    <p>Here you simply <strong>review → edit if needed → approve</strong>. Approving creates the admin account (a brand-new church name is created under the last chosen level automatically) and emails the applicant. Rejecting records an optional reason and emails them. Every step is safe — no data is ever deleted.</p>
-    <p><strong>Roles &amp; corporate email:</strong> each registrant picks their role (<em>Church Admin / Editor / Media Team</em>). As soon as a level is picked or a church name is typed, the form <strong>suggests two usernames</strong> from the church name + role (e.g. <code>SANCTUARY OF PRAISE</code> + admin → <code>sopadmin</code> / <code>sop.admin</code>). The chosen username doubles as the <strong>corporate email local-part</strong>. If <strong>Settings → Corporate Email (cPanel)</strong> is enabled, Approve automatically creates that mailbox (e.g. <code>sopadmin@domain</code>) using the password the registrant entered, and if they gave an <strong>alternative email</strong>, it is added as a forwarder.</p>
+    <p>Churches register their admin at the public <strong>/register</strong> page. They pick their <strong>Province → Zone → Area</strong> from the church list, then <strong>type their Parish church name</strong> (auto-CAPS; existing parishes appear as suggestions as they type).</p>
+    <p>Here you simply <strong>review → edit if needed → approve</strong>. Approving creates the admin account (a brand-new parish name is created under the chosen Area automatically) and emails the applicant. Rejecting records an optional reason and emails them. Every step is safe — no data is ever deleted.</p>
+    <p><strong>Roles &amp; corporate email:</strong> each registrant picks their role (<em>Church Admin / Editor / Media Team</em>). As soon as a Zone/Area is picked or a Parish is typed, the form <strong>suggests two usernames</strong> from the church name + role (e.g. <code>SANCTUARY OF PRAISE</code> + admin → <code>sopadmin</code> / <code>sop.admin</code>). The chosen username doubles as the <strong>corporate email local-part</strong>. If <strong>Settings → Corporate Email (cPanel)</strong> is enabled, Approve automatically creates that mailbox (e.g. <code>sopadmin@domain</code>) using the password the registrant entered, and if they gave an <strong>alternative email</strong>, it is added as a forwarder.</p>
     <p><strong>Instant password strength:</strong> the register page measures strength on every keystroke using <strong>cPanel's 0–100 scale</strong> — <span style="color:#ff6b6b;">red = weak (&lt;65)</span>, <span style="color:#e8b95f;">amber = fair (65–79)</span>, <span style="color:#5fe0a4;">green = strong (80+)</span> — and suggests a stronger password based on what was typed. Weak passwords are <strong>blocked at submission</strong> (cPanel minimum strength <strong>65</strong>), so cPanel email creation never fails later. If the password is the only problem, the page <strong>keeps every other field</strong>, auto-scrolls to and highlights the password section, and tells them why — they only fix that one part. After submitting, applicants see a <strong>“Submission received”</strong> screen with a <strong>WhatsApp</strong> link (from Settings → Contact Phone) for instant review &amp; approval. Use <strong>Settings → 🔌 Test cPanel connection</strong> to verify your API token, and <strong>✉ Create email</strong> on an approved registration to retry a failed mailbox.</p>
   </div>
 
@@ -442,23 +235,8 @@ require __DIR__ . '/partials/layout-open.php';
   </div>
 
   <div class="card" style="margin-bottom:18px;">
-    <h2 id="backup">Backups (<code>/admin/backup</code>) <span class="pill super">SUPER</span></h2>
-    <p>Everything on the site lives in one database, and this is where you keep a copy of it. Use it before any major change.</p>
-    <ul>
-      <li><strong>Backups</strong> — how many are stored, how big they are, and how old the newest one is. If the newest backup is surprisingly old the page says so plainly, because that is usually the first sign the scheduled job has stopped running.</li>
-      <li><strong>Stored Backups</strong> — each archive with its size, when it was taken, and a <strong>Manifest</strong> link. Keep a copy somewhere other than the server: a backup stored only on the machine it is backing up is not a backup.</li>
-      <li><strong>The manifest is the part people forget.</strong> An archive holds the database only. The manifest lists the uploaded media that is <em>not</em> inside it — how many files and how much space — so you know exactly what to copy separately. A database restored without its uploads comes back with every image missing.</li>
-      <li><strong>Retention</strong> — the newest backups are kept and older ones pruned on the schedule, according to the retention setting (change it in Settings). <em>Apply retention now</em> runs the pruning immediately.</li>
-      <li><strong>Restoring</strong> — the page gives you the exact command, built from your own filenames, rather than a generic example: download the archive you intend to restore, check its size is plausible (a 0&nbsp;KB file is not a backup), then run the command or import the file through phpMyAdmin.</li>
-      <li><strong>Media files are not in the archive</strong> — the database is. Uploaded images and video live in the uploads folder and are backed up separately; the page lists what to copy and where.</li>
-      <li><strong>Scheduling</strong> — the page shows the cron line that keeps backups running without anyone remembering.</li>
-    </ul>
-  </div>
-
-  <div class="card" style="margin-bottom:18px;">
     <h2 id="settings">Settings (<code>/admin/settings</code>) <span class="pill super">SUPER</span></h2>
-    <p>Configuration for <strong>the church you are currently managing</strong> — name, tagline, General Overseer Declaration, hero background media, contact details (supports multiple comma/newline-separated phone numbers), social links (Facebook, Instagram, YouTube, TikTok, X / Twitter), live stream link, giving URL, footer &amp; SEO, Bible source, and <strong>Email (SMTP)</strong> settings used for all outgoing mail (newsletters, notifications, security alerts).</p>
-    <p><strong>On an installation serving more than one church, saving here changes that church only.</strong> Use the church switcher to choose which one you are editing; the page always names it at the top. Values are inherited in order — the shipped defaults, then the installation defaults, then anything set here — so <em>a field left empty is inherited, not blanked</em>, and clearing a field that previously had a value is a real change that takes effect.</p>
+    <p>Site-wide configuration — name, tagline, General Overseer Declaration, hero background media, contact details (supports multiple comma/newline-separated phone numbers), social links (Facebook, Instagram, YouTube, TikTok, X / Twitter), live stream link, giving URL, footer &amp; SEO, Bible source, and <strong>Email (SMTP)</strong> settings used for all outgoing mail (newsletters, notifications, security alerts).</p>
     <ul>
       <li><strong>General Overseer (G.O.) Declaration:</strong> Set a prophetic word or annual theme banner at the top of the website. Choose between an animated <strong>scrolling marquee</strong> or a bold <strong>static announcement banner</strong>.</li>
       <li><strong>Homepage Hero Background:</strong> Choose between an animated gradient, background image, <strong>uploaded MP4/WebM background video</strong>, or a <strong>YouTube video background link</strong>.</li>
@@ -474,8 +252,6 @@ require __DIR__ . '/partials/layout-open.php';
   <div class="card" style="margin-bottom:18px;">
     <h2 id="users">Users (<code>/admin/users</code>) <span class="pill role">ADMIN</span></h2>
     <p>Create and manage accounts for your church's team. Set name, username, email, role (admin/editor/media team), password, and <strong>Home Unit</strong> (the church they manage). The very first super-admin account can't be deleted or edited by others.</p>
-    <p><strong>An account belongs to one church.</strong> The list shows your church's team and nothing else, an account you create here belongs to your church, and it can sign in on your church's web address — and nowhere else. The super admin is the exception: it works across every church, and uses the <strong>switcher</strong> in the sidebar to choose which church's team it is looking at.</p>
-    <p>If somebody says they cannot sign in, check that they are on <em>your</em> church's web address and that they appear in this list. An account belonging to another church is told only that its credentials are invalid — that is deliberate, so the sign-in form cannot be used to find out who has an account where.</p>
   </div>
 
   <div class="card" style="margin-bottom:18px;">

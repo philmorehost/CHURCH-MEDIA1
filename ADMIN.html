@@ -1,0 +1,502 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="A readable, accessible guide to everything you can do in the Church Media admin panel.">
+<title>Admin Panel Guide · Church Media</title>
+<style>
+  :root {
+    --bg: #f6f4f0;
+    --surface: #ffffff;
+    --ink: #211d2e;
+    --ink-dim: #5c566e;
+    --ink-faint: #8a849b;
+    --brand: #6c46d6;
+    --brand-dark: #4f2fb0;
+    --gold: #c89a3f;
+    --gold-soft: #f3e2bb;
+    --border: #e4dfd6;
+    --danger: #c0392b;
+    --ok: #2e7d4f;
+    --radius: 14px;
+    --shadow: 0 1px 3px rgba(33,29,46,.08), 0 8px 24px rgba(33,29,46,.06);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    line-height: 1.6;
+    font-size: 16px;
+  }
+  .skip-link {
+    position: absolute; left: -9999px; top: 0; z-index: 100;
+    background: var(--brand); color: #fff; padding: 10px 16px; border-radius: 0 0 8px 0;
+    font-weight: 600; text-decoration: none;
+  }
+  .skip-link:focus { left: 0; color: #fff; }
+
+  .layout { display: grid; grid-template-columns: 280px 1fr; min-height: 100vh; }
+
+  /* Sidebar */
+  .sidebar {
+    background: linear-gradient(180deg, #241c3d 0%, #171230 100%);
+    color: #d9d4ea; position: sticky; top: 0; height: 100vh; overflow-y: auto;
+    padding: 24px 18px;
+  }
+  .sidebar .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+  .sidebar .mark {
+    width: 42px; height: 42px; border-radius: 12px; flex: none;
+    background: linear-gradient(135deg, var(--gold), #a9771f);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 20px; color: #2a1d05;
+  }
+  .sidebar h1 { font-size: 15px; margin: 0; color: #fff; line-height: 1.25; }
+  .sidebar .subtitle { font-size: 12px; color: var(--gold-soft); opacity: .9; }
+  .sidebar nav { margin-top: 8px; }
+  .sidebar .group { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: #8a819f; margin: 18px 6px 6px; }
+  .sidebar a {
+    display: block; color: #d9d4ea; text-decoration: none; padding: 8px 10px;
+    border-radius: 9px; font-size: 14px; transition: background .15s, color .15s;
+  }
+  .sidebar a:hover, .sidebar a:focus-visible { background: rgba(255,255,255,.08); color: #fff; outline: 2px solid var(--gold); outline-offset: -2px; }
+  .sidebar a .num { color: var(--gold-soft); font-weight: 700; margin-right: 8px; }
+  .sidebar .foot { margin-top: 24px; font-size: 12px; color: #8a819f; border-top: 1px solid rgba(255,255,255,.1); padding-top: 14px; }
+
+  /* Main content */
+  .main { padding: 40px 48px 80px; max-width: 1080px; min-width: 0; }
+  .main header { margin-bottom: 32px; }
+  .main header h2 { font-size: 32px; margin: 0 0 8px; letter-spacing: -.02em; }
+  .main header p { margin: 0; color: var(--ink-dim); font-size: 17px; max-width: 72ch; }
+  section { scroll-margin-top: 24px; margin-bottom: 44px; }
+  section h3 {
+    font-size: 22px; margin: 0 0 14px; padding-bottom: 10px;
+    border-bottom: 2px solid var(--gold); display: inline-block; letter-spacing: -.01em;
+  }
+  section h4 { font-size: 17px; margin: 22px 0 8px; }
+  p { margin: 10px 0; }
+  ul { margin: 10px 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 22px 24px; box-shadow: var(--shadow);
+  }
+  .muted { color: var(--ink-dim); }
+
+  /* Tables */
+  .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); }
+  table { width: 100%; border-collapse: collapse; background: var(--surface); font-size: 15px; min-width: 520px; }
+  caption {
+    text-align: left; padding: 12px 16px; font-weight: 700; font-size: 15px;
+    background: #fbfaf7; border-bottom: 1px solid var(--border); color: var(--ink);
+  }
+  th, td { padding: 11px 16px; text-align: left; vertical-align: top; }
+  thead th {
+    background: #f4f1ea; color: var(--ink); font-weight: 700; font-size: 13px;
+    text-transform: uppercase; letter-spacing: .05em; border-bottom: 2px solid var(--border);
+    position: sticky; top: 0;
+  }
+  tbody tr { border-bottom: 1px solid #efeae0; }
+  tbody tr:nth-child(even) { background: #fcfbf8; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: #f7f2e9; }
+  .badge {
+    display: inline-block; padding: 2px 10px; border-radius: 999px;
+    font-size: 12.5px; font-weight: 700; white-space: nowrap;
+  }
+  .badge.full { background: var(--brand); color: #fff; }
+  .badge.yes { background: #e5f4ea; color: var(--ok); }
+  .badge.no  { background: #fdeae7; color: var(--danger); }
+  .badge.only { background: var(--gold-soft); color: #7a5a13; }
+
+  .notice {
+    border-left: 4px solid var(--brand); background: #f0ebfb; color: #3a2a63;
+    padding: 14px 18px; border-radius: 0 10px 10px 0; margin: 18px 0;
+  }
+  code, kbd {
+    background: #efeae0; border: 1px solid var(--border); border-radius: 6px;
+    padding: 1px 6px; font-family: Consolas, "Cascadia Mono", monospace; font-size: .9em;
+  }
+  footer { margin-top: 60px; padding-top: 18px; border-top: 1px solid var(--border); color: var(--ink-faint); font-size: 13px; }
+
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; }
+    .sidebar { position: static; height: auto; }
+    .sidebar nav { display: none; }
+    .main { padding: 24px 20px 64px; }
+    .main header h2 { font-size: 26px; }
+  }
+  @media print {
+    .sidebar { display: none; }
+    .layout { display: block; }
+    .main { padding: 0; }
+    .table-wrap { box-shadow: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    * { transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to main content</a>
+
+<div class="layout">
+  <aside class="sidebar" aria-label="Table of contents">
+    <div class="brand">
+      <div class="mark" aria-hidden="true">C</div>
+      <div>
+        <h1>Church Media<br>Admin Panel Guide</h1>
+        <div class="subtitle">What you can do in the admin</div>
+      </div>
+    </div>
+    <nav>
+      <div class="group">Overview</div>
+      <a href="#roles"><span class="num">01</span>Roles &amp; Permissions</a>
+      <div class="group">Content</div>
+      <a href="#dashboard"><span class="num">02</span>Dashboard</a>
+      <a href="#media"><span class="num">03</span>Media &amp; Reels</a>
+      <a href="#events"><span class="num">04</span>Events</a>
+      <a href="#sermons"><span class="num">05</span>Sermons</a>
+      <a href="#team"><span class="num">06</span>Team</a>
+      <a href="#prayer"><span class="num">07</span>Prayer Wall</a>
+      <a href="#newsletter"><span class="num">08</span>Newsletter</a>
+      <a href="#forms"><span class="num">09</span>Forms</a>
+      <a href="#pages"><span class="num">10</span>Pages</a>
+      <div class="group">System</div>
+      <a href="#security"><span class="num">11</span>Security</a>
+      <a href="#settings"><span class="num">12</span>Settings</a>
+      <a href="#users"><span class="num">13</span>Users</a>
+      <a href="#account"><span class="num">14</span>My Account</a>
+      <a href="#login"><span class="num">15</span>Login &amp; Logout</a>
+      <a href="#notes"><span class="num">16</span>General Notes</a>
+    </nav>
+    <div class="foot">Admin panel runs at <code>/admin</code> on the website.</div>
+  </aside>
+
+  <main class="main" id="content">
+    <header>
+      <h2>Admin Panel Guide</h2>
+      <p>The admin panel at <code>/admin</code> is where the church staff manage the entire site. You must be signed in; everyone who can log in also gets a <strong>My Account</strong> page to update their own details.</p>
+    </header>
+
+    <!-- 01 Roles -->
+    <section id="roles" aria-labelledby="roles-h">
+      <h3 id="roles-h">Roles &amp; Permissions</h3>
+      <div class="card">
+        <p>There are three roles. Every page checks its own permission, so what you see is what you're allowed to use.</p>
+        <div class="table-wrap">
+          <table>
+            <caption>Role capabilities</caption>
+            <thead>
+              <tr><th scope="col">Role</th><th scope="col">Can do</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><span class="badge full">admin</span></td><td>Everything, including Users, Security, and Settings</td></tr>
+              <tr><td><span class="badge">editor</span></td><td>Content only: media, events, sermons, team, prayer, newsletter, forms, pages</td></tr>
+              <tr><td><span class="badge">media_team</span></td><td>Media &amp; Reels only (upload and manage posts)</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="table-wrap" style="margin-top:18px;">
+          <table>
+            <caption>Who can access each page</caption>
+            <thead>
+              <tr>
+                <th scope="col">Page</th><th scope="col">admin</th><th scope="col">editor</th><th scope="col">media_team</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>Dashboard</td><td><span class="badge yes">Yes</span></td><td><span class="badge yes">Yes</span></td><td><span class="badge yes">Yes</span></td></tr>
+              <tr><td>Media &amp; Reels</td><td><span class="badge yes">Yes</span></td><td><span class="badge yes">Yes</span></td><td><span class="badge yes">Yes</span></td></tr>
+              <tr><td>Events</td><td><span class="badge yes">Yes</span></td><td><span class="badge yes">Yes</span></td><td><span class="badge no">No</span></td></tr>
+              <tr><td>Sermons</td><td><span class="badge yes">Yes</span></td><td><span class="badge yes">Yes</span></td><td><span class="badge no">No</span></td></tr>
+              <tr><td>Team</td><td><span class="badge yes">Yes</span></td><td><span class="badge yes">Yes</span></td><td><span class="badge no">No</span></td></tr>
+              <tr><td>Prayer Wall</td><td><span class="badge yes">Yes</span></td><td><span class="badge yes">Yes</span></td><td><span class="badge no">No</span></td></tr>
+              <tr><td>Newsletter</td><td><span class="badge yes">Yes</span></td><td><span class="badge yes">Yes</span></td><td><span class="badge no">No</span></td></tr>
+              <tr><td>Forms</td><td><span class="badge yes">Yes</span></td><td><span class="badge yes">Yes</span></td><td><span class="badge no">No</span></td></tr>
+              <tr><td>Pages</td><td><span class="badge yes">Yes</span></td><td><span class="badge yes">Yes</span></td><td><span class="badge no">No</span></td></tr>
+              <tr><td>Security</td><td><span class="badge yes">Yes</span></td><td><span class="badge no">No</span></td><td><span class="badge no">No</span></td></tr>
+              <tr><td>Settings</td><td><span class="badge yes">Yes</span></td><td><span class="badge no">No</span></td><td><span class="badge no">No</span></td></tr>
+              <tr><td>Users</td><td><span class="badge yes">Yes</span></td><td><span class="badge no">No</span></td><td><span class="badge no">No</span></td></tr>
+              <tr><td>My Account</td><td><span class="badge yes">Yes</span></td><td><span class="badge yes">Yes</span></td><td><span class="badge yes">Yes</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- 02 Dashboard -->
+    <section id="dashboard" aria-labelledby="dashboard-h">
+      <h3 id="dashboard-h">Dashboard (<code>/admin</code>)</h3>
+      <div class="card">
+        <p>An overview landing page after login.</p>
+        <ul>
+          <li><strong>Stat cards</strong> — media posts, upcoming events, sermons, new prayer requests, active newsletter subscribers, and blocked IPs.</li>
+          <li><strong>Recent media posts</strong> — the latest uploads with type, likes, views, and posting time.</li>
+          <li><strong>Recent security activity</strong> — recent login attempts (success / failed / blocked) with username and IP.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 03 Media -->
+    <section id="media" aria-labelledby="media-h">
+      <h3 id="media-h">Media &amp; Reels (<code>/admin/media</code>)</h3>
+      <div class="card">
+        <p>Manage the social-style media feed that appears on the website and in the mobile app.</p>
+        <ul>
+          <li><strong>Create posts:</strong>
+            <ul>
+              <li>Upload <strong>multiple photos and/or videos</strong> in one go (up to 200MB per file). Images are auto-compressed to WebP; videos are kept in their original file so they play immediately.</li>
+              <li>Or paste a <strong>YouTube link</strong> (regular videos and Shorts both work); an optional custom cover image can be set.</li>
+              <li>The post type is chosen automatically: single image, carousel (multiple photos), or vertical reel (contains video).</li>
+              <li>Add a caption, tick categories, and choose <strong>publish immediately</strong> or save as a draft.</li>
+              <li>Instant upload with a progress bar; uploads are never blocked on video conversion.</li>
+            </ul>
+          </li>
+          <li><strong>Video conversion</strong> — uploaded videos are automatically cropped to the vertical 9:16 "reel" format in the background when FFmpeg is available. A <strong>Process</strong> button lets you retry any that are still pending, and a cron job (see Settings) is the safety net that guarantees every video is converted.</li>
+          <li><strong>List</strong> — see cover thumbnails, caption, type, conversion status (converted / converting / original), and engagement (likes, views, saves).</li>
+          <li><strong>Edit</strong> — change the caption, categories, and publish status.</li>
+          <li><strong>Publish toggle</strong> — flip any post between published and draft with one click.</li>
+          <li><strong>Delete</strong> — removes the post and its files permanently (with confirmation).</li>
+          <li><strong>Categories</strong> — create and manage categories to organize the feed.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 04 Events -->
+    <section id="events" aria-labelledby="events-h">
+      <h3 id="events-h">Events (<code>/admin/events</code>)</h3>
+      <div class="card">
+        <p>List upcoming events for the site's Events section.</p>
+        <ul>
+          <li><strong>Create / edit events:</strong> title, description, start and optional end date-time, location, cover image, an optional <strong>RSVP link</strong> (enable + URL), and publish/draft status.</li>
+          <li><strong>List</strong> — start time, location, RSVP on/off, status.</li>
+          <li><strong>Delete</strong> — remove an event permanently (with confirmation).</li>
+          <li>Slugs are auto-generated and kept unique.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 05 Sermons -->
+    <section id="sermons" aria-labelledby="sermons-h">
+      <h3 id="sermons-h">Sermons (<code>/admin/sermons</code>)</h3>
+      <div class="card">
+        <p>The sermon library — audio + optional video per message.</p>
+        <ul>
+          <li><strong>Add / edit sermons:</strong> title, speaker, series, scripture reference, description, optional video embed URL (YouTube/Vimeo), cover image, and an <strong>audio file</strong> (mp3, m4a, or wav).</li>
+          <li>Set the published date and publish/draft status.</li>
+          <li><strong>List</strong> — title, speaker, series, published date, status.</li>
+          <li><strong>Delete</strong> — remove a sermon permanently.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 06 Team -->
+    <section id="team" aria-labelledby="team-h">
+      <h3 id="team-h">Team (<code>/admin/team</code>)</h3>
+      <div class="card">
+        <p>Profiles shown on the About page.</p>
+        <ul>
+          <li><strong>Add / edit team members:</strong> name, role/title (e.g. Lead Pastor), bio, photo, sort order (controls display order), and "Visible on About page".</li>
+          <li><strong>List</strong> — photo, name, role, visibility status.</li>
+          <li><strong>Delete</strong> — remove a member permanently.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 07 Prayer -->
+    <section id="prayer" aria-labelledby="prayer-h">
+      <h3 id="prayer-h">Prayer Wall (<code>/admin/prayer</code>)</h3>
+      <div class="card">
+        <p>Incoming prayer requests submitted from the public "Prayer" page (anonymously or with contact info).</p>
+        <ul>
+          <li><strong>Public / private toggle</strong> — mark a request as public to feature it on the site's prayer wall.</li>
+          <li><strong>Status tracking</strong> — move requests through <strong>new → prayed → archived</strong> with a dropdown.</li>
+          <li><strong>Delete</strong> — remove a request.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 08 Newsletter -->
+    <section id="newsletter" aria-labelledby="newsletter-h">
+      <h3 id="newsletter-h">Newsletter (<code>/admin/newsletter</code>)</h3>
+      <div class="card">
+        <p>People who subscribed on the website.</p>
+        <ul>
+          <li><strong>List subscribers</strong> with status (active / unsubscribed) and when they joined.</li>
+          <li><strong>Export CSV</strong> — download all active subscribers.</li>
+          <li><strong>Remove</strong> — delete an individual subscriber.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 09 Forms -->
+    <section id="forms" aria-labelledby="forms-h">
+      <h3 id="forms-h">Forms (<code>/admin/forms</code>)</h3>
+      <div class="card">
+        <p>A full drag-and-drop form builder, like Google Forms, for registrations, event sign-ups, feedback, etc.</p>
+        <ul>
+          <li><strong>Build a form:</strong>
+            <ul>
+              <li>Title, optional public-link slug (auto-generated from the title), description, and submit-button label.</li>
+              <li>Optional <strong>closing date/time</strong> — after this, visitors see a "form closed" page instead.</li>
+              <li><strong>Field types:</strong> text, textarea, email, phone, number, date, url, select, radio, checkbox, and <strong>image upload</strong>.</li>
+              <li>Per field: label, placeholder, options (one per line for select/radio/checkbox), and required.</li>
+              <li><strong>Reorder fields</strong> by dragging them.</li>
+            </ul>
+          </li>
+          <li><strong>Share</strong> — each form has its own public link (<code>/forms/your-slug</code>); an "Open form" button jumps to it.</li>
+          <li><strong>Responses:</strong>
+            <ul>
+              <li>View all submissions for a form, with a response count.</li>
+              <li><strong>Export CSV</strong> — submissions exported with one column per field (image fields export the file URLs).</li>
+              <li>Delete individual submissions, or <strong>clear all</strong> at once.</li>
+            </ul>
+          </li>
+          <li><strong>Delete a form</strong> — removes the form and its submissions permanently.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 10 Pages -->
+    <section id="pages" aria-labelledby="pages-h">
+      <h3 id="pages-h">Pages (<code>/admin/pages</code>)</h3>
+      <div class="card">
+        <p>A visual CMS for building standalone pages (e.g. About, Our Story) without touching code.</p>
+        <ul>
+          <li><strong>Create / edit pages:</strong> title, slug, eyebrow, meta description, nav label, include-in-nav, publish status, and sort order.</li>
+          <li><strong>Section-based content builder</strong> with drag-and-drop blocks:
+            <ul>
+              <li><strong>Hero</strong> — big banner block</li>
+              <li><strong>Text</strong> — heading + body with alignment</li>
+              <li><strong>Columns</strong> — multi-column text blocks</li>
+              <li><strong>Image</strong> — uploaded image</li>
+              <li><strong>Quote</strong> — quote + source</li>
+              <li><strong>CTA</strong> — call-to-action title, subtitle, button label and link</li>
+            </ul>
+          </li>
+          <li><strong>Upload images</strong> directly into page sections (up to 8MB, auto-compressed).</li>
+          <li><strong>Toggle</strong> publish and include-in-nav from the list.</li>
+          <li><strong>Delete</strong> — removes the page and cleans up any images it used.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 11 Security -->
+    <section id="security" aria-labelledby="security-h">
+      <h3 id="security-h">Security (<code>/admin/security</code>) <span class="badge only">admin only</span></h3>
+      <div class="card">
+        <p>Access controls and monitoring.</p>
+        <ul>
+          <li><strong>IP access rules</strong> — blacklist or whitelist specific IP addresses, with an optional reason. Manual blocks never expire until removed here. A 👑 marks IPs auto-whitelisted after repeated successful logins.</li>
+          <li><strong>Country rules</strong> — whitelist or blacklist entire countries by 2-letter code (enforced when the server can detect the country, e.g. via a CDN header or geoip).</li>
+          <li><strong>Recent login activity</strong> — the last 50 login events (success / failed / blocked) with the username attempted and IP.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 12 Settings -->
+    <section id="settings" aria-labelledby="settings-h">
+      <h3 id="settings-h">Settings (<code>/admin/settings</code>) <span class="badge only">admin only</span></h3>
+      <div class="card">
+        <p>Global site settings, in four groups:</p>
+        <ol>
+          <li><strong>Branding</strong> — site / church name, tagline, logo, and favicon.</li>
+          <li><strong>Homepage Hero</strong> — the big banner on the homepage:
+            <ul>
+              <li>Background image (auto-compressed to WebP, with a "remove" option to go back to the animated gradient)</li>
+              <li>Eyebrow text, headline, and scripture line</li>
+              <li>Two call-to-action buttons, each with its own label and link</li>
+            </ul>
+          </li>
+          <li><strong>Contact &amp; Service Times</strong> —
+            <ul>
+              <li>Contact email, phone, and address</li>
+              <li><strong>Service Times</strong> — up to 4 rows of label + time. These show everywhere service times are displayed (homepage, footer, contact page, live page) <strong>and</strong> in the mobile app. Saving here overrides the default schedule.</li>
+            </ul>
+          </li>
+          <li><strong>Social &amp; Live</strong> —
+            <ul>
+              <li>Facebook, Instagram, YouTube, TikTok URLs</li>
+              <li><strong>Livestream YouTube link</strong> + a "We are live right now" toggle (shows a LIVE badge site-wide)</li>
+              <li><strong>Giving / donation URL</strong></li>
+            </ul>
+          </li>
+          <li><strong>Footer &amp; SEO</strong> — footer about text and the site meta description.</li>
+        </ol>
+        <div class="notice">The page also includes the <strong>Video Conversion (Cron Job)</strong> instructions with the exact cPanel cron command to guarantee background video processing.</div>
+      </div>
+    </section>
+
+    <!-- 13 Users -->
+    <section id="users" aria-labelledby="users-h">
+      <h3 id="users-h">Users (<code>/admin/users</code>) <span class="badge only">admin only</span></h3>
+      <div class="card">
+        <p>Team accounts and their access.</p>
+        <div class="table-wrap">
+          <table>
+            <caption>User roles you can assign</caption>
+            <thead>
+              <tr><th scope="col">Role</th><th scope="col">Access</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><strong>Media Team</strong></td><td>Upload &amp; manage posts</td></tr>
+              <tr><td><strong>Editor</strong></td><td>Posts, events, sermons</td></tr>
+              <tr><td><strong>Admin</strong></td><td>Full access</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <ul>
+          <li><strong>Add team accounts</strong> with a role.</li>
+          <li><strong>List</strong> — name, username, role, last login (time + IP), and status.</li>
+          <li><strong>Suspend / activate</strong> any user (you can't suspend your own account).</li>
+          <li><strong>Delete</strong> — remove a user (you can't delete your own account).</li>
+          <li>Passwords are hashed (Argon2id) and must be at least 10 characters.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 14 Account -->
+    <section id="account" aria-labelledby="account-h">
+      <h3 id="account-h">My Account (<code>/admin/account</code>)</h3>
+      <div class="card">
+        <p>Every signed-in user can:</p>
+        <ul>
+          <li>Update their own <strong>name</strong> and <strong>email</strong>.</li>
+          <li><strong>Change their password</strong> (must verify the current password; minimum 10 characters).</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 15 Login -->
+    <section id="login" aria-labelledby="login-h">
+      <h3 id="login-h">Login &amp; Logout</h3>
+      <div class="card">
+        <ul>
+          <li><strong><code>/admin/login</code></strong> — sign-in page with built-in protection: failed attempts are logged, IPs can be blocked by rule, and the Security Center tracks everything.</li>
+          <li><strong><code>/admin/logout</code></strong> — signs you out of the panel.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 16 Notes -->
+    <section id="notes" aria-labelledby="notes-h">
+      <h3 id="notes-h">General Notes</h3>
+      <div class="card">
+        <ul>
+          <li><strong>CSRF protection</strong> is applied to every form and POST action automatically.</li>
+          <li>Uploaded images are <strong>auto-compressed to WebP</strong> for fast page loads; video files stay in their original format so they play immediately while the vertical crop happens in the background.</li>
+          <li>The panel is built to be used on desktop; the public website and mobile app are what visitors see.</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer>Church Media — Admin Panel Guide. Generated from <code>ADMIN.md</code>.</footer>
+  </main>
+</div>
+</body>
+</html>

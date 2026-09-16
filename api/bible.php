@@ -9,11 +9,10 @@ declare(strict_types=1);
 header('Content-Type: application/json');
 
 // 1. Load Settings
-// Through the resolver, not the first row in the table. "First row" is the shared defaults row, so a
-// church that chose its own Bible source or pasted its own api.bible token would have been served the
-// platform default instead — the setting would silently appear not to save.
-$source = (string) setting('bible_source', 'keyless');
-$apiKey = trim((string) setting('bible_api_key', ''));
+$pdo = Database::getInstance()->getConnection();
+$row = $pdo->query('SELECT * FROM settings ORDER BY id ASC LIMIT 1')->fetch();
+$source = $row['bible_source'] ?? 'keyless';
+$apiKey = trim((string) ($row['bible_api_key'] ?? ''));
 
 // 2. Get Parameters
 $book = trim((string) ($_GET['book'] ?? ''));
