@@ -346,6 +346,24 @@ final class Payhub
             'response' => $body,
         ]);
 
+        /*
+         * What a person can be shown — and, when the gateway rejected the amount, the two figures it
+         * compared.
+         *
+         * PayHub's own words are `message` ("Insufficient funds", or "Payment amount mismatch. Transaction
+         * rejected."), and that sentence alone is not enough to act on: a mismatch *without the numbers*
+         * gave no way to tell a fee-added-to-the-payer (normal, and something the gateway must accept) from
+         * a genuine shortfall, without reading the raw payload. The gateway returns `details.expected` and
+         * `details.received`, so they are folded into the sentence.
+         */
+        $reason = trim((string) ($body['data']['gateway_response'] ?? ($body['message'] ?? '')));
+        $expected = $body['details']['expected'] ?? null;
+        $received = $body['details']['received'] ?? null;
+        if ($reason !== '' && $expected !== null && $received !== null) {
+            $reason .= ' (expected ' . number_format((float) $expected, 2)
+                . ', gateway settled ' . number_format((float) $received, 2) . ')';
+        }
+
         return [
             'ok' => true,
             'paid' => $paid,
@@ -355,7 +373,7 @@ final class Payhub
             'gateway_reference' => self::referenceFromPayload($body),
             // What a person can be shown. `gateway_response` is the gateway's own words ("Insufficient
             // funds"), which is what an advertiser needs to see to know what to do next.
-            'reason' => trim((string) ($body['data']['gateway_response'] ?? ($body['message'] ?? ''))),
+            'reason' => $reason,
             'error' => '',
             'raw' => $body,
         ];
