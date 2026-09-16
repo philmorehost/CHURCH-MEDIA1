@@ -384,6 +384,22 @@ final class Payhub
      *
      * The signature is over the **raw body**, so the caller must pass the body as received and not a
      * re-encoded array — JSON key order would change and the signature would never match.
+     *
+     * ⚠️ **PayHub signs from two different code paths and they do not agree.** The documented contract is
+     * `HMAC-SHA256`, and that is what `includes/functions.php::trigger_merchant_webhook()` uses — but
+     * `webhook-paystack.php`, the path that fires when Paystack tells PayHub a payment succeeded (which is
+     * exactly the bank-transfer case), signs with **SHA512**. A site that implemented the documentation
+     * therefore computes a SHA256 HMAC that can never match a SHA512 signature, and — because a signature
+     * that is present but wrong is refused outright — answers 401 and loses a real payment.
+     *
+     * Both are accepted here. That is not a weakening: either is an HMAC of the *same* raw body under the
+     * *same* shared secret, so either proves the sender holds the secret. What it buys is that the site
+     * works whichever path delivered the event. (The gateway itself should converge on SHA256, which is
+     * what it documents — that is a change for the gateway's owner, because other merchants may have
+     * coded against the SHA512 they received.)
+     *
+     * The comparison is case-insensitive on the hex, because the value is transmitted by hand in places
+     * and an upper-case hex digest is the same signature.
      */
     public static function verifyWebhook(string $rawBody, string $signature): bool
     {
@@ -396,7 +412,13 @@ final class Payhub
             return false;
         }
 
-        return hash_equals(hash_hmac('sha256', $rawBody, $secret), $signature);
+        $signature = strtolower(trim($signature));
+
+        if (hash_equals(hash_hmac('sha256', $rawBody, $secret), $signature)) {
+            return true;
+        }
+
+        return hash_equals(hash_hmac('sha512', $rawBody, $secret), $signature);
     }
 
     /**

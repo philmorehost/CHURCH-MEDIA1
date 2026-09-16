@@ -96,7 +96,21 @@ $headline = [
 
     <?php if ($outcome !== 'paid'): ?>
       <p style="font-size:13.5px; color:var(--ink-dim); margin:0 0 18px;">
-        <?php if ($canRetry): ?>
+        <?php if ($outcome === 'pending'): ?>
+          <?php
+          /*
+           * A payment the gateway has taken but not yet confirmed — which is the normal shape of a bank
+           * transfer, and of a card charge that is still settling. The honest thing to say is that it is not
+           * confirmed *yet*, and to give the advertiser something to do about it: this page re-asks the
+           * gateway every time it is loaded, so reloading it is the check.
+           *
+           * Not a failure, and deliberately not counted as one — the attempt stays pending, so it does not
+           * consume one of the advertiser's two tries. See AdPayments, rule 3.
+           */
+          ?>
+          Your payment has not been confirmed by the gateway yet. A bank transfer can take a minute or two
+          to appear, so if you have just sent it, check again shortly.
+        <?php elseif ($canRetry): ?>
           You can try the card payment again — you have
           <?= (int) $remaining ?> <?= $remaining === 1 ? 'attempt' : 'attempts' ?> left before bank transfer
           becomes the only option.
@@ -106,6 +120,12 @@ $headline = [
       </p>
 
       <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+        <?php if ($outcome === 'pending'): ?>
+          <?php /* A plain link, not a POST: this page only re-asks the gateway and records what it answers,
+                   every write on it is guarded to fire once, and a paid advert is only ever read — so
+                   reloading it can never take a second payment or undo one. */ ?>
+          <a class="btn btn-gold" href="/advertise/return?ref=<?= e(urlencode($reference)) ?>">Check payment again</a>
+        <?php endif; ?>
         <?php if ($canRetry): ?>
           <?php /* A POST, because retrying creates a payment attempt. A GET that creates anything is a GET
                    that a mail client pre-fetches and a crawler follows. */ ?>
