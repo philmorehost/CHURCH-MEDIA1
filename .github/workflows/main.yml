@@ -73,8 +73,16 @@ jobs:
             printf 'storeFile=../keystore/release.keystore\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
               "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > android/key.properties
             echo "Release signing configured."
+            # Report the fingerprint now, so a wrong keystore is visible in seconds
+            # instead of after a multi-minute Flutter build.
+            if command -v keytool >/dev/null 2>&1; then
+              echo -n "Configured keystore fingerprint: "
+              keytool -list -v -keystore android/keystore/release.keystore \
+                -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" 2>/dev/null \
+                | tr -d '\r\n' | grep -o 'SHA1: [0-9A-F:]*' || echo "<could not read keystore>"
+            fi
           else
-            echo "No keystore secret set - release build will fall back to the debug key."
+            echo "::warning::No keystore secret set - the release build will fall back to the debug key and the AAB will be rejected by Google Play."
           fi
 
       - name: Build release APK
@@ -91,13 +99,34 @@ jobs:
             --build-name "1.0.${{ github.run_number }}" \
             --build-number "${{ github.run_number }}"
 
+      - name: Verify APK signature
+        working-directory: RCCGLP63
+        run: |
+          APKSIGNER=$(ls $ANDROID_HOME/build-tools/*/apksigner 2>/dev/null | tail -1)
+          if [ -n "$APKSIGNER" ]; then
+            "$APKSIGNER" verify --print-certs build/app/outputs/flutter-apk/app-release.apk
+          else
+            echo "apksigner not found; skipping verification"
+          fi
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: rccglp63-apk
+          path: RCCGLP63/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+
       # An AAB exists only to be uploaded to Google Play, and Play accepts it only
       # when it is signed with the upload key already registered for this app.
       # When the keystore secret above is unset or holds a different file, Gradle
       # silently falls back to the debug key and the bundle is rejected at upload
-      # time with "Your App Bundle is signed with the wrong key". Comparing the
-      # signer here turns that into a failed run that prints both fingerprints.
-      # The fingerprint below is public information (it is shown in Play Console);
+      # time with "Your App Bundle is signed with the wrong key". The debug key is
+      # generated fresh on every run, so its fingerprint differs run to run - that
+      # is how you can tell it apart from a real keystore.
+      #
+      # This runs AFTER the APK upload on purpose: a debug-signed APK is still
+      # useful for sideloading, so only the AAB artifact is withheld.
+      # The fingerprint below is public information (Play Console shows it);
       # update it only if the app's upload key is ever reset.
       - name: Verify AAB is signed with the Play upload key
         working-directory: RCCGLP63
@@ -120,24 +149,7 @@ jobs:
             echo "::error::app-release.aab is not signed with the RCCGLP63YAYA Play upload key. Expected $EXPECTED_UPLOAD_SHA1 but got ${ACTUAL:-<none>}. Play will reject this bundle. Set the ANDROID_KEYSTORE_BASE64 secret to the base64 of rccglp63yaya-release.keystore, with KEY_ALIAS=philmore-rccglp63yaya and matching passwords."
             exit 1
           fi
-          echo "Signer matches the Play upload key."
-
-      - name: Verify APK signature
-        working-directory: RCCGLP63
-        run: |
-          APKSIGNER=$(ls $ANDROID_HOME/build-tools/*/apksigner 2>/dev/null | tail -1)
-          if [ -n "$APKSIGNER" ]; then
-            "$APKSIGNER" verify --print-certs build/app/outputs/flutter-apk/app-release.apk
-          else
-            echo "apksigner not found; skipping verification"
-          fi
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: rccglp63-apk
-          path: RCCGLP63/build/app/outputs/flutter-apk/app-release.apk
-          if-no-files-found: error
+          echo "Signer matches the Play upload key - safe to send to Google Play."
 
       - name: Upload AAB
         uses: actions/upload-artifact@v4
