@@ -110,7 +110,33 @@ final class ShareCard
         if ($slug !== null && $slug !== '') {
             $query['slug'] = $slug;
         }
+        $version = self::versionFor($type, $id, $slug);
+        if ($version !== '') {
+            $query['v'] = $version;
+        }
         return '/api/og?' . http_build_query($query);
+    }
+
+    /**
+     * A short token that changes whenever this card's content changes.
+     *
+     * A crawler caches a preview **per URL** and does not re-read it — WhatsApp and Facebook hold one
+     * for days. A stable `?type=post&id=7` therefore meant a reel that had already been previewed kept
+     * showing its OLD picture, so a cover uploaded afterwards never appeared in a shared link: the one
+     * place the church was looking to check that its cover had taken effect.
+     *
+     * Carrying the fingerprint in the address is what makes them look again, because to them it is a
+     * different image. It is the same reasoning as the mtime-busted favicon, and it cannot make them
+     * re-read too often: the token only moves when the picture itself would.
+     */
+    private static function versionFor(string $type, int $id, ?string $slug): string
+    {
+        try {
+            $entity = self::resolve($type, $id > 0 ? $id : null, $slug);
+        } catch (Throwable $e) {
+            return '';
+        }
+        return $entity === null ? '' : substr(hash('sha256', self::cacheKey($entity)), 0, 12);
     }
 
     /**

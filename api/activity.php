@@ -9,9 +9,18 @@ declare(strict_types=1);
 
 $pdo = Database::getInstance()->getConnection();
 
+/*
+ * The cover, read the way every other surface reads it: the item's THUMBNAIL first, and the item's own
+ * file only when the item IS an image. Asking for file_path alone handed a reel's .mp4 to the app as a
+ * picture, so the activity list showed no cover for any reel — and an uploaded cover was ignored
+ * outright, because a cover lives in thumbnail_path.
+ */
 $posts = $pdo->query('
     SELECT p.id, p.caption, p.created_at, p.post_type,
-           (SELECT file_path FROM media_post_items WHERE media_post_id = p.id ORDER BY sort_order ASC LIMIT 1) AS cover
+           (SELECT COALESCE(NULLIF(i.thumbnail_path, \'\'), IF(i.type = \'image\', i.file_path, NULL))
+              FROM media_post_items i
+             WHERE i.media_post_id = p.id
+             ORDER BY i.sort_order ASC, i.id ASC LIMIT 1) AS cover
     FROM media_posts p
     WHERE p.is_published = 1
     ORDER BY p.created_at DESC LIMIT 12
