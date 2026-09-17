@@ -176,11 +176,21 @@ $faviconVersion = $faviconFile !== '' && is_file(UPLOADS_PATH . '/' . $faviconFi
   <meta property="article:published_time" content="<?= e($metaPublishedTime) ?>">
 <?php endif; ?>
 <?php
-// og:image prefers a generated share card (views set $metaImage for that), then
-// the church logo. The generated card is what makes a WhatsApp share show a
+// og:image prefers a generated share card (views set $metaImage for that), then a generated
+// brand card, then the church logo. The generated card is what makes a WhatsApp share show a
 // proper preview instead of a bare link.
 $ogImage = $metaImage ?? null;
-if (!$ogImage && ($s['logo_path'] ?? null)) {
+$ogImageIsCard = $ogImage !== null;
+if (!$ogImage && ShareCard::available()) {
+    // No image of its own: draw the church's own brand card. The uploaded logo is deliberately
+    // the LAST resort, because it is usually a WebP (which WhatsApp and several other scrapers
+    // refuse outright) and is rarely 1200×630, so a preview built on it degrades to an icon or to
+    // nothing at all. Skipped entirely when GD is missing here — then there is no card to draw.
+    // Absolute, because the crawler fetching this has to be able to reach it from outside; a
+    // relative path here is an og:image that resolves to nothing and a preview with no picture.
+    $ogImage = baseUrl(ShareCard::brandUrl());
+    $ogImageIsCard = true;
+} elseif (!$ogImage && ($s['logo_path'] ?? null)) {
     $ogImage = uploadUrl($s['logo_path']);
 }
 
@@ -188,8 +198,20 @@ if (!$ogImage && ($s['logo_path'] ?? null)) {
 // declaring the wrong pair of numbers is a claim about an image the crawler is about to measure.
 $ogWidth = (int) ($metaImageWidth ?? 0);
 $ogHeight = (int) ($metaImageHeight ?? 0);
-if ($ogWidth < 1) { $ogWidth = 1200; }
-if ($ogHeight < 1) { $ogHeight = 630; }
+if ($ogWidth < 1 || $ogHeight < 1) {
+    // A generated card is 1200×630 by construction, so those are known rather than assumed.
+    // Anything else — the uploaded logo — has to be measured from the file itself.
+    $ogWidth = ShareCard::WIDTH;
+    $ogHeight = ShareCard::HEIGHT;
+    $logoFile = (string) ($s['logo_path'] ?? '');
+    if (!$ogImageIsCard && $logoFile !== '' && is_file(UPLOADS_PATH . '/' . $logoFile)) {
+        $logoSize = @getimagesize(UPLOADS_PATH . '/' . $logoFile);
+        if (is_array($logoSize) && (int) $logoSize[0] > 0 && (int) $logoSize[1] > 0) {
+            $ogWidth = (int) $logoSize[0];
+            $ogHeight = (int) $logoSize[1];
+        }
+    }
+}
 ?>
 <?php if ($ogImage): ?>
   <meta property="og:image" content="<?= e($ogImage) ?>">

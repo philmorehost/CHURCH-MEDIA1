@@ -333,7 +333,10 @@
   }
 
   function share(post) {
-    var url = window.location.origin + '/feed?post=' + post.id;
+    // The reel's own permalink, not '/feed?post=ID': that page exists for the share sheet (see
+    // core/routes.php) and it is what the mobile app already shares, so a reel shared from the
+    // website and from the app are now the same link. Both serve the same preview card.
+    var url = window.location.origin + '/post/' + post.id;
     if (navigator.share) {
       navigator.share({ title: post.caption || 'Check this out', url: url }).catch(function () {});
     } else if (navigator.clipboard) {

@@ -17,6 +17,39 @@ $previewAd ??= null;
 
 $metaTitle = $previewAd !== null ? 'Preview: ' . ($previewAd['title'] ?? '') : 'Reels';
 $metaDescription = 'Watch the latest reels from ' . e(setting('site_title')) . ' — worship, sermon clips, and moments from the community.';
+
+/*
+ * `/feed?post=ID` is a deep link to ONE reel, and it is the address the whole public site gives
+ * out for a reel: feed.js's share button, the home page's media cards and the media gallery's tiles
+ * all point here. A crawler reads the og: tags off the page it is handed, so without this the reel
+ * was previewed with the church logo — the generic Reels page has no image of its own, and
+ * layout-open.php can only fall back to the logo.
+ *
+ * The tags are deliberately the same ones `/post/{id}` serves, and the card is the same generated
+ * PNG (core/ShareCard.php), so a reel previews identically whichever of the two links was shared.
+ */
+$deepPostId = (int) ($_GET['post'] ?? 0);
+if ($previewAd === null && $deepPostId > 0) {
+    $deepStmt = Database::getInstance()->getConnection()
+        ->prepare('SELECT id, slug, caption, post_type FROM media_posts WHERE id = ? AND is_published = 1 LIMIT 1');
+    $deepStmt->execute([$deepPostId]);
+    $deepPost = $deepStmt->fetch() ?: null;
+
+    if ($deepPost !== null) {
+        $deepCaption = trim((string) ($deepPost['caption'] ?? ''));
+        $deepIsReel = (string) ($deepPost['post_type'] ?? '') === 'vertical_reel';
+        $metaTitle = $deepCaption !== ''
+            ? mb_strimwidth($deepCaption, 0, 70, '…')
+            : ($deepIsReel ? 'Reel' : 'Post') . ' — ' . setting('site_title');
+        $metaDescription = $deepCaption !== ''
+            ? mb_strimwidth($deepCaption, 0, 155, '…')
+            : 'Watch it on ' . setting('site_title') . '.';
+        $metaImage = baseUrl(ShareCard::urlFor('post', (int) $deepPost['id'], (string) ($deepPost['slug'] ?? '')));
+        // The deep link shows one reel, so that reel's own page is the canonical address of it.
+        $metaCanonical = baseUrl('/post/' . (int) $deepPost['id']);
+    }
+}
+
 $categories = Database::getInstance()->getConnection()
     ->query('SELECT c.slug, c.name FROM media_categories c WHERE EXISTS (SELECT 1 FROM media_post_categories mpc WHERE mpc.media_category_id = c.id) ORDER BY c.name ASC')
     ->fetchAll();

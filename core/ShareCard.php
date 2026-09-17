@@ -22,8 +22,13 @@ final class ShareCard
     public const WIDTH = 1200;
     public const HEIGHT = 630;
 
-    /** Entity types a card can be generated for. Anything else is refused. */
-    public const TYPES = ['sermon', 'event', 'post', 'testimony'];
+    /**
+     * Entity types a card can be generated for. Anything else is refused.
+     *
+     * `brand` is the exception that needs no content row: it is the church's own name on the
+     * branded background, used by pages that have no image of their own.
+     */
+    public const TYPES = ['sermon', 'event', 'post', 'testimony', 'brand'];
 
     /** Hard ceiling on cached cards, oldest evicted first. 0 disables pruning. */
     private const MAX_CACHE_FILES = 4000;
@@ -108,6 +113,19 @@ final class ShareCard
         return '/api/og?' . http_build_query($query);
     }
 
+    /**
+     * Public URL for the generic brand card.
+     *
+     * This is what a page falls back to when it has no image of its own. It exists because the
+     * alternative — pointing og:image at the uploaded logo — hands crawlers a WebP (WhatsApp and
+     * several other scrapers refuse WebP outright) in whatever shape the church happened to upload,
+     * so the preview degraded to a logo or to nothing. A drawn card is always a 1200×630 PNG.
+     */
+    public static function brandUrl(): string
+    {
+        return self::urlFor('brand', 0);
+    }
+
     /** Where generated cards are cached. */
     public static function cacheDir(): string
     {
@@ -127,6 +145,15 @@ final class ShareCard
     {
         if (!in_array($type, self::TYPES, true)) {
             return null;
+        }
+
+        // The brand card reads nothing but the church's own settings, so it is answered before the
+        // database is touched — it must still be drawable if the connection is unavailable.
+        if ($type === 'brand') {
+            $title = trim((string) setting('site_title'));
+            $tagline = trim((string) setting('site_tagline', ''));
+            return self::compose('brand', '', 0, $title !== '' ? $title : 'Share', null,
+                $tagline !== '' ? [$tagline] : [], '/');
         }
 
         try {
