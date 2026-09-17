@@ -23,6 +23,15 @@ final class ShareCard
     public const HEIGHT = 630;
 
     /**
+     * Longest edge of a cover served as a share image, and never upscaled past its real size.
+     *
+     * A preview is rendered a few hundred pixels wide, so there is nothing to gain from handing a
+     * crawler a 4000px photo — and plenty to lose, since a link that takes ten seconds to scrape
+     * often is not scraped at all.
+     */
+    public const COVER_MAX_EDGE = 1200;
+
+    /**
      * Entity types a card can be generated for. Anything else is refused.
      *
      * `brand` is the exception that needs no content row: it is the church's own name on the
@@ -150,6 +159,59 @@ final class ShareCard
     public static function brandUrl(): string
     {
         return self::urlFor('brand', 0);
+    }
+
+    /** Public URL for an entity's OWN image rather than a composed card. */
+    public static function coverUrl(string $type, ?int $id = null, ?string $slug = null): string
+    {
+        return self::urlFor($type, (int) $id, $slug) . '&cover=1';
+    }
+
+    /**
+     * An entity's own artwork as its share image: the URL, plus the size of the file that URL will
+     * really serve. Null when there is no usable cover, so the caller can compose a card instead.
+     *
+     * Why this exists: an event is announced with a **flyer**, and a flyer carries the date, the venue
+     * and the invitation as part of its design. Composing a 1200×630 card from it meant cropping a
+     * portrait poster to a 16:9 band — on the live church site a 958×1280 flyer became a 958×503
+     * slice, so roughly two thirds of the poster, including whatever it was announcing, never
+     * reached the preview.
+     *
+     * The dimensions are measured from the file that is actually served rather than reasoned about,
+     * because `og:image:width` is a claim the crawler checks against the image it downloads.
+     *
+     * @return array{url:string,width:int,height:int}|null
+     */
+    public static function coverPreview(string $type, ?int $id = null, ?string $slug = null): ?array
+    {
+        if (!in_array($type, self::TYPES, true)) {
+            return null;
+        }
+
+        try {
+            $entity = self::resolve($type, $id, $slug);
+        } catch (Throwable $e) {
+            return null;
+        }
+        if ($entity === null) {
+            return null;
+        }
+
+        $file = self::coverFile($entity);
+        if ($file === null) {
+            return null;
+        }
+
+        $size = @getimagesize($file);
+        if (!is_array($size) || (int) $size[0] < 1 || (int) $size[1] < 1) {
+            return null;
+        }
+
+        return [
+            'url' => self::coverUrl($type, $id, $slug),
+            'width' => (int) $size[0],
+            'height' => (int) $size[1],
+        ];
     }
 
     /** Where generated cards are cached. */
@@ -315,9 +377,11 @@ final class ShareCard
      */
     private static function prune(string $keepFile): void
     {
-        // Superseded versions of the same item — filenames start "<type>-<id>-".
-        if (preg_match('#^([a-z0-9]+-\d+)-[0-9a-f]{16}\.png$#i', basename($keepFile), $m)) {
-            foreach (glob(self::cacheDir() . '/' . $m[1] . '-*.png') ?: [] as $file) {
+        // Superseded versions of the same item. A composed card is named "<type>-<id>-<hash>.<ext>"
+        // and a cover "cover-<type>-<id>-<hash>.<ext>", so the prefix tells the two kinds apart and
+        // neither can evict the other.
+        if (preg_match('#^(cover-)?([a-z0-9]+-\d+)-[0-9a-f]{16}\.(?:png|jpg)$#i', basename($keepFile), $m)) {
+            foreach (self::cacheFiles(($m[1] ?? '') . $m[2] . '-') as $file) {
                 if ($file !== $keepFile) {
                     @unlink($file);
                 }
@@ -325,11 +389,12 @@ final class ShareCard
         }
 
         // A hard ceiling on the whole directory, oldest first. The settings table
-        // is a single wide row, so this is a constant rather than a setting.
+        // is a single wide row, so this is a constant rather than a setting. Covers
+        // count towards it — they are the same kind of regenerable file.
         if (self::MAX_CACHE_FILES <= 0) {
             return;
         }
-        $files = glob(self::cacheDir() . '/*.png') ?: [];
+        $files = self::cacheFiles('');
         if (count($files) <= self::MAX_CACHE_FILES) {
             return;
         }
@@ -341,11 +406,18 @@ final class ShareCard
         }
     }
 
+    /** Cached card/cover files whose name starts with $prefix. Both extensions. */
+    private static function cacheFiles(string $prefix): array
+    {
+        $dir = self::cacheDir() . '/';
+        return array_merge(glob($dir . $prefix . '*.png') ?: [], glob($dir . $prefix . '*.jpg') ?: []);
+    }
+
     /** Removes cached cards for one item (used when content changes). */
     public static function forget(string $type, int $id): void
     {
-        $pattern = self::cacheDir() . '/' . preg_replace('/[^a-z0-9]/i', '', $type) . '-' . $id . '-*.png';
-        foreach (glob($pattern) ?: [] as $file) {
+        $stem = preg_replace('/[^a-z0-9]/i', '', $type) . '-' . $id . '-';
+        foreach (array_merge(self::cacheFiles($stem), self::cacheFiles('cover-' . $stem)) as $file) {
             @unlink($file);
         }
     }
@@ -638,6 +710,110 @@ final class ShareCard
         }
         $path = UPLOADS_PATH . '/' . ltrim($stored, '/');
         return (is_file($path) && is_readable($path)) ? $path : null;
+    }
+
+    /**
+     * A crawler-safe copy of the entity's own cover, or null when there is none to serve.
+     *
+     * Uploads are stored as **WebP** — that is what the uploader writes — and WebP is refused
+     * outright by WhatsApp and several other scrapers, so a preview pointed at the stored file shows
+     * no picture at all. Everything is therefore handed over as a JPEG.
+     *
+     * The cover's own shape is preserved. This is the opposite of the composed card, which crops to
+     * 16:9; cropping an announcement is what lost the announcement.
+     *
+     * A stored JPEG/PNG already inside the box is returned untouched: no re-encode, no cache file, and
+     * it still works on a host without GD.
+     *
+     * This is what `&cover=1` on /api/og actually serves, and what `coverPreview()` reports the size of.
+     */
+    public static function coverFile(array $entity): ?string
+    {
+        $cover = (string) ($entity['cover'] ?? '');
+        $path = self::imagePath($cover);
+        if ($path === null) {
+            return null;
+        }
+
+        $size = @getimagesize($path);
+        if (!is_array($size) || (int) $size[0] < 1 || (int) $size[1] < 1) {
+            return null;
+        }
+
+        $mime = (string) ($size['mime'] ?? '');
+        if (self::fitsCoverBox((int) $size[0], (int) $size[1]) && ($mime === 'image/jpeg' || $mime === 'image/png')) {
+            return $path;
+        }
+        if (!self::available()) {
+            return null; // Cannot re-encode, so there is no crawler-safe form of this file.
+        }
+
+        $file = self::cacheDir() . '/cover-' . self::cacheKey($entity) . '.jpg';
+        if (is_file($file) && filesize($file) > 0) {
+            return $file;
+        }
+
+        // imagecreatefromstring sniffs the format, so this reads WebP wherever GD supports it.
+        $src = @imagecreatefromstring((string) @file_get_contents($path));
+        if (!$src) {
+            return null;
+        }
+        $srcW = imagesx($src);
+        $srcH = imagesy($src);
+        if ($srcW < 1 || $srcH < 1) {
+            imagedestroy($src);
+            return null;
+        }
+
+        $out = self::coverBox($srcW, $srcH);
+        $canvas = imagecreatetruecolor($out['width'], $out['height']);
+        if (!$canvas) {
+            imagedestroy($src);
+            return null;
+        }
+        // A transparent PNG flattened onto the default black canvas looks like a rendering fault, so
+        // the canvas starts white.
+        imagefilledrectangle($canvas, 0, 0, $out['width'], $out['height'],
+            imagecolorallocate($canvas, 255, 255, 255));
+        imagecopyresampled($canvas, $src, 0, 0, 0, 0, $out['width'], $out['height'], $srcW, $srcH);
+        imagedestroy($src);
+
+        // Write to a temporary name then rename, so two concurrent crawlers can never serve a
+        // half-written JPEG.
+        $tmp = $file . '.' . bin2hex(random_bytes(4)) . '.tmp';
+        $ok = imagejpeg($canvas, $tmp, 88);
+        imagedestroy($canvas);
+        if (!$ok || !is_file($tmp)) {
+            @unlink($tmp);
+            return null;
+        }
+        if (!@rename($tmp, $file)) {
+            @unlink($tmp);
+            return is_file($file) ? $file : null;
+        }
+
+        self::prune($file);
+        return $file;
+    }
+
+    /** True when an image of this size needs no re-encode to be served as a cover. */
+    private static function fitsCoverBox(int $width, int $height): bool
+    {
+        return max($width, $height) <= self::COVER_MAX_EDGE;
+    }
+
+    /**
+     * The size a cover is served at: fitted inside the box, never upscaled.
+     *
+     * @return array{width:int,height:int}
+     */
+    private static function coverBox(int $width, int $height): array
+    {
+        $scale = min(1.0, self::COVER_MAX_EDGE / max(1, max($width, $height)));
+        return [
+            'width' => max(1, (int) round($width * $scale)),
+            'height' => max(1, (int) round($height * $scale)),
+        ];
     }
 
     /** Shared shape for the renderer. */

@@ -12,7 +12,27 @@ if (!$event) {
 }
 $metaTitle = $event['title'];
 $metaDescription = $event['description'] ? mb_strimwidth($event['description'], 0, 155, '…') : null;
-$metaImage = baseUrl(ShareCard::urlFor('event', (int) $event['id'], (string) $event['slug']));
+
+/*
+ * The flyer IS the preview.
+ *
+ * An event is announced with artwork, and that artwork usually carries the date, the venue and the
+ * invitation as part of its design — so composing a 1200×630 card out of it did not decorate the
+ * preview, it cropped the announcement: a 958×1280 portrait flyer became a 958×503 slice, cutting off
+ * most of the poster.
+ *
+ * `coverPreview()` hands back the church's own image at its own shape (delivered as a JPEG, because
+ * the stored file is a WebP that several scrapers refuse) together with the size that will actually
+ * be served. An event with no flyer still gets the composed card, which says more than a bare link.
+ */
+$coverPreview = ShareCard::coverPreview('event', (int) $event['id'], (string) $event['slug']);
+if ($coverPreview !== null) {
+    $metaImage = baseUrl($coverPreview['url']);
+    $metaImageWidth = $coverPreview['width'];
+    $metaImageHeight = $coverPreview['height'];
+} else {
+    $metaImage = baseUrl(ShareCard::urlFor('event', (int) $event['id'], (string) $event['slug']));
+}
 
 $rsvpMode = Rsvp::modeFor($event);
 $takesRsvps = Rsvp::takesRsvps($event);
