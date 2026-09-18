@@ -278,9 +278,9 @@ $currentTenant = class_exists('Tenant') ? Tenant::current() : null;
       <input type="password" id="password" name="password" minlength="10" required>
       <label for="role">Role</label>
       <select id="role" name="role">
-        <option value="media_team">Media Team — upload &amp; manage posts</option>
-        <option value="editor">Editor — posts, events, sermons</option>
-        <option value="admin">Admin — full access</option>
+        <option value="media_team">Media Team — publishes this church's media, reels, news and comments</option>
+        <option value="editor">Editor — runs this church's content and ministry records</option>
+        <option value="admin">Admin — owns this church's account, users and settings</option>
       </select>
       <label for="org_unit_id">Home Unit / Scope</label>
       <select id="org_unit_id" name="org_unit_id">
@@ -335,9 +335,9 @@ $currentTenant = class_exists('Tenant') ? Tenant::current() : null;
         <div class="form-note">You cannot change your own role.</div>
       <?php else: ?>
       <select id="role" name="role">
-        <option value="media_team" <?= $editUser['role'] === 'media_team' ? 'selected' : '' ?>>Media Team — upload &amp; manage posts</option>
-        <option value="editor" <?= $editUser['role'] === 'editor' ? 'selected' : '' ?>>Editor — posts, events, sermons</option>
-        <option value="admin" <?= $editUser['role'] === 'admin' ? 'selected' : '' ?>>Admin — full access</option>
+        <option value="media_team" <?= $editUser['role'] === 'media_team' ? 'selected' : '' ?>>Media Team — publishes this church's media, reels, news and comments</option>
+        <option value="editor" <?= $editUser['role'] === 'editor' ? 'selected' : '' ?>>Editor — runs this church's content and ministry records</option>
+        <option value="admin" <?= $editUser['role'] === 'admin' ? 'selected' : '' ?>>Admin — owns this church's account, users and settings</option>
       </select>
       <?php endif; ?>
       <label for="org_unit_id">Home Unit / Scope</label>

@@ -73,10 +73,10 @@ require __DIR__ . '/partials/layout-open.php';
     <p>Every account has a role that controls what they can see and do. You'll usually only see <strong>your own church's</strong> content — each parish is fully isolated from every other parish.</p>
     <table>
       <tr><th>Role</th><th>What they can do</th></tr>
-      <tr><td><strong>Admin</strong></td><td>Full content management for their church (media, events, sermons, team, prayer, newsletter, forms), manage their church's users, use Notifications, and send <strong>SMS</strong> to their own church.</td></tr>
-      <tr><td><strong>Editor</strong></td><td>Create and edit content (media, events, sermons, team, forms, prayer) but cannot manage users or site settings. May also compose and send <strong>SMS</strong> for their church.</td></tr>
-      <tr><td><strong>Media Team</strong></td><td>Post and manage media &amp; reels only, plus <strong>SMS</strong> for their church.</td></tr>
-      <tr><td><strong>Super Admin</strong></td><td>Everything above across the whole organisation — plus Units, Site Settings, Pages, Users, Firebase push, and the <strong>SMS gateway settings</strong> (the API token, sending hours and caps). Marked with a <span class="pill super">SUPER</span> badge in this guide.</td></tr>
+      <tr><td><strong>Admin</strong></td><td>Owns this church's account: everything an Editor or Media Team member can do, plus this church's users, settings, giving, ads, campaigns and security.</td></tr>
+      <tr><td><strong>Editor</strong></td><td>Runs this church's content and ministry records day to day: sermons, series, events, devotionals, news, prayer, testimonies, reading plans, team, forms, newsletter, notifications, roster, attendance, follow-up, newcomers and analytics.</td></tr>
+      <tr><td><strong>Media Team</strong></td><td>Publishes and maintains this church's media: uploads photos, videos and reels, posts news, moderates comments, and sends SMS/WhatsApp.</td></tr>
+      <tr><td><strong>Super Admin</strong></td><td>Everything above, in every church (the switcher chooses which), plus the platform-only screens: creating churches (Registrations), Units and Unit Levels, Site Settings, Pages, Backups, Firebase push, and the SMS/WhatsApp gateway settings.</td></tr>
     </table>
     <p><strong>Isolation:</strong> a parish admin only sees their own parish's posts, events, sermons, team, forms, prayer requests, newsletter subscribers and <strong>SMS contacts</strong> — even if they log in at the organisation level. Unassigned records (e.g. visitor prayer requests) are only visible to the super admin, who can assign them to the right church.</p>
     <p>Within SMS specifically, a contact, group, sender ID or campaign with <strong>no church attached is treated as shared</strong> — head office records — so every parish admin can see them. Anything attached to another parish is invisible, and opening it by its id is refused as well as hidden.</p>
@@ -136,7 +136,7 @@ require __DIR__ . '/partials/layout-open.php';
   </div>
 
   <div class="card" style="margin-bottom:18px;">
-    <h2 id="ads">Ads Management (<code>/admin/ads</code>) <span class="pill super">SUPER</span></h2>
+    <h2 id="ads">Ads Management (<code>/admin/ads</code>) <span class="pill admin">ADMIN</span></h2>
     <p>Monetize and manage vertical 9:16 display advertisements for the website and Mobile App. The gateway keys live on a separate screen, reached from <strong>System → Payment Gateway</strong> in the sidebar (or <code>/admin/ads?action=settings</code>).</p>
     <ul>
       <li><strong>Ad Gateway Settings</strong> (<strong>System → Payment Gateway</strong> <span class="pill super">SUPER</span>): Configure Payhub Online Gateway keys (`payhub_public_key`, `payhub_secret_key`) and Manual Bank Transfer details for advertiser checkout.</li>
@@ -221,7 +221,7 @@ require __DIR__ . '/partials/layout-open.php';
   </div>
 
   <div class="card" style="margin-bottom:18px;">
-    <h2 id="reading-plans">Reading Plans (<code>/admin/reading-plans</code>) <span class="pill super">SUPER</span></h2>
+    <h2 id="reading-plans">Reading Plans (<code>/admin/reading-plans</code>) <span class="pill role">ADMIN/EDITOR</span></h2>
     <p>Give the church a Bible-reading plan — a chapter a day, a year through the Bible, whatever suits. Members choose one from their own account and tick off the days as they read.</p>
     <p><strong>Writing a plan.</strong> The editor is a text box with <strong>one line per day</strong>, because that is how a plan is written on paper and the only form that stays readable at 365 lines. Write a passage as <code>Genesis 1</code>, <code>Genesis 1-3</code>, <code>Genesis 1:1-5</code> or <code>John 3:16</code>, and put more than one reading on a day by separating them with a semicolon: <code>Psalm 23; John 10</code>.</p>
     <p><strong>Leave a line blank for a rest day</strong> — the days after it keep their numbers. A plan that rests on Sundays depends on that, and a plan nobody has to renumber is one nobody mistypes.</p>
