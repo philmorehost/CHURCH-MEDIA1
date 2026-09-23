@@ -36,6 +36,9 @@ dependencies:
   # declared here because download_store.dart imports it directly.
   path_provider: ^2.1.6
   shared_preferences: ^2.2.3
+  # Bible read-aloud. The engine is the device's own, so nothing is streamed and
+  # nothing is licensed per listen — see bible_tts_service.dart for the voice choice.
+  flutter_tts: ^4.2.0
 
 dev_dependencies:
   flutter_test:
