@@ -52,6 +52,22 @@ class OfflineBibleService {
   /// Whether the given abbreviation (e.g. 'KJV') is available offline.
   static bool isOffline(String abbrev) => versions.containsKey(abbrev.toLowerCase());
 
+  /// Scripture with the translator's marks removed.
+  ///
+  /// The KJV marks the words its translators supplied — words not carried by the manuscripts they had —
+  /// with braces: `In the beginning {God} created`. In print those are italic, and read as an aside. Here
+  /// they were rendered exactly as the source file has them, so a verse read
+  /// "And God said, Let there be {a} firmament in the midst of the waters", and the reader's eye lands on
+  /// the braces instead of the sentence. **The words stay; only the marks go.**
+  ///
+  /// Deliberately applied once, here, at the point the file is decoded — not in the chapter widget.
+  /// Everything that shows scripture (the reader, whole-Bible search, the verse of the day, shared text)
+  /// takes its verse strings from this cache, and the lowercase search index is built from the same
+  /// strings. Cleaning the text anywhere else would leave one surface disagreeing with another, and the
+  /// search index would match on characters the reader can no longer see.
+  static String plainText(String verse) =>
+      verse.replaceAll('{', '').replaceAll('}', '');
+
   final Map<String, List<OfflineBook>> _cache = {};
 
   /// version -> book -> chapter -> lowercased verse text. Built once per version
@@ -78,7 +94,10 @@ class OfflineBibleService {
     for (final b in decoded) {
       final map = b as Map<String, dynamic>;
       final chapters = (map['chapters'] as List<dynamic>)
-          .map((c) => (c as List<dynamic>).cast<String>())
+          .map((c) => (c as List<dynamic>)
+              .cast<String>()
+              .map((s) => plainText(s))
+              .toList())
           .toList();
       list.add(OfflineBook(
         abbrev: (map['abbrev'] as String?) ?? '',
