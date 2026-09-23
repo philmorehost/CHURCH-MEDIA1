@@ -8,6 +8,8 @@ import '../services/offline_bible_service.dart';
 import '../services/share_service.dart';
 import '../theme/app_theme.dart';
 
+import '../services/bible_tts_service.dart';
+
 /// Highlight color palette (key stored in the local DB).
 const Map<String, Color> _highlightColors = {
   'yellow': Color(0xFFFFF59D),
@@ -63,6 +65,12 @@ class _BibleScreenState extends State<BibleScreen> {
   Timer? _targetFadeTimer;
   bool _targetFading = false;
 
+  /// Read-aloud state. `_speakingVerse` is the verse being spoken right now, which is what
+  /// gets the highlight — the reader's eye should follow the voice, not hunt for it.
+  bool _reading = false;
+  int _speakingVerse = 0;
+  double _ttsRate = 0.82;
+
   @override
   void initState() {
     super.initState();
@@ -76,6 +84,16 @@ class _BibleScreenState extends State<BibleScreen> {
       final v = double.tryParse(font);
       if (v != null && v >= 12 && v <= 28) _fontSize = v;
     }
+
+    // Reading voice and pace are the reader's own choices, so they are restored before the
+    // engine is used for the first time — a voice that resets on every launch is worse than
+    // no choice at all.
+    final savedRate = await BibleLocalStore.instance.getSetting('bible_tts_rate');
+    final savedVoice = await BibleLocalStore.instance.getSetting('bible_tts_voice');
+    final rate = double.tryParse(savedRate ?? '');
+    if (rate != null && rate >= 0.4 && rate <= 1.2) _ttsRate = rate;
+    BibleTtsService.instance.selectedVoiceName = (savedVoice?.isEmpty ?? true) ? null : savedVoice;
+    await BibleTtsService.instance.setRate(_ttsRate);
     final books = await OfflineBibleService.instance.books('kjv');
     if (!mounted) return;
     setState(() {
@@ -103,6 +121,9 @@ class _BibleScreenState extends State<BibleScreen> {
 
   @override
   void dispose() {
+    // Leaving the screen must silence it. A chapter still being read aloud from a closed
+    // reader is the worst possible version of this feature, and it is the easy mistake.
+    BibleTtsService.instance.stop();
     _targetFadeTimer?.cancel();
     _verseController.dispose();
     _chapterController.dispose();
@@ -536,6 +557,12 @@ class _BibleScreenState extends State<BibleScreen> {
         title: const Text('Holy Bible'),
         centerTitle: true,
         actions: [
+          IconButton(
+            icon: Icon(_reading ? Icons.stop_circle_outlined : Icons.play_circle_outline),
+            tooltip: _reading ? 'Stop reading' : 'Read this chapter aloud',
+            onPressed: _reading ? _stopReading : _readAloud,
+          ),
+          IconButton(icon: const Icon(Icons.record_voice_over), tooltip: 'Reading voice & speed', onPressed: _showVoiceSheet),
           IconButton(icon: const Icon(Icons.search), tooltip: 'Search', onPressed: _openSearchScreen),
           IconButton(icon: const Icon(Icons.text_fields), tooltip: 'Font size', onPressed: _showFontSizeSheet),
           if (!_showSearch)
@@ -739,16 +766,167 @@ class _BibleScreenState extends State<BibleScreen> {
     );
   }
 
+  /// Reads the current chapter aloud, from the chosen verse to the end.
+  ///
+  /// The scroll-and-highlight reuses the mechanism the reader already has for "show the
+  /// chapter scrolled to this verse" rather than adding a second one, so a verse spoken aloud
+  /// behaves exactly like a verse jumped to.
+  Future<void> _readAloud() async {
+    if (_passage.isEmpty) return;
+
+    final verses = _passage.map((v) => v.text).toList();
+    final start = (_selectedVerse > 0 && _selectedVerse <= verses.length) ? _selectedVerse - 1 : 0;
+
+    setState(() => _reading = true);
+
+    await BibleTtsService.instance.readChapter(
+      verses: verses.sublist(start),
+      firstVerseNumber: start + 1,
+      onVerse: (verseNumber) {
+        if (!mounted) return;
+        setState(() {
+          _speakingVerse = verseNumber;
+          _targetVerse = verseNumber;
+          _targetFading = false;
+        });
+        _scrollToVerse();
+      },
+      onDone: () {
+        if (!mounted) return;
+        setState(() {
+          _reading = false;
+          _speakingVerse = 0;
+        });
+      },
+      onError: (message) {
+        if (!mounted) return;
+        setState(() {
+          _reading = false;
+          _speakingVerse = 0;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      },
+    );
+  }
+
+  Future<void> _stopReading() async {
+    await BibleTtsService.instance.stop();
+    if (!mounted) return;
+    setState(() {
+      _reading = false;
+      _speakingVerse = 0;
+    });
+  }
+
+  /// The reading voice and pace, chosen by ear.
+  ///
+  /// The voices listed are the ones the device actually has — not a Male/Female pair chosen by
+  /// this app. Phone speech engines do not report gender, so any such switch would be a guess,
+  /// and a wrong guess is obvious the moment it speaks. Every entry can be heard first, which
+  /// is how a person really picks a voice.
+  Future<void> _showVoiceSheet() async {
+    final voices = await BibleTtsService.instance.availableVoices();
+    if (!mounted) return;
+
+    await showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (context) => StatefulBuilder(builder: (context, setSheetState) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Reading voice', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                const SizedBox(height: 4),
+                Text(
+                  voices.isEmpty
+                      ? 'This device reported no voices. Install a speech engine in your phone\'s settings.'
+                      : 'Tap a voice to use it, or the play icon to hear it first.',
+                  style: const TextStyle(fontSize: 12.5, color: AppColors.inkFaint),
+                ),
+                const SizedBox(height: 10),
+                Row(children: [
+                  const Icon(Icons.speed, size: 20),
+                  Expanded(
+                    child: Slider(
+                      min: 0.5,
+                      max: 1.2,
+                      divisions: 14,
+                      value: _ttsRate,
+                      label: '${(_ttsRate * 100).round()}%',
+                      onChanged: (v) {
+                        setSheetState(() {});
+                        setState(() => _ttsRate = v);
+                        BibleTtsService.instance.setRate(v);
+                        BibleLocalStore.instance.setSetting('bible_tts_rate', v.toStringAsFixed(2));
+                      },
+                    ),
+                  ),
+                  Text('${(_ttsRate * 100).round()}%'),
+                ]),
+                const SizedBox(height: 6),
+                if (voices.isNotEmpty)
+                  Flexible(
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: voices.length,
+                      itemBuilder: (context, i) {
+                        final v = voices[i];
+                        final selected = BibleTtsService.instance.selectedVoiceName == v.name;
+                        return ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(
+                            selected ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                            size: 20,
+                            color: selected ? AppColors.gold : AppColors.inkFaint,
+                          ),
+                          title: Text(v.label, style: const TextStyle(fontSize: 13.5)),
+                          subtitle: v.gender == null
+                              ? null
+                              : Text('sounds like a ${v.gender=="male" ? "man" : "woman"} (from the voice name — a hint, not a guarantee)', style: const TextStyle(fontSize: 11, color: AppColors.inkFaint)),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.play_arrow, size: 20),
+                            tooltip: 'Hear it',
+                            onPressed: () => BibleTtsService.instance.preview(v),
+                          ),
+                          onTap: () async {
+                            await BibleTtsService.instance.selectVoice(v);
+                            await BibleLocalStore.instance.setSetting('bible_tts_voice', v.name);
+                            setSheetState(() {});
+                            if (context.mounted) setState(() {});
+                          },
+                        );
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      }),
+    );
+  }
+
   Widget _verseTile(ThemeData theme, int verse, String text) {
     final color = _highlights[verse];
     final isTarget = _targetVerse > 0 && verse == _targetVerse;
-    final tileColor = isTarget && color == null
-        // Fade from a golden tint to transparent once the search highlight
-        // has served its purpose (manual highlights still win).
-        ? (_targetFading
-            ? const Color(0x00E8B95F)
-            : const Color(0x33E8B95F))
-        : (color != null ? (_highlightColors[color] ?? Colors.yellow).withValues(alpha: 0.35) : null);
+    final isSpeaking = _speakingVerse == verse;
+    final tileColor = isSpeaking
+        // The verse being read. Takes precedence over a manual highlight, because while the
+        // voice is moving the reader needs to see WHERE it is more than where they left off.
+        ? const Color(0x33E8B95F)
+        : (isTarget && color == null
+            // Fade from a golden tint to transparent once the search highlight
+            // has served its purpose (manual highlights still win).
+            ? (_targetFading
+                ? const Color(0x00E8B95F)
+                : const Color(0x33E8B95F))
+            : (color != null ? (_highlightColors[color] ?? Colors.yellow).withValues(alpha: 0.35) : null));
     return GestureDetector(
       onLongPress: () => _showVerseActions(verse, text),
       child: AnimatedContainer(
