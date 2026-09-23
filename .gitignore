@@ -22,3 +22,12 @@
 
 # Office lock files, created beside a document while it is open.
 ~$*
+
+# JVM crash dumps. The JVM writes hs_err_pid*.log and replay_pid*.log next to
+# whatever directory Gradle was running in when a build tool crashed. They are
+# machine-specific memory dumps — large, noisy, and useless to anyone else.
+hs_err_pid*.log
+replay_pid*.log
+
+# Editor state.
+/.vscode/

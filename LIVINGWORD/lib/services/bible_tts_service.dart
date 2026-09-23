@@ -105,6 +105,56 @@ class BibleTtsService {
     return voices;
   }
 
+  /// Every speech engine the phone has.
+  ///
+  /// Android can have more than one (Google's, and the manufacturer's); iOS has exactly one.
+  /// Worth asking because "no voices" usually means the engine is installed but its voice
+  /// data is not, and knowing how many engines there are tells the reader whether swapping to
+  /// another one is even possible.
+  Future<List<String>> engineNames() async {
+    await init();
+    try {
+      final raw = await _tts.getEngines;
+      return (raw as List)
+          .whereType<Map>()
+          .map((e) => '${e['name'] ?? e['label'] ?? ''}')
+          .where((n) => n.isNotEmpty)
+          .toList();
+    } catch (e) {
+      debugPrint('BibleTtsService.engineNames: $e');
+      return <String>[];
+    }
+  }
+
+  /// Asks the phone whether it can actually read aloud, so the reader can be told what is
+  /// missing instead of tapping play and hearing nothing.
+  ///
+  /// The decision itself is made by [BibleTtsDiagnosis.classify], which takes only plain
+  /// values and so can be reasoned about (and tested) without a phone attached. This method's
+  /// whole job is to gather those values honestly: a probe that fails is not evidence that
+  /// the phone is broken, so a failure to answer is not turned into a verdict.
+  Future<BibleTtsDiagnosis> diagnose() async {
+    await init();
+    final engines = await engineNames();
+    final voices = await _loadVoices();
+
+    // Not every engine answers this. When it will not, leave it true rather than using a
+    // non-answer to declare the phone unusable.
+    var installed = true;
+    try {
+      installed = (await _tts.isLanguageInstalled('en-US')) == true;
+    } catch (e) {
+      debugPrint('BibleTtsService.diagnose: isLanguageInstalled: $e');
+    }
+
+    return BibleTtsDiagnosis.classify(
+      engineCount: engines.length,
+      voiceCount: voices.length,
+      englishVoiceCount: voices.where((v) => v.isEnglish).length,
+      englishLanguageInstalled: installed,
+    );
+  }
+
   /// Reads with [voice] from now on. The caller persists [selectedVoiceName].
   Future<void> selectVoice(BibleTtsVoice voice) async {
     await init();
@@ -407,5 +457,142 @@ class BibleTtsVoice {
     final where = locale.replaceAll('_', '-').toUpperCase();
     final short = name.length > 26 ? '${name.substring(0, 26)}…' : name;
     return '$where · $short';
+  }
+}
+
+/// The one thing standing between the reader and a verse read aloud.
+///
+/// Ordered worst-first is not the order they are checked in — see
+/// [BibleTtsDiagnosis.classify] — but it is the order of how much is missing.
+enum BibleTtsIssue {
+  /// Voices are available and at least one reads English. Nothing to fix.
+  ready,
+
+  /// No speech engine at all: nothing on the phone can turn text into sound.
+  noEngine,
+
+  /// An engine is installed but it reported no voices, so there is nothing to read with.
+  noVoices,
+
+  /// The engine has voices, but none of them read English.
+  noEnglishVoice,
+}
+
+/// What the phone can and cannot do, and what the reader can do about it.
+///
+/// This exists because "the voice does not work" is the one failure a reader cannot
+/// diagnose for themselves: nothing appears on the screen, nothing is written where they can
+/// see it, and the cause is always somewhere in the phone's own settings, several screens
+/// deep. Naming the cause and opening that exact screen is the entire point of this class —
+/// a message that says "install a voice" and leaves somebody hunting through their phone is
+/// not a solution.
+///
+/// The decision is made from four plain numbers by [classify], deliberately kept free of any
+/// platform call so the reasoning can be checked without a phone.
+class BibleTtsDiagnosis {
+  final BibleTtsIssue issue;
+  final int engineCount;
+  final int voiceCount;
+  final int englishVoiceCount;
+
+  /// What the engine itself said. Only ever a hint: network voices read fine without the
+  /// on-device data being installed, so a false here is a reason to look, not a verdict.
+  final bool englishLanguageInstalled;
+
+  const BibleTtsDiagnosis({
+    required this.issue,
+    required this.engineCount,
+    required this.voiceCount,
+    required this.englishVoiceCount,
+    required this.englishLanguageInstalled,
+  });
+
+  /// Google's speech engine. It is present on nearly every Android phone, and this link
+  /// exists for the ones that shipped without it.
+  static const String googleEngineStoreUrl =
+      'https://play.google.com/store/apps/details?id=com.google.android.tts';
+
+  /// Where the fix lives on the phone. Shown even when the button works: a reader who is
+  /// told the name of the screen can find it on any phone, and can tell somebody else.
+  static const String manualPath =
+      'Settings → System → Languages & input → Text-to-speech output';
+
+  bool get isReady => issue == BibleTtsIssue.ready;
+
+  /// The case where reading may work but sound wrong: voices are present, yet the engine says
+  /// the English data is not installed. A hint, not a fault — see [englishLanguageInstalled].
+  bool get needsVoiceDataHint => isReady && !englishLanguageInstalled;
+
+  /// Offered when there is nothing usable to speak with, so installing Google's engine is a
+  /// real remedy rather than a suggestion.
+  bool get shouldInstallEngine =>
+      issue == BibleTtsIssue.noEngine || issue == BibleTtsIssue.noVoices;
+
+  String get settingsLabel => 'Open speech settings';
+
+  /// One line naming what is missing.
+  String get title {
+    switch (issue) {
+      case BibleTtsIssue.ready:
+        return 'Reading voice ready';
+      case BibleTtsIssue.noEngine:
+        return 'This phone has no speech voice';
+      case BibleTtsIssue.noVoices:
+        return 'The speech engine has no voices';
+      case BibleTtsIssue.noEnglishVoice:
+        return 'No English voice is installed';
+    }
+  }
+
+  /// Why it matters, in the reader's words, and what installing fixes.
+  String get detail {
+    switch (issue) {
+      case BibleTtsIssue.ready:
+        return 'This phone has $englishVoiceCount English '
+            '${englishVoiceCount == 1 ? 'voice' : 'voices'} to read with.';
+      case BibleTtsIssue.noEngine:
+        return 'Reading aloud needs a text-to-speech voice, and this phone does not have one. '
+            'Google\'s is free and takes a moment to install — then come back and check again.';
+      case BibleTtsIssue.noVoices:
+        return 'A speech engine is installed but it reported no voices, so there is nothing '
+            'to read with. Downloading the voice data, or reinstalling the engine, fixes this.';
+      case BibleTtsIssue.noEnglishVoice:
+        return 'The engine has $voiceCount ${voiceCount == 1 ? 'voice' : 'voices'}, but none of '
+            'them read English. Downloading the English voice data once is enough — after '
+            'that, reading works without a connection.';
+    }
+  }
+
+  /// Works out what is missing from what the phone reported.
+  ///
+  /// Order matters and is deliberate. Voices that read English are checked FIRST, so a phone
+  /// that answers with voices but not engines is still called ready — the aim is to predict
+  /// whether the reader will hear something, not to police the phone's configuration. Only
+  /// when there is nothing to speak with is a fault named, and an empty list from both probes
+  /// is the honest worst case: nothing on this phone can produce a voice.
+  static BibleTtsDiagnosis classify({
+    required int engineCount,
+    required int voiceCount,
+    required int englishVoiceCount,
+    required bool englishLanguageInstalled,
+  }) {
+    final BibleTtsIssue issue;
+    if (englishVoiceCount > 0) {
+      issue = BibleTtsIssue.ready;
+    } else if (voiceCount > 0) {
+      issue = BibleTtsIssue.noEnglishVoice;
+    } else if (engineCount > 0) {
+      issue = BibleTtsIssue.noVoices;
+    } else {
+      issue = BibleTtsIssue.noEngine;
+    }
+
+    return BibleTtsDiagnosis(
+      issue: issue,
+      engineCount: engineCount,
+      voiceCount: voiceCount,
+      englishVoiceCount: englishVoiceCount,
+      englishLanguageInstalled: englishLanguageInstalled,
+    );
   }
 }

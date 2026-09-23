@@ -2,8 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../services/api_client.dart';
 import '../services/bible_local_store.dart';
+import '../services/device_settings_service.dart';
 import '../services/offline_bible_service.dart';
 import '../services/share_service.dart';
 import '../theme/app_theme.dart';
@@ -70,6 +72,10 @@ class _BibleScreenState extends State<BibleScreen> {
   bool _reading = false;
   int _speakingVerse = 0;
   double _ttsRate = 0.82;
+
+  /// True once the phone has refused to open its own speech settings, so the sheet stops
+  /// offering a button that does nothing and shows the way there by hand instead.
+  bool _voiceSettingsUnavailable = false;
 
   @override
   void initState() {
@@ -774,6 +780,18 @@ class _BibleScreenState extends State<BibleScreen> {
   Future<void> _readAloud() async {
     if (_passage.isEmpty) return;
 
+    // Ask the phone whether it can actually speak BEFORE starting, rather than letting the
+    // reader tap play and hear nothing. Silence is the one failure they cannot diagnose for
+    // themselves: there is no error to read, and the cause is always a screen deep inside the
+    // phone's settings. So when something is missing, the voice sheet opens on the explanation
+    // and the fix instead of the reader being left to guess.
+    final diagnosis = await BibleTtsService.instance.diagnose();
+    if (!mounted) return;
+    if (!diagnosis.isReady) {
+      await _showVoiceSheet();
+      return;
+    }
+
     final verses = _passage.map((v) => v.text).toList();
     final start = (_selectedVerse > 0 && _selectedVerse <= verses.length) ? _selectedVerse - 1 : 0;
 
@@ -804,7 +822,12 @@ class _BibleScreenState extends State<BibleScreen> {
           _reading = false;
           _speakingVerse = 0;
         });
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+        // The diagnosis said this phone could read, but it would not. Offer the fix where the
+        // reader already is, instead of telling them to go and find it.
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(message),
+          action: SnackBarAction(label: 'Fix it', onPressed: _showVoiceSheet),
+        ));
       },
     );
   }
@@ -818,14 +841,20 @@ class _BibleScreenState extends State<BibleScreen> {
     });
   }
 
-  /// The reading voice and pace, chosen by ear.
+  /// The reading voice and pace, chosen by ear — and, when the phone cannot read aloud at all,
+  /// what is missing and the one button that fixes it.
   ///
   /// The voices listed are the ones the device actually has — not a Male/Female pair chosen by
   /// this app. Phone speech engines do not report gender, so any such switch would be a guess,
   /// and a wrong guess is obvious the moment it speaks. Every entry can be heard first, which
   /// is how a person really picks a voice.
   Future<void> _showVoiceSheet() async {
-    final voices = await BibleTtsService.instance.availableVoices();
+    // Re-probed every time the sheet opens, because phones change underneath an app: voice
+    // data gets installed or reclaimed for storage, and a reader who has just followed the
+    // instructions deserves to see the result rather than a stale verdict.
+    var voices = await BibleTtsService.instance.availableVoices();
+    var diagnosis = await BibleTtsService.instance.diagnose();
+    _voiceSettingsUnavailable = false;
     if (!mounted) return;
 
     await showModalBottomSheet(
@@ -833,6 +862,22 @@ class _BibleScreenState extends State<BibleScreen> {
       showDragHandle: true,
       isScrollControlled: true,
       builder: (context) => StatefulBuilder(builder: (context, setSheetState) {
+        // The values above live outside this builder on purpose: the builder re-runs on every
+        // setSheetState, so anything declared in here would be reset each time it rebuilt.
+        final d = diagnosis;
+        final listed = voices;
+
+        Future<void> recheck() async {
+          final v = await BibleTtsService.instance.availableVoices();
+          final refreshed = await BibleTtsService.instance.diagnose();
+          if (!context.mounted) return;
+          setSheetState(() {
+            voices = v;
+            diagnosis = refreshed;
+            _voiceSettingsUnavailable = false;
+          });
+        }
+
         return SafeArea(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
@@ -842,12 +887,34 @@ class _BibleScreenState extends State<BibleScreen> {
               children: [
                 const Text('Reading voice', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                 const SizedBox(height: 4),
-                Text(
-                  voices.isEmpty
-                      ? 'This device reported no voices. Install a speech engine in your phone\'s settings.'
-                      : 'Tap a voice to use it, or the play icon to hear it first.',
-                  style: const TextStyle(fontSize: 12.5, color: AppColors.inkFaint),
-                ),
+                if (!d.isReady)
+                  _voiceProblemCard(
+                    d,
+                    showManualPath: _voiceSettingsUnavailable,
+                    onOpenSettings: () async {
+                      final opened = await DeviceSettingsService.openVoiceSettings();
+                      if (!context.mounted) return;
+                      setSheetState(() => _voiceSettingsUnavailable = !opened);
+                    },
+                    onInstallEngine: _installSpeechEngine,
+                    onRecheck: recheck,
+                  )
+                else ...[
+                  Text(
+                    listed.isEmpty
+                        ? 'This device reported no voices.'
+                        : 'Tap a voice to use it, or the play icon to hear it first.',
+                    style: const TextStyle(fontSize: 12.5, color: AppColors.inkFaint),
+                  ),
+                  if (d.needsVoiceDataHint) ...[
+                    const SizedBox(height: 6),
+                    const Text(
+                      'If the reading sounds wrong or stays silent, the English voice data may not '
+                      'be downloaded on this phone yet.',
+                      style: TextStyle(fontSize: 11.5, color: AppColors.inkFaint),
+                    ),
+                  ],
+                ],
                 const SizedBox(height: 10),
                 Row(children: [
                   const Icon(Icons.speed, size: 20),
@@ -869,13 +936,13 @@ class _BibleScreenState extends State<BibleScreen> {
                   Text('${(_ttsRate * 100).round()}%'),
                 ]),
                 const SizedBox(height: 6),
-                if (voices.isNotEmpty)
+                if (listed.isNotEmpty)
                   Flexible(
                     child: ListView.builder(
                       shrinkWrap: true,
-                      itemCount: voices.length,
+                      itemCount: listed.length,
                       itemBuilder: (context, i) {
-                        final v = voices[i];
+                        final v = listed[i];
                         final selected = BibleTtsService.instance.selectedVoiceName == v.name;
                         return ListTile(
                           dense: true,
@@ -909,6 +976,81 @@ class _BibleScreenState extends State<BibleScreen> {
           ),
         );
       }),
+    );
+  }
+
+  /// What is missing, in the reader's own words, with the button that fixes it.
+  ///
+  /// This is the whole answer to "the voice does not work": the cause named plainly, the one
+  /// action that resolves it, and — because that button can fail on a phone whose build does
+  /// not expose the screen — the route there by hand, so there is always something to act on.
+  Widget _voiceProblemCard(
+    BibleTtsDiagnosis d, {
+    required bool showManualPath,
+    required VoidCallback onOpenSettings,
+    required VoidCallback onInstallEngine,
+    required VoidCallback onRecheck,
+  }) {
+    const danger = Color(0xFF8C1D18);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0x14B3261E),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0x33B3261E)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            const Icon(Icons.volume_off_outlined, size: 18, color: danger),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(d.title,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 13.5, color: danger)),
+            ),
+          ]),
+          const SizedBox(height: 6),
+          Text(d.detail, style: const TextStyle(fontSize: 12, height: 1.4)),
+          const SizedBox(height: 8),
+          Text(
+            // The button was pressed and no screen appeared: say so, and give the route.
+            showManualPath
+                ? 'This phone would not open that screen. Open ${BibleTtsDiagnosis.manualPath}.'
+                : 'On the phone: ${BibleTtsDiagnosis.manualPath}.',
+            style: const TextStyle(fontSize: 11, color: AppColors.inkFaint),
+          ),
+          const SizedBox(height: 10),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            if (d.shouldInstallEngine)
+              FilledButton.icon(
+                onPressed: onInstallEngine,
+                icon: const Icon(Icons.download_outlined, size: 18),
+                label: const Text('Install a voice'),
+              ),
+            OutlinedButton.icon(
+              onPressed: onOpenSettings,
+              icon: const Icon(Icons.settings_outlined, size: 18),
+              label: Text(d.settingsLabel),
+            ),
+            TextButton.icon(
+              onPressed: onRecheck,
+              icon: const Icon(Icons.refresh, size: 18),
+              label: const Text('Check again'),
+            ),
+          ]),
+        ],
+      ),
+    );
+  }
+
+  /// Google's speech engine on the store, for a phone that shipped without one.
+  Future<void> _installSpeechEngine() async {
+    await launchUrl(
+      Uri.parse(BibleTtsDiagnosis.googleEngineStoreUrl),
+      mode: LaunchMode.externalApplication,
     );
   }
 

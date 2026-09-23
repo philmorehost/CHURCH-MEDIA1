@@ -26,6 +26,30 @@ class MainActivity : FlutterActivity() {
                     }
                 }
 
+                "openTtsSettings" -> {
+                    // The screen where voice data is installed — Android's "Text-to-speech
+                    // output". It has to be opened by intent ACTION, not by a URI, which is
+                    // why this cannot be done from Dart at all. The action is also not part of
+                    // the public API — there is no Settings.ACTION_TTS_SETTINGS — so it is
+                    // written out, and because it is not public a manufacturer's build may not
+                    // have it.
+                    try {
+                        startActivity(Intent("com.android.settings.TTS_SETTINGS"))
+                        result.success(true)
+                    } catch (e: Exception) {
+                        try {
+                            // On Android 11 and later the speech output screen sits under
+                            // Accessibility, so this lands one step away rather than nowhere.
+                            startActivity(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                            result.success(true)
+                        } catch (e2: Exception) {
+                            // Report it honestly: the app then shows the reader how to get there
+                            // by hand instead of leaving them on an unchanged page.
+                            result.success(false)
+                        }
+                    }
+                }
+
                 else -> result.notImplemented()
             }
         }
