@@ -152,9 +152,11 @@ final class ShareCard
      * Public URL for the generic brand card.
      *
      * This is what a page falls back to when it has no image of its own. It exists because the
-     * alternative — pointing og:image at the uploaded logo — hands crawlers a WebP (WhatsApp and
-     * several other scrapers refuse WebP outright) in whatever shape the church happened to upload,
-     * so the preview degraded to a logo or to nothing. A drawn card is always a 1200×630 PNG.
+     * alternative — pointing og:image straight at the uploaded logo — hands crawlers a WebP (WhatsApp
+     * and several other scrapers refuse WebP outright) in whatever shape the church happened to
+     * upload, so the preview degraded to a logo or to nothing. A drawn card is always a 1200×630 PNG —
+     * and it now draws the church's **own logo** onto that card (see `paintLogo()`), so the preview
+     * shows the church's mark rather than a bare initial.
      */
     public static function brandUrl(): string
     {
@@ -433,6 +435,10 @@ final class ShareCard
             (string) $entity['eyebrow'],
             (string) ($entity['cover'] ?? ''),
             (string) setting('site_title'),
+            // The logo is drawn onto the card, so a new logo has to mint a new cache key — otherwise the
+            // old card is served from disk (and its `?v=` never moves, so crawlers never re-read it) and
+            // the church changing its logo appears to do nothing to a shared link.
+            (string) setting('logo_path', ''),
             (string) setting('og_card_version', '1'),
             self::hasType() ? 'type' : 'notype',
         ]);
@@ -461,7 +467,9 @@ final class ShareCard
         // background is already dark, so it needs only a light touch.
         self::paintScrim($image, self::HEIGHT - 300, 300, $drewCover ? 96 : 60);
 
-        self::paintText($image, $entity);
+        // `!$drewCover` tells the text where a logo tile may have been drawn, so a long title wraps
+        // before it instead of being painted straight over it.
+        self::paintText($image, $entity, !$drewCover);
 
         return $image;
     }
@@ -489,13 +497,100 @@ final class ShareCard
             ], $colour);
         }
 
-        // A large monogram, so a card with no photograph still looks deliberate.
+        // The church's own logo when it has one, so a shared link for a page with no picture of its own
+        // shows the church's mark instead of a bare initial. Drawn after the wedge so it is not tinted.
+        if (self::paintLogo($image)) {
+            return;
+        }
+
+        // No logo uploaded: a large monogram, so a card with no photograph still looks deliberate.
         if (self::hasType()) {
             $initial = mb_strtoupper(mb_substr((string) setting('site_title'), 0, 1));
             $font = (string) self::fontPath(true);
             $colour = imagecolorallocatealpha($image, self::GOLD[0], self::GOLD[1], self::GOLD[2], 96);
             imagettftext($image, 260, 0, self::WIDTH - 470, 400, $colour, $font, $initial);
         }
+    }
+
+    /**
+     * Draws the church's uploaded logo into the corner of a branded card, so a shared link for a page
+     * that has no image of its own still carries the church's own mark.
+     *
+     * The logo is **contained**, never cropped — a crest or a wordmark has its edges doing work. It sits
+     * on a soft tile in the card's own background colour with a thin gold ring, because the gold wedge
+     * behind this corner would otherwise show through a transparent logo (changing its colours), and a
+     * logo drawn straight onto the wedge can end up low-contrast against the gold.
+     *
+     * Returns false when there is no usable logo, so the caller can fall back to the monogram.
+     */
+    private static function paintLogo(GdImage $image): bool
+    {
+        $path = self::imagePath((string) setting('logo_path', ''));
+        if ($path === null) {
+            return false;
+        }
+        // imagecreatefromstring sniffs the format, so WebP support is whatever GD has.
+        $src = @imagecreatefromstring((string) @file_get_contents($path));
+        if (!$src) {
+            return false;
+        }
+        $srcW = imagesx($src);
+        $srcH = imagesy($src);
+        if ($srcW <= 0 || $srcH <= 0) {
+            imagedestroy($src);
+            return false;
+        }
+
+        $margin = 72;
+        $box = 320;
+        $x0 = self::WIDTH - $margin - $box;
+        $y0 = $margin;
+        $x1 = $x0 + $box;
+        $y1 = $y0 + $box;
+        $radius = 28;
+
+        // The ring first (a faint gold), then the tile inset by a couple of pixels over it, so what is
+        // left showing is a hairline border.
+        $ring = imagecolorallocatealpha($image, self::GOLD[0], self::GOLD[1], self::GOLD[2], 104);
+        self::paintRoundedRect($image, $x0, $y0, $x1, $y1, $radius, $ring);
+        $panel = imagecolorallocate($image, self::BG[0] + 8, self::BG[1] + 7, self::BG[2] + 16);
+        self::paintRoundedRect($image, $x0 + 2, $y0 + 2, $x1 - 2, $y1 - 2, $radius - 2, $panel);
+
+        // Contain inside the tile with even padding. Upscaling is capped at 2× — a small logo needs a
+        // little help to be legible, but a genuinely tiny one scaled 10× would just be mush.
+        $pad = 36;
+        $inner = $box - $pad * 2;
+        $scale = min(2.0, $inner / max($srcW, $srcH));
+        $dstW = max(1, (int) round($srcW * $scale));
+        $dstH = max(1, (int) round($srcH * $scale));
+        $dstX = $x0 + (int) round(($box - $dstW) / 2);
+        $dstY = $y0 + (int) round(($box - $dstH) / 2);
+        imagecopyresampled($image, $src, $dstX, $dstY, 0, 0, $dstW, $dstH, $srcW, $srcH);
+        imagedestroy($src);
+        return true;
+    }
+
+    /** True when a logo is uploaded on this site and is readable, so a card can draw it. */
+    private static function hasLogo(): bool
+    {
+        return self::imagePath((string) setting('logo_path', '')) !== null;
+    }
+
+    /** A filled rectangle with rounded corners, built from two bands and four corner ellipses. */
+    private static function paintRoundedRect(GdImage $image, int $x0, int $y0, int $x1, int $y1, int $radius, int $colour): void
+    {
+        $radius = max(0, min($radius, (int) floor(min($x1 - $x0, $y1 - $y0) / 2)));
+        if ($radius === 0) {
+            imagefilledrectangle($image, $x0, $y0, $x1, $y1, $colour);
+            return;
+        }
+        imagefilledrectangle($image, $x0 + $radius, $y0, $x1 - $radius, $y1, $colour);
+        imagefilledrectangle($image, $x0, $y0 + $radius, $x1, $y1 - $radius, $colour);
+        $d = $radius * 2;
+        imagefilledellipse($image, $x0 + $radius, $y0 + $radius, $d, $d, $colour);
+        imagefilledellipse($image, $x1 - $radius, $y0 + $radius, $d, $d, $colour);
+        imagefilledellipse($image, $x0 + $radius, $y1 - $radius, $d, $d, $colour);
+        imagefilledellipse($image, $x1 - $radius, $y1 - $radius, $d, $d, $colour);
     }
 
     /** Cover-crops the entity's image to fill the card. False when unavailable. */
@@ -553,13 +648,17 @@ final class ShareCard
         }
     }
 
-    private static function paintText(GdImage $image, array $entity): void
+    private static function paintText(GdImage $image, array $entity, bool $branded = false): void
     {
         $margin = 72;
         $maxWidth = self::WIDTH - $margin * 2;
         $baselineBottom = self::HEIGHT - 84;
 
         $hasType = self::hasType();
+
+        // When a logo tile occupies the top-right corner, the title wraps inside the column to its left
+        // rather than running under it. The subtitle sits below the tile, so it keeps the full width.
+        $titleMaxWidth = ($branded && self::hasLogo()) ? self::WIDTH - $margin * 2 - 320 : $maxWidth;
 
         // --- footer: site name, always present ---
         $footY = self::HEIGHT - 62;
@@ -596,7 +695,7 @@ final class ShareCard
             $font = (string) self::fontPath(true);
             $lines = [];
             foreach ([64, 58, 52, 46, 40, 36] as $size) {
-                $lines = self::wrap($entity['title'], $size, $font, $maxWidth, 3);
+                $lines = self::wrap($entity['title'], $size, $font, $titleMaxWidth, 3);
                 if (count($lines) <= 3) {
                     $lineHeight = (int) round($size * 1.24);
                     $blockHeight = $lineHeight * count($lines);

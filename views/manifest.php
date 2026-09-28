@@ -32,44 +32,29 @@ if ($description === '') {
 }
 
 /**
- * The icons, in order of preference.
+ * The icons, generated per church by the `/app-icon.png` route from the logo and favicon saved in
+ * Settings.
  *
- * A church's own uploaded logo is used when it is genuinely usable as an app icon — square, and at
- * least 192px — because declaring an icon of the wrong size is worse than not offering one: the
- * launcher either refuses the install or scales up something too small to read. So the stored file is
- * measured rather than assumed, and the two icons shipped with the site are the fallback.
+ * There is deliberately **no** fallback to the artwork shipped with the code. That fallback is exactly
+ * what put the same default logo on every church's home screen: a church whose upload was not precisely
+ * square and 192px got the shipped icon instead of its own, which looks implemented and does nothing.
+ * The route now draws a correctly-sized square PNG from whatever was uploaded — the logo first, the
+ * favicon second, and the church's own initial only when nothing has been uploaded at all — so the icon
+ * is always this church's own mark.
  *
- * It **replaces** the shipped icons rather than joining them. A launcher picks the closest match for
- * the size it needs, so with both listed a 512px generic icon wins over a church's 192px logo and the
- * church's own logo never appears — the feature quietly doing nothing while looking implemented. The
- * trade-off is real and accepted: a 192px logo has no 512px companion, so a launcher that wants one
- * scales the logo up, which is a slightly soft icon rather than the wrong church's logo.
+ * Both sizes are declared because a launcher picks the closest match for the density it needs. The
+ * `sizes` are true rather than assumed, because the route draws to them exactly, which is what keeps an
+ * install from being refused for declaring the wrong size.
  *
  * `purpose` is `any` throughout, and never `maskable`. A maskable icon has to keep its content inside a
- * safe zone so a launcher can crop it to a circle without cutting anything off, and neither a church's
- * logo nor the shipped icons can be assumed to have that padding. Claiming `maskable` when it is not is
- * how an app icon ends up with its edges sliced away.
+ * safe zone so a launcher can crop it to a circle without cutting anything off, and a church's logo
+ * cannot be assumed to have that padding. Claiming `maskable` when it is not is how an app icon ends up
+ * with its edges sliced away.
  */
-$icons = [];
-
-$logo = (string) ($s['logo_path'] ?? '');
-if ($logo !== '') {
-    $file = UPLOADS_PATH . '/' . $logo;
-    $size = is_file($file) ? @getimagesize($file) : false;
-    if ($size !== false && (int) $size[0] === (int) $size[1] && (int) $size[0] >= 192) {
-        $icons[] = [
-            'src' => (string) uploadUrl($logo),
-            'sizes' => (int) $size[0] . 'x' . (int) $size[1],
-            'type' => (string) ($size['mime'] ?? 'image/png'),
-            'purpose' => 'any',
-        ];
-    }
-}
-
-if (!$icons) {
-    $icons[] = ['src' => '/assets/logo.png', 'sizes' => '192x192', 'type' => 'image/png', 'purpose' => 'any'];
-    $icons[] = ['src' => '/assets/app_icon.png', 'sizes' => '512x512', 'type' => 'image/png', 'purpose' => 'any'];
-}
+$icons = [
+    ['src' => appIconUrl(192), 'sizes' => '192x192', 'type' => 'image/png', 'purpose' => 'any'],
+    ['src' => appIconUrl(512), 'sizes' => '512x512', 'type' => 'image/png', 'purpose' => 'any'],
+];
 
 $manifest = [
     'name' => $name,

@@ -227,11 +227,14 @@ if ($ogWidth < 1 || $ogHeight < 1) {
 <meta name="theme-color" content="#0a0912">
 <?php /*
          The manifest is generated per church (views/manifest.php) rather than being a static file, so
-         the name under the icon on a home screen is this church's name. `apple-touch-icon` is the same
-         image for iOS, which ignores `manifest` icons entirely when a site is added to the home screen.
+         the name under the icon on a home screen is this church's name. iOS ignores `manifest` icons
+         entirely when a site is added to the home screen and fetches `apple-touch-icon` instead, and it
+         will not accept the uploaded WebP — so both point at the generated `/app-icon.png` route, which
+         is drawn from this church's own logo (or favicon). That is what stops the artwork shipped with
+         the code appearing under one church's app on another church's phone.
        */ ?>
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="apple-touch-icon" href="/assets/logo.png">
+<link rel="apple-touch-icon" sizes="180x180" href="<?= e(appIconUrl(180)) ?>">
 <?php /*
          iOS ignores the manifest for the name under a home-screen icon and uses this instead, so the
          church's name has to be here too or the icon is captioned with whatever the page title happens

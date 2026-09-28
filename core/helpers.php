@@ -390,6 +390,41 @@ function appShortName(): string
 }
 
 /**
+ * The URL of this church's home-screen icon, at a given size.
+ *
+ * Points at the `/app-icon.png` route rather than at the uploaded logo file itself. That is deliberate:
+ * an uploaded logo is stored as **WebP** (which several launchers, and iOS for `apple-touch-icon`,
+ * refuse as an icon) and is rarely the exact square shape a manifest has to declare. The route draws a
+ * correctly-sized square PNG from whatever the church uploaded, so the icon under an installed app is
+ * this church's own and the `sizes` the manifest claims are always true.
+ *
+ * The query string carries the uploaded files' timestamps because a browser and an installed app hang
+ * on to an app icon more stubbornly than any other asset — a bare URL keeps showing the old icon long
+ * after a new logo is saved. Same reasoning as the favicon's `?v=` in the layout.
+ */
+function appIconUrl(int $size = 512): string
+{
+    if ($size < 1) {
+        $size = 512;
+    }
+    return '/app-icon.png?size=' . $size . '&v=' . rawurlencode(appIconVersion());
+}
+
+/** The newest mtime of the uploaded logo/favicon, or `default` when neither is set (cache-buster). */
+function appIconVersion(): string
+{
+    $s = settings();
+    $stamp = 0;
+    foreach (['logo_path', 'favicon_path'] as $key) {
+        $file = (string) ($s[$key] ?? '');
+        if ($file !== '' && is_file(UPLOADS_PATH . '/' . $file)) {
+            $stamp = max($stamp, (int) @filemtime(UPLOADS_PATH . '/' . $file));
+        }
+    }
+    return $stamp > 0 ? (string) $stamp : 'default';
+}
+
+/**
  * Translates a key into the language this visitor is reading.
  *
  * `:name` placeholders are substituted from `$vars`, and they are placeholders rather than
@@ -455,6 +490,55 @@ function settingSave(array $values): bool
 
     settingsForget();
     return true;
+}
+
+/**
+ * Turns a stored phone number into the digits a `wa.me` link needs.
+ *
+ * wa.me accepts no `+`, no spaces and no trunk `0`, so a number kept as `0812 345 6789` has to become
+ * `2348123456789`. The SMS normaliser already knows how to do that, and it is the same routine the
+ * member forms trust — so this is the one place the conversion happens, rather than the same
+ * expression copied into every page that happens to draw a WhatsApp button.
+ *
+ * Returns digits only, or `''` when there is nothing to convert.
+ */
+function whatsappDigits(string $raw): string
+{
+    if (trim($raw) === '') {
+        return '';
+    }
+    return (string) (Sms::normaliseMsisdn(trim($raw)) ?? preg_replace('/[^0-9]/', '', trim($raw)));
+}
+
+/**
+ * The number to notify when a church registers: a **super admin's own phone**, because only a super
+ * admin can approve a registration (`admin/registrations.php` refuses everybody else) — so that is
+ * who the applicant's message has to reach.
+ *
+ * Falls back to the site's **Contact Phone** so a message still reaches the office when no super admin
+ * has filled their profile in, which is the state the applicant is in: the success screen used to read
+ * Contact Phone *alone*, so with that box empty the button silently did not exist and nobody could ask
+ * for a review at all.
+ *
+ * Returns wa.me digits, or `""` when nobody has set a number.
+ */
+function registrationApprovalNumber(): string
+{
+    try {
+        $row = Database::getInstance()->getConnection()->query(
+            "SELECT phone FROM users WHERE is_super_admin = 1 AND phone IS NOT NULL AND phone <> '' ORDER BY id ASC LIMIT 1"
+        );
+        $raw = trim((string) $row->fetchColumn());
+    } catch (Throwable $e) {
+        $raw = '';
+    }
+    if ($raw !== '') {
+        return whatsappDigits($raw);
+    }
+
+    // Contact Phone may list several numbers ("0803…, 0805…"), so the first one is used.
+    $parts = array_filter(array_map('trim', preg_split('/[,\n]+/', (string) setting('contact_phone', '')) ?: []));
+    return $parts ? whatsappDigits((string) reset($parts)) : '';
 }
 
 /**

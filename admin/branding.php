@@ -44,8 +44,8 @@ $branding = [
     // The church's own identity.
     'site_title' => ['kind' => 'text', 'label' => 'Site name', 'hint' => 'The church name, shown in the browser tab and across the site.'],
     'site_tagline' => ['kind' => 'text', 'label' => 'Tagline'],
-    'logo_path' => ['kind' => 'image', 'label' => 'Logo'],
-    'favicon_path' => ['kind' => 'image', 'label' => 'Favicon', 'hint' => 'The little icon in the browser tab.'],
+    'logo_path' => ['kind' => 'image', 'label' => 'Logo', 'hint' => 'Shown across the site, and used for the app icon when someone adds the site to their phone\'s home screen.'],
+    'favicon_path' => ['kind' => 'image', 'label' => 'Favicon', 'hint' => 'The little icon in the browser tab, and the fallback app icon when no logo is set.'],
     'meta_description' => ['kind' => 'text', 'label' => 'Search description', 'hint' => 'One or two sentences for search results.'],
     'default_locale' => ['kind' => 'enum', 'label' => 'Language', 'hint' => 'The language this site speaks by default. Anything a language has not translated yet is shown in English, and a visitor who chooses their own language keeps it.'],
 
@@ -257,11 +257,18 @@ require __DIR__ . '/partials/layout-open.php';
         <div style="margin-bottom:12px;">
           <label for="<?= e($file) ?>"><?= e($spec['label']) ?><?= $readable($current, $key) !== '' ? ' (currently set)' : '' ?></label>
           <input type="file" id="<?= e($file) ?>" name="<?= e($file) ?>" accept="image/*">
+          <?php if (!empty($spec['hint'])): ?><small style="color:var(--ink-faint); display:block;"><?= e($spec['hint']) ?></small><?php endif; ?>
           <?php if ($readable($current, $key) !== ''): ?>
             <img src="<?= e(uploadUrl($readable($current, $key))) ?>" class="thumb" alt="">
           <?php endif; ?>
         </div>
       <?php endforeach; ?>
+
+      <div style="margin-bottom:12px;">
+        <label>App icon (home screen)</label>
+        <img src="<?= e(appIconUrl(180)) ?>" class="thumb" alt="" width="72" height="72">
+        <small style="color:var(--ink-faint); display:block;">Drawn from your logo, or your favicon if no logo is set — refreshed here as soon as you save. This is the icon a phone shows on its home screen, and it is generated per church, so other churches on this installation keep their own.</small>
+      </div>
     </div>
 
     <div class="card" style="margin-bottom:18px;">

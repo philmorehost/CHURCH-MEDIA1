@@ -456,4 +456,161 @@ class MediaProcessor
             . 'font-size="56" font-family="Georgia, serif" font-weight="700">' . $char . '</text></svg>';
         exit;
     }
+
+    /**
+     * Outputs this church's app icon as a square PNG, at the requested size.
+     *
+     * Served by the `/app-icon.png` route and referenced by `views/manifest.php` and the layout's
+     * `apple-touch-icon`, so the icon under an installed app is the church's own rather than the
+     * artwork shipped with the code. It is generated rather than pointing straight at the uploaded
+     * logo for two reasons, each of which is the difference between "the church's logo appears" and a
+     * silent fallback to the platform default:
+     *
+     * 1. Uploads are stored as **WebP**, which several launchers — and iOS for `apple-touch-icon`
+     *    specifically — refuse as an icon, so a manifest pointed straight at the stored file is an
+     *    icon some devices simply do not draw.
+     * 2. A launcher needs the exact size the manifest declares. The logo is whatever shape the church
+     *    uploaded, so drawing it onto a square canvas is what makes a `sizes` claim true instead of a
+     *    guess that can make an install be refused.
+     *
+     * The image is **contained**, never cropped: a crest or a wordmark has its edges doing work, and a
+     * launcher that shows two-thirds of it is worse than one that shows all of it a little smaller.
+     * Whatever the image does not cover is filled with the site's own `--bg-0`, so a transparent logo
+     * sits on the colour the app opens on rather than on black or on white.
+     *
+     * The size arrives from the query string, so it is taken from a whitelist rather than trusted — an
+     * unbounded number there would be an unbounded allocation.
+     *
+     * Declared `void` for the same PHP 7 reason as `renderDynamicFavicon`: it writes the image and then
+     * exits, so `never` would be a syntax error on anything older than 8.1.
+     */
+    public static function renderAppIcon(int $size): void
+    {
+        if (!in_array($size, [96, 128, 152, 167, 180, 192, 256, 384, 512], true)) {
+            $size = 512;
+        }
+
+        $source = self::appIconSource();
+
+        if (function_exists('imagecreatetruecolor')) {
+            $logo = null;
+            if ($source !== null) {
+                // imagecreatefromstring sniffs the format, so WebP support is whatever GD has.
+                $data = @file_get_contents($source);
+                if ($data !== false) {
+                    $logo = @imagecreatefromstring($data);
+                }
+            }
+
+            $canvas = imagecreatetruecolor($size, $size);
+            if ($canvas !== false) {
+                imagealphablending($canvas, false);
+                imagesavealpha($canvas, true);
+                $bg = imagecolorallocate($canvas, 0x0a, 0x09, 0x12);
+                imagefilledrectangle($canvas, 0, 0, $size, $size, $bg);
+                imagealphablending($canvas, true);
+
+                if ($logo instanceof GdImage) {
+                    $srcW = imagesx($logo);
+                    $srcH = imagesy($logo);
+                    if ($srcW > 0 && $srcH > 0) {
+                        $scale = min($size / $srcW, $size / $srcH);
+                        $dstW = max(1, (int) round($srcW * $scale));
+                        $dstH = max(1, (int) round($srcH * $scale));
+                        imagecopyresampled(
+                            $canvas,
+                            $logo,
+                            (int) floor(($size - $dstW) / 2),
+                            (int) floor(($size - $dstH) / 2),
+                            0,
+                            0,
+                            $dstW,
+                            $dstH,
+                            $srcW,
+                            $srcH
+                        );
+                    }
+                    imagedestroy($logo);
+                } else {
+                    self::paintLetterMark($canvas, $size);
+                }
+
+                header('Content-Type: image/png');
+                header('Cache-Control: public, max-age=86400');
+                imagepng($canvas);
+                imagedestroy($canvas);
+                exit;
+            }
+        }
+
+        // No GD (or no canvas): hand back the uploaded file untouched when there is one — it is still
+        // the church's own image — and otherwise the generated letter tile. No path here can serve the
+        // artwork shipped with the code, which belongs to a different church.
+        if ($source !== null) {
+            $info = @getimagesize($source);
+            header('Content-Type: ' . ($info['mime'] ?? 'application/octet-stream'));
+            header('Cache-Control: public, max-age=86400');
+            readfile($source);
+            exit;
+        }
+
+        self::renderDynamicFavicon((string) setting('site_title', 'C'));
+    }
+
+    /**
+     * The uploaded logo, else the uploaded favicon, else null.
+     *
+     * Only a file that actually exists counts: a path in the database with nothing behind it (a restore
+     * that missed the uploads folder, say) must not become a broken icon, so it falls through to the
+     * letter tile instead.
+     */
+    private static function appIconSource(): ?string
+    {
+        foreach (['logo_path', 'favicon_path'] as $key) {
+            $file = trim((string) (setting($key) ?? ''));
+            if ($file !== '' && is_file(UPLOADS_PATH . '/' . $file)) {
+                return UPLOADS_PATH . '/' . $file;
+            }
+        }
+        return null;
+    }
+
+    /** The church's initial in the site's gold-on-dark, centred — used when nothing has been uploaded. */
+    private static function paintLetterMark(GdImage $canvas, int $size): void
+    {
+        $letter = mb_strtoupper(mb_substr(trim((string) setting('site_title', 'C')) ?: 'C', 0, 1));
+        $gold = imagecolorallocate($canvas, 0xe8, 0xb9, 0x5f);
+
+        // A real font when the server has one, which is the normal case — the same probe the share cards
+        // use, so the icon and the cards pick the same typeface rather than drifting apart.
+        $font = class_exists('ShareCard') ? ShareCard::fontPath(true) : null;
+        if ($font !== null && function_exists('imagettftext')) {
+            $pt = $size * 0.5;
+            $box = @imagettfbbox($pt, 0, $font, $letter);
+            if (is_array($box)) {
+                $width = abs($box[4] - $box[0]);
+                $height = abs($box[5] - $box[1]);
+                $x = (int) round(($size - $width) / 2 - $box[0]);
+                $y = (int) round(($size - $height) / 2 - $box[1]);
+                imagettftext($canvas, $pt, 0, $x, $y, $gold, $font, $letter);
+                return;
+            }
+        }
+
+        // No TrueType font: draw the glyph with GD's built-in bitmap font onto a small tile and scale it
+        // up. Blocky, but visible and correct, which is what this fallback is for.
+        $tile = imagecreatetruecolor(24, 24);
+        if ($tile === false) {
+            return;
+        }
+        imagealphablending($tile, false);
+        imagesavealpha($tile, true);
+        imagefilledrectangle($tile, 0, 0, 24, 24, imagecolorallocatealpha($tile, 0, 0, 0, 127));
+        imagealphablending($tile, true);
+        $tw = imagefontwidth(5) * strlen($letter);
+        imagestring($tile, 5, (int) ((24 - $tw) / 2), (int) ((24 - imagefontheight(5)) / 2), $letter, imagecolorallocate($tile, 0xe8, 0xb9, 0x5f));
+        $half = (int) round($size * 0.5);
+        imagecopyresampled($canvas, $tile, (int) round(($size - $half) / 2), (int) round(($size - $half) / 2), 0, 0, $half, $half, 24, 24);
+        imagedestroy($tile);
+    }
 }

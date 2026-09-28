@@ -1279,6 +1279,13 @@ $router->post('/register', function () {
         $unit = Unit::findByNameAnywhere($current);
         $stmt = $pdo->prepare('INSERT INTO church_name_flags (org_unit_id, current_name, suggested_name, status, reported_by) VALUES (?, ?, ?, "pending", ?)');
         $stmt->execute([$unit ? (int) $unit['id'] : null, $current, $suggested, mb_substr(trim((string) ($_POST['flag_by'] ?? '')), 0, 150) ?: null]);
+        $_SESSION['register_receipt'] = [
+            'kind' => 'correction',
+            'current' => $current,
+            'suggested' => $suggested,
+            'by' => mb_substr(trim((string) ($_POST['flag_by'] ?? '')), 0, 150),
+            'at' => date('Y-m-d H:i'),
+        ];
         flash('register_sent', '1');
         redirect('/register?sent=1');
     }
@@ -1402,6 +1409,25 @@ $router->post('/register', function () {
         $parish ? (int) $parish['id'] : null,
         $chain ? json_encode(array_map(static fn (array $u): array => ['type' => $u['type'], 'id' => (int) $u['id']], $chain), JSON_UNESCAPED_SLASHES) : null,
     ]);
+    // A receipt for the success screen, which is reached by a redirect — by then the form's own
+    // fields are gone, and its WhatsApp button has to say WHO is waiting and for WHICH church or the
+    // message is useless to the admin reading it. Never the password: only what the admin needs to
+    // find and weigh the row.
+    $churchParts = [];
+    foreach ($chain as $chainUnit) {
+        $churchParts[] = (string) $chainUnit['name'];
+    }
+    $churchParts[] = $parishName;
+    $_SESSION['register_receipt'] = [
+        'kind' => 'registration',
+        'name' => mb_substr($name, 0, 150),
+        'username' => mb_substr($username, 0, 100),
+        'email' => mb_substr($email, 0, 150),
+        'phone' => mb_substr($phone, 0, 45),
+        'role' => ['admin' => 'Church Admin', 'editor' => 'Editor', 'media_team' => 'Media Team'][$role] ?? $role,
+        'church' => mb_substr(implode(' > ', $churchParts), 0, 220),
+        'at' => date('Y-m-d H:i'),
+    ];
     clearFormOld();
     flash('register_sent', '1');
     redirect('/register?sent=1');
@@ -2575,4 +2601,15 @@ $router->get('/favicon.ico', function () {
     // Nothing uploaded yet: a generated letter tile from the church's initial, so a
     // new site shows its own mark instead of the browser's blank placeholder.
     MediaProcessor::renderDynamicFavicon((string) setting('site_title', 'C'));
+});
+
+// The home-screen icon, generated per church from the logo and favicon saved in Settings.
+//
+// A route rather than a reference to the uploaded file: uploads are WebP (which several launchers, and
+// iOS for apple-touch-icon, refuse as an icon) and are rarely the exact square size a manifest has to
+// declare. This draws a correctly-sized PNG from whatever the church uploaded, so the icon under an
+// installed app is that church's own and never the artwork shipped with the code. See
+// MediaProcessor::renderAppIcon().
+$router->get('/app-icon.png', function () {
+    MediaProcessor::renderAppIcon((int) ($_GET['size'] ?? 512));
 });

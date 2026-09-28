@@ -22,11 +22,13 @@
  * makes the old cache get deleted on activate rather than being kept alongside the new one for ever.
  */
 
-var CACHE = 'church-site-v2';
+var CACHE = 'church-site-v3';
 
 /* Fetched at install so the offline page is there the first time it is needed, rather than only after
-   the visitor has happened to visit it. */
-var PRECACHE = ['/offline', '/assets/css/site.css', '/assets/logo.png', '/assets/app_icon.png'];
+   the visitor has happened to visit it. The shipped logo files used to be precached here; they are gone
+   because the icons are now generated per church by /app-icon.png, and pinning one church's default
+   artwork on every origin is the leak this change removes. */
+var PRECACHE = ['/offline', '/assets/css/site.css'];
 
 /* Path prefixes this worker will handle at all. Everything else is the network's business. */
 function isHandled(url) {
