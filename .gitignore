@@ -31,3 +31,12 @@ replay_pid*.log
 
 # Editor state.
 /.vscode/
+
+# Uploaded media is a church's own content, not part of the script. Committing it is
+# what put one church's logo and reels into every install built from this code, so it
+# is ignored here — the folders and their .keep placeholders stay tracked so a fresh
+# checkout still has somewhere for the uploader to write.
+/public/uploads/**
+!/public/uploads/index.php
+!/public/uploads/*/
+!/public/uploads/*/.keep

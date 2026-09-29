@@ -258,8 +258,9 @@ require __DIR__ . '/partials/layout-open.php';
           <label for="<?= e($file) ?>"><?= e($spec['label']) ?><?= $readable($current, $key) !== '' ? ' (currently set)' : '' ?></label>
           <input type="file" id="<?= e($file) ?>" name="<?= e($file) ?>" accept="image/*">
           <?php if (!empty($spec['hint'])): ?><small style="color:var(--ink-faint); display:block;"><?= e($spec['hint']) ?></small><?php endif; ?>
-          <?php if ($readable($current, $key) !== ''): ?>
-            <img src="<?= e(uploadUrl($readable($current, $key))) ?>" class="thumb" alt="">
+          <?php $storedBranding = brandingImageUrl($key); ?>
+          <?php if ($storedBranding !== null): ?>
+            <img src="<?= e($storedBranding) ?>" class="thumb" alt="">
           <?php endif; ?>
         </div>
       <?php endforeach; ?>

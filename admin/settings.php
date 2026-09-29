@@ -265,12 +265,14 @@ $currentTenant = class_exists('Tenant') ? Tenant::current() : null;
       <div>
         <label for="logo">Logo <?= $row['logo_path'] ? '(currently set)' : '' ?></label>
         <input type="file" id="logo" name="logo" accept="image/*">
-        <?php if ($row['logo_path']): ?><img src="<?= e(uploadUrl($row['logo_path'])) ?>" class="thumb" alt=""><?php endif; ?>
+        <?php $logoThumb = brandingImageUrl('logo_path'); ?>
+        <?php if ($logoThumb !== null): ?><img src="<?= e($logoThumb) ?>" class="thumb" alt=""><?php endif; ?>
       </div>
       <div>
         <label for="favicon">Favicon <?= $row['favicon_path'] ? '(currently set)' : '' ?></label>
         <input type="file" id="favicon" name="favicon" accept="image/*">
-        <?php if ($row['favicon_path']): ?><img src="<?= e(uploadUrl($row['favicon_path'])) ?>" class="thumb" alt=""><?php endif; ?>
+        <?php $faviconThumb = brandingImageUrl('favicon_path'); ?>
+        <?php if ($faviconThumb !== null): ?><img src="<?= e($faviconThumb) ?>" class="thumb" alt=""><?php endif; ?>
       </div>
     </div>
   </div>

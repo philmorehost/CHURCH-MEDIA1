@@ -120,6 +120,31 @@ function uploadUrl(?string $path): ?string
 }
 
 /**
+ * The URL of an uploaded branding image, or null when nothing is set **or the file is not there**.
+ *
+ * `uploadUrl()` maps a stored path to a URL whether or not the file exists, which is right for the media
+ * a church posts: a missing photo is a broken photo, and that is the honest thing to show. Branding is
+ * different. A `logo_path` left pointing at a file that is no longer on disk is a stale setting, and the
+ * header has a good fallback — the church's own initial — so a missing logo must use it rather than draw
+ * a broken image where the church's mark belongs.
+ */
+function brandingImageUrl(string $key): ?string
+{
+    $stored = trim((string) (setting($key) ?? ''));
+    if ($stored === '') {
+        return null;
+    }
+    // A full URL or an inline image is used as-is; only a stored local path needs the file to exist.
+    if (preg_match('#^(https?:)?//#i', $stored) || str_starts_with($stored, 'data:')) {
+        return $stored;
+    }
+    if (!is_file(UPLOADS_PATH . '/' . ltrim($stored, '/'))) {
+        return null;
+    }
+    return uploadUrl($stored);
+}
+
+/**
  * The markup for a hero background photo — two elements, never one.
  *
  * A hero fills the viewport, so on a phone it is very tall and very narrow (roughly

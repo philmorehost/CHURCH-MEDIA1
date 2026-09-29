@@ -57,7 +57,7 @@ if ($langQuery !== '') {
     <div class="footer-grid">
       <div>
         <div class="footer-brand">
-          <span class="mark"><?php if ($s['logo_path'] ?? null): ?><img src="<?= e(uploadUrl($s['logo_path'])) ?>" alt=""><?php else: ?><?= e(mb_substr($s['site_title'], 0, 1)) ?><?php endif; ?></span>
+          <span class="mark"><?php $brandLogoUrl = brandingImageUrl('logo_path'); ?><?php if ($brandLogoUrl !== null): ?><img src="<?= e($brandLogoUrl) ?>" alt=""><?php else: ?><?= e(mb_substr($s['site_title'], 0, 1)) ?><?php endif; ?></span>
           <?= e($s['site_title']) ?>
         </div>
         <p class="footer-about"><?= e($s['footer_about_text'] ?? $s['site_tagline'] ?? '') ?></p>
