@@ -613,4 +613,91 @@ class MediaProcessor
         imagecopyresampled($canvas, $tile, (int) round(($size - $half) / 2), (int) round(($size - $half) / 2), 0, 0, $half, $half, 24, 24);
         imagedestroy($tile);
     }
+
+    /**
+     * Outputs the tab icon as a square PNG.
+     *
+     * Why this exists: Google Search accepts BMP, GIF, ICO, PNG, JPEG, PPM and TIFF favicons, and **not**
+     * WebP — which is the only format this system's uploader writes. Serving the stored favicon untouched
+     * therefore handed Googlebot an image it could not use, so Google kept showing whatever it had picked
+     * up earlier: a tab icon whose church had already replaced it. Converting here is what makes a new
+     * icon visible to a search engine at all. Browsers accept either format, so nothing is lost.
+     *
+     * The result is square, which Google requires (1:1), and the image is **contained**, never cropped.
+     * The background is left transparent because a tab icon sits on the browser's own chrome — tabs,
+     * bookmarks, history — which may be light or dark, so the logo's own shape is the right thing to
+     * show rather than a coloured tile.
+     *
+     * Google also wants the favicon URL to stay **stable**, so this is served at the one `/favicon.ico`
+     * path and never redirected elsewhere.
+     *
+     * @param string $source Absolute path to the stored favicon, or '' when none has been uploaded.
+     */
+    public static function renderFavicon(string $source = '', int $size = 64): void
+    {
+        $size = max(16, min(256, $size));
+
+        if (function_exists('imagecreatetruecolor')) {
+            $image = false;
+            if ($source !== '' && is_file($source)) {
+                // imagecreatefromstring sniffs the format, so this reads the stored WebP.
+                $data = @file_get_contents($source);
+                if ($data !== false) {
+                    $image = @imagecreatefromstring($data);
+                }
+            }
+
+            $canvas = imagecreatetruecolor($size, $size);
+            if ($canvas !== false) {
+                imagealphablending($canvas, false);
+                imagesavealpha($canvas, true);
+                imagefilledrectangle($canvas, 0, 0, $size, $size, imagecolorallocatealpha($canvas, 0, 0, 0, 127));
+                imagealphablending($canvas, true);
+
+                if ($image instanceof GdImage) {
+                    $srcW = imagesx($image);
+                    $srcH = imagesy($image);
+                    if ($srcW > 0 && $srcH > 0) {
+                        $scale = min($size / $srcW, $size / $srcH);
+                        $dstW = max(1, (int) round($srcW * $scale));
+                        $dstH = max(1, (int) round($srcH * $scale));
+                        imagecopyresampled(
+                            $canvas,
+                            $image,
+                            (int) floor(($size - $dstW) / 2),
+                            (int) floor(($size - $dstH) / 2),
+                            0,
+                            0,
+                            $dstW,
+                            $dstH,
+                            $srcW,
+                            $srcH
+                        );
+                    }
+                    imagedestroy($image);
+                } else {
+                    self::paintLetterMark($canvas, $size);
+                }
+
+                header('Content-Type: image/png');
+                header('Cache-Control: public, max-age=86400');
+                imagepng($canvas);
+                imagedestroy($canvas);
+                exit;
+            }
+        }
+
+        // No GD: hand back the stored file as it is. It may be a format Google will not take, but it is
+        // still the church's own image rather than a blank tab.
+        if ($source !== '' && is_file($source)) {
+            $info = @getimagesize($source);
+            header('Content-Type: ' . ($info['mime'] ?? 'application/octet-stream'));
+            header('Cache-Control: public, max-age=86400');
+            readfile($source);
+            exit;
+        }
+
+        // The older SVG tile is the last resort, and reachable only without GD.
+        self::renderDynamicFavicon((string) setting('site_title', 'C'));
+    }
 }

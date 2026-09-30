@@ -2584,23 +2584,30 @@ $router->get('/devotional/{date}', function (array $params) {
 // Do not add that file back — deleting it is what makes this reachable.
 $router->get('/favicon.ico', function () {
     $path = (string) (setting('favicon_path') ?? '');
-    if ($path !== '' && is_file(UPLOADS_PATH . '/' . $path)) {
-        // processImage() stores WebP, but the type comes from the extension so a
-        // differently stored icon still declares itself correctly.
-        $types = [
-            'webp' => 'image/webp', 'png' => 'image/png', 'jpg' => 'image/jpeg',
-            'jpeg' => 'image/jpeg', 'gif' => 'image/gif', 'svg' => 'image/svg+xml',
-            'ico' => 'image/x-icon',
-        ];
-        $ext = strtolower((string) pathinfo($path, PATHINFO_EXTENSION));
-        header('Content-Type: ' . ($types[$ext] ?? 'application/octet-stream'));
+    $file = $path !== '' ? UPLOADS_PATH . '/' . $path : '';
+    $mime = ($file !== '' && is_file($file)) ? (string) (mime_content_type($file) ?: '') : '';
+
+    // WebP is what this system's uploader writes, and Google Search does not accept WebP favicons (its
+    // list is BMP, GIF, ICO, PNG, JPEG, PPM and TIFF). So a stored WebP is converted to a square PNG
+    // here — which is what makes the tab icon something a search engine can actually use, instead of
+    // leaving it showing an icon the church had already replaced.
+    if ($mime === 'image/webp') {
+        MediaProcessor::renderFavicon($file, 64);
+    }
+
+    if ($file !== '' && is_file($file)) {
+        // Already in an accepted format, so it goes out untouched. The type is read from the file rather
+        // than guessed from its extension, so a differently stored icon still declares itself correctly.
+        header('Content-Type: ' . ($mime !== '' ? $mime : 'application/octet-stream'));
         header('Cache-Control: public, max-age=86400');
-        readfile(UPLOADS_PATH . '/' . $path);
+        readfile($file);
         exit;
     }
-    // Nothing uploaded yet: a generated letter tile from the church's initial, so a
-    // new site shows its own mark instead of the browser's blank placeholder.
-    MediaProcessor::renderDynamicFavicon((string) setting('site_title', 'C'));
+
+    // Nothing uploaded yet: a generated PNG letter tile from the church's initial, so a new site shows
+    // its own mark instead of the browser's blank placeholder. A PNG rather than the older SVG, because
+    // Google's list of accepted favicon formats does not include SVG either.
+    MediaProcessor::renderFavicon('', 64);
 });
 
 // The home-screen icon, generated per church from the logo and favicon saved in Settings.
