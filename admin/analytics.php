@@ -136,7 +136,28 @@ foreach ($topGroups as $group) {
     $tops[] = $group + ['rows' => $rows, 'titles' => $resolveTitles($rows, $group['table'], $group['column'])];
 }
 
-$topPaths = Analytics::topPaths($from, $to, 10, $unitIds);
+/*
+ * The page report.
+ *
+ * Every page that was opened, plus the site's own list of the pages that were **not** — the two together
+ * are what make this a report of all the pages rather than a leaderboard. A table built only from recorded
+ * hits can never show the page nobody is finding, which is usually the one worth knowing about.
+ * `SiteUrls::pages()` is the same list the sitemap publishes, so the report and the sitemap cannot
+ * disagree about which pages exist.
+ */
+$pageReport = Analytics::pageReport($from, $to, $unitIds);
+$knownPageLabels = [];
+foreach (SiteUrls::pages() as $knownPage) {
+    $knownPageLabels[$knownPage['path']] = $knownPage['label'];
+}
+$seenPaths = array_flip(array_column($pageReport, 'path'));
+$unvisitedPages = [];
+foreach ($knownPageLabels as $knownPath => $knownLabel) {
+    if (!isset($seenPaths[$knownPath])) {
+        $unvisitedPages[$knownPath] = $knownLabel;
+    }
+}
+$pageViewTotal = array_sum(array_column($pageReport, 'views'));
 $topSearches = Analytics::topSearches($from, $to, 10, $unitIds);
 $topReferrers = Analytics::topReferrers($from, $to, 8, $unitIds);
 $byUnit = Analytics::byUnit($from, $to, 12);
@@ -237,6 +258,60 @@ require __DIR__ . '/partials/layout-open.php';
   </div>
 </div>
 
+<?php /* The page report sits on its own row rather than in the grid below: it is the one table here with a
+         row per page, so it needs the width — a ~300px grid cell would clip its columns. */ ?>
+<div class="card" style="margin-top:18px;">
+  <h2>Page traffic</h2>
+  <p class="sub">
+    Every page opened in this period, busiest first<?= $pageViewTotal > 0 ? ' — ' . number_format($pageViewTotal) . ' page views in total' : '' ?>.
+    Visitors counts distinct devices, so one person reading five pages is five views but one visitor.
+  </p>
+
+  <?php if (!$pageReport): ?>
+    <div class="empty">No page views recorded yet. The beacon runs on the public site's own pages, so a signed-in admin view is never counted.</div>
+  <?php else: ?>
+    <table>
+      <tr>
+        <th style="padding-left:0;">Page</th>
+        <th style="text-align:right;">Views</th>
+        <th style="text-align:right;">Visitors</th>
+        <th style="text-align:right;">Share</th>
+        <th style="text-align:right;padding-right:0;">Last seen</th>
+      </tr>
+      <?php foreach ($pageReport as $row): ?>
+        <?php $pageLabel = $knownPageLabels[$row['path']] ?? ''; ?>
+        <tr>
+          <td style="padding-left:0;">
+            <?php if ($pageLabel !== ''): ?>
+              <strong><?= e(mb_strimwidth($pageLabel, 0, 44, '…')) ?></strong><br>
+              <code style="font-size:11px;color:var(--ink-faint);"><?= e($row['path']) ?></code>
+            <?php else: ?>
+              <code style="font-size:12px;"><?= e($row['path']) ?></code>
+            <?php endif; ?>
+          </td>
+          <td style="text-align:right;color:var(--ink-dim);"><?= number_format($row['views']) ?></td>
+          <td style="text-align:right;color:var(--ink-dim);"><?= number_format($row['visitors']) ?></td>
+          <td style="text-align:right;color:var(--ink-faint);"><?= e($pct($row['views'], $pageViewTotal)) ?></td>
+          <td style="text-align:right;padding-right:0;color:var(--ink-faint);"><?= $row['last_at'] !== null ? e(timeAgo($row['last_at'])) : '—' ?></td>
+        </tr>
+      <?php endforeach; ?>
+    </table>
+    <?php if (count($pageReport) >= 500): ?>
+      <p class="sub" style="margin:12px 0 0;">Showing the 500 busiest pages.</p>
+    <?php endif; ?>
+  <?php endif; ?>
+
+  <?php if ($unvisitedPages): ?>
+    <h2 style="font-size:13.5px;margin-top:22px;">No visits at all (<?= count($unvisitedPages) ?>)</h2>
+    <p class="sub" style="margin-bottom:10px;">Pages the site offers that nobody opened in this period — usually the ones worth linking from the front page.</p>
+    <p style="margin:0;">
+      <?php foreach ($unvisitedPages as $path => $label): ?>
+        <code title="<?= e($path) ?>" style="display:inline-block;font-size:11.5px;background:var(--panel-2,#1c1a33);border:1px solid var(--border);border-radius:8px;padding:3px 8px;margin:0 6px 6px 0;"><?= e(mb_strimwidth($label, 0, 34, '…')) ?></code>
+      <?php endforeach; ?>
+    </p>
+  <?php endif; ?>
+</div>
+
 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px;">
   <?php foreach ($tops as $group): ?>
     <div class="card" style="margin:0;">
@@ -264,22 +339,6 @@ require __DIR__ . '/partials/layout-open.php';
       <?php endif; ?>
     </div>
   <?php endforeach; ?>
-
-  <div class="card" style="margin:0;">
-    <h2 style="font-size:14px;">Most visited pages</h2>
-    <?php if (!$topPaths): ?>
-      <p class="sub" style="margin:0;">Nothing yet.</p>
-    <?php else: ?>
-      <table>
-        <?php foreach ($topPaths as $row): ?>
-          <tr>
-            <td style="padding-left:0;"><code style="font-size:12px;"><?= e((string) $row['path']) ?></code></td>
-            <td style="text-align:right;width:60px;padding-right:0;color:var(--ink-dim);"><?= number_format((int) $row['n']) ?></td>
-          </tr>
-        <?php endforeach; ?>
-      </table>
-    <?php endif; ?>
-  </div>
 
   <div class="card" style="margin:0;">
     <h2 style="font-size:14px;">What people searched for</h2>

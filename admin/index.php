@@ -59,6 +59,33 @@ if ($user && !empty($user['org_unit_id'])) {
     $unitNotifications = $pdo->query("SELECT n.id, n.title, n.body, n.created_at, nr.read_at FROM notifications n JOIN notification_recipients nr ON nr.notification_id = n.id AND nr.org_unit_id = {$unitId} ORDER BY n.created_at DESC LIMIT 4")->fetchAll();
 }
 
+/*
+ * Page traffic, for the super admin only.
+ *
+ * The Analytics screen this summarises is already super-admin only — its navigation entry carries
+ * `super` — so surfacing the headline numbers here does not widen who can see them; it just means the
+ * person asking the question does not have to go looking for the answer.
+ *
+ * Guarded on purpose. Analytics has its own tables, and a half-migrated install (or the window during an
+ * upgrade) must still render the dashboard: the page everyone lands on is the last place that should go
+ * down because a stats table is missing.
+ */
+$traffic = null;
+if ($user && !empty($user['is_super_admin'])) {
+    try {
+        $trafficFrom = date('Y-m-d', (int) strtotime('-29 day'));
+        $trafficTo = date('Y-m-d');
+        $traffic = [
+            'views' => Analytics::counts($trafficFrom, $trafficTo)['page_view'],
+            'visitors' => Analytics::visitors($trafficFrom, $trafficTo),
+            'pages' => Analytics::pageReport($trafficFrom, $trafficTo, null, 8),
+        ];
+    } catch (Throwable $e) {
+        error_log('Dashboard traffic unavailable — ' . $e->getMessage());
+        $traffic = null;
+    }
+}
+
 $pageTitle = 'Dashboard';
 $activeNav = 'dashboard';
 require __DIR__ . '/partials/layout-open.php';
@@ -84,6 +111,36 @@ require __DIR__ . '/partials/layout-open.php';
     <div style="color:var(--ink-dim);font-size:13px;"><?= e(mb_strimwidth((string) $n['body'], 0, 110, '…')) ?></div>
   </div>
   <?php endforeach; ?>
+</div>
+<?php endif; ?>
+
+<?php if ($traffic !== null): ?>
+<div class="card" style="margin-bottom:18px;">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+    <h2 style="margin:0;">📈 Page traffic</h2>
+    <a href="/admin/analytics" style="color:var(--gold-soft);font-size:13px;">Full report →</a>
+  </div>
+  <p class="sub" style="margin-bottom:14px;">The last 30 days, across every page of the site.</p>
+
+  <div class="grid cols-2" style="margin-bottom:16px;">
+    <div class="stat"><div class="num"><?= number_format($traffic['views']) ?></div><div class="label">Page views</div></div>
+    <div class="stat"><div class="num"><?= number_format($traffic['visitors']) ?></div><div class="label">Visitors (distinct devices)</div></div>
+  </div>
+
+  <?php if (!$traffic['pages']): ?>
+    <div class="empty">No page views recorded yet.</div>
+  <?php else: ?>
+    <table class="resp-table">
+      <tr><th>Page</th><th style="text-align:right;">Views</th><th style="text-align:right;">Visitors</th></tr>
+      <?php foreach ($traffic['pages'] as $page): ?>
+        <tr>
+          <td data-label="Page"><code style="font-size:12px;"><?= e($page['path']) ?></code></td>
+          <td data-label="Views" style="text-align:right;"><?= number_format($page['views']) ?></td>
+          <td data-label="Visitors" style="text-align:right;"><?= number_format($page['visitors']) ?></td>
+        </tr>
+      <?php endforeach; ?>
+    </table>
+  <?php endif; ?>
 </div>
 <?php endif; ?>
 

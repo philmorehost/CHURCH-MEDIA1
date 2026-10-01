@@ -66,7 +66,7 @@ final class Analytics
             'tenant_id' => self::tenant(),
             'occurred_at' => (string) ($data['occurred_at'] ?? date('Y-m-d H:i:s')),
             'event' => $event,
-            'path' => self::clip($data['path'] ?? null, 255),
+            'path' => self::clip(self::normalisePath($data['path'] ?? null), 255),
             'org_unit_id' => $unitId > 0 ? $unitId : null,
             'entity_type' => self::clip($data['entity_type'] ?? null, 30),
             'entity_id' => $entityId > 0 ? $entityId : null,
@@ -103,7 +103,9 @@ final class Analytics
                 'org_unit_id' => (int) ($row['org_unit_id'] ?? 0),
                 'entity_type' => $entityType,
                 'entity_id' => (int) $row['id'],
-                'path' => rtrim((string) ($_SERVER['REQUEST_URI'] ?? ''), '/'),
+                // Stored raw: `record()` strips the query string and any trailing slash, so every writer
+                // lands on the same normalised path and one page cannot appear twice in its own report.
+                'path' => (string) ($_SERVER['REQUEST_URI'] ?? ''),
             ]);
         } catch (Throwable $e) {
             // Analytics must never break a page render.
@@ -282,18 +284,57 @@ final class Analytics
         return $stmt->fetchAll();
     }
 
-    /** Most-visited pages (paths), with the site root normalised to "/". */
-    public static function topPaths(string $from, string $to, int $limit = 10, ?array $unitIds = null): array
+    /**
+     * Views, unique devices and last-seen time for every page, busiest first.
+     *
+     * This is the report a church actually asks for — "how many people opened each page?" — so unlike
+     * `topPaths()` it is not cut down to a handful, and it counts **distinct devices per page** as well as
+     * hits: a page opened 400 times by 12 people is a different thing from one opened 400 times by 400.
+     *
+     * The path is normalised in SQL because the two writers disagree — the browser beacon records
+     * `location.pathname`, while the server-side content views record the raw request URI, which carries
+     * the query string. Without this, a page reached as `/sermons?page=2` would be counted separately from
+     * `/sermons` and the same page would appear twice in its own report.
+     *
+     * @return array<int, array{path:string,views:int,visitors:int,last_at:?string}>
+     */
+    public static function pageReport(string $from, string $to, ?array $unitIds = null, int $limit = 500): array
     {
         [$where, $params] = self::range($from, $to, $unitIds);
-        $limit = max(1, min(50, $limit));
+        $limit = max(1, min(2000, $limit));
         $stmt = self::db()->prepare(
-            'SELECT COALESCE(path, \'/\') AS path, COUNT(*) AS n FROM analytics_events
+            'SELECT TRIM(TRAILING \'/\' FROM SUBSTRING_INDEX(COALESCE(path, \'\'), \'?\', 1)) AS p,
+                    COUNT(*) AS views,
+                    COUNT(DISTINCT session_hash) AS visitors,
+                    MAX(occurred_at) AS last_at
+             FROM analytics_events
              WHERE ' . $where . ' AND event = \'page_view\'
-             GROUP BY COALESCE(path, \'/\') ORDER BY n DESC LIMIT ' . $limit
+             GROUP BY p
+             ORDER BY views DESC
+             LIMIT ' . $limit
         );
         $stmt->execute($params);
-        return $stmt->fetchAll();
+
+        $out = [];
+        foreach ($stmt->fetchAll() as $row) {
+            $path = trim((string) $row['p']);
+            $out[] = [
+                // Trimming the trailing slash leaves the site root as an empty string; the beacon records
+                // `/` for the home page, so it is put back here rather than left as a blank row.
+                'path' => $path === '' ? '/' : '/' . ltrim($path, '/'),
+                'views' => (int) $row['views'],
+                'visitors' => (int) $row['visitors'],
+                'last_at' => $row['last_at'] !== null ? (string) $row['last_at'] : null,
+            ];
+        }
+        return $out;
+    }
+
+    /** Most-visited pages (paths), busiest first. `pageReport()` carries the per-page detail. */
+    public static function topPaths(string $from, string $to, int $limit = 10, ?array $unitIds = null): array
+    {
+        $rows = self::pageReport($from, $to, $unitIds, $limit);
+        return array_map(static fn (array $row): array => ['path' => $row['path'], 'n' => $row['views']], $rows);
     }
 
     /** What people actually searched for — the clearest content-gap signal. */
@@ -435,6 +476,24 @@ final class Analytics
         }
         $value = trim((string) $value);
         return $value === '' ? null : mb_substr($value, 0, $max);
+    }
+
+    /**
+     * A path as it should be stored: no query string, no trailing slash.
+     *
+     * Both are dropped so that one page is one row in the report. `/sermons?page=2` and `/sermons/` are the
+     * same page to a reader, and counting them separately would both split a page's traffic and pad the
+     * report with rows that look like different pages. Returns null for the site root, which the report
+     * reads back as `/` — the same value the browser beacon sends.
+     */
+    private static function normalisePath($path): ?string
+    {
+        if ($path === null) {
+            return null;
+        }
+        $path = (string) preg_replace('/[?#].*$/', '', (string) $path);
+        $path = rtrim(trim($path), '/');
+        return $path === '' ? null : $path;
     }
 
     private static function tenant(): int
